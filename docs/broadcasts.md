@@ -35,7 +35,7 @@ does not stop a broadcast; stopping Elsewhere does. No broadcast starts automati
 
 ## Media and limits
 
-Each output uses its own H.264 software encoder, AAC encoder, FLV muxer, and RTMP/RTMPS connection.
+Each output uses its own H.264 software encoder with CBR and filler data, AAC encoder, FLV muxer, and RTMP/RTMPS connection.
 The runtime image needs x264, an AAC encoder, FLV, and RTMP GStreamer plugins. Capabilities report
 missing plugins. Up to four outputs can run, with even dimensions from 64 pixels to 3840×2160,
 24/25/30/50/60 fps, and 100–50000 kbps video. These are accepted settings, not a guarantee that

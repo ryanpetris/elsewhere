@@ -24,7 +24,7 @@ fn validate(s: &Start, c: &Capabilities) -> Result<(), ApiError> {
     if !matches!(uri.scheme_str(), Some("rtmp" | "rtmps")) || uri.host().is_none() || uri.authority().is_some_and(|a| a.as_str().contains('@')) || s.url.len() > 4096 || s.url.chars().any(char::is_whitespace) || s.url.contains('#') {
         return Err(error("invalid", "Use an RTMP or RTMPS URL without user information, fragments or whitespace."));
     }
-    if s.stream_key.len() > 4096 || s.stream_key.chars().any(|c| c.is_control() || c.is_whitespace()) || (!s.stream_key.is_empty() && uri.query().is_some()) { return Err(error("invalid", "Invalid stream key, or a query in the base URL. Put destination query parameters in the stream key.")); }
+    if s.stream_key.len() > 4096 || s.stream_key.contains('#') || s.stream_key.chars().any(|c| c.is_control() || c.is_whitespace()) || (!s.stream_key.is_empty() && uri.query().is_some()) { return Err(error("invalid", "Invalid stream key, or a query in the base URL. Put destination query parameters in the stream key.")); }
     if s.width < 64 || s.height < 64 || s.width > c.max_width || s.height > c.max_height || s.width % 2 != 0 || s.height % 2 != 0 || !matches!(s.fps, 24 | 25 | 30 | 50 | 60) || s.bitrate_kbps < c.min_bitrate_kbps || s.bitrate_kbps > c.max_bitrate_kbps { return Err(error("invalid", "Use even dimensions from 64 up to the capability limits, 24/25/30/50/60 fps, and a supported bitrate.")); }
     if s.audio == elsewhere_core::broadcast::Audio::Desktop && !c.desktop_audio { return Err(error("unavailable", "Desktop audio is unavailable. Select silence to broadcast without desktop audio.")); }
     Ok(())
@@ -38,7 +38,6 @@ impl App {
     pub fn broadcast_start(&self, key: Key, settings: Start) -> Result<Status, ApiError> {
         crate::writable(key)?;
         let caps = self.broadcast_capabilities();
-        validate(&settings, &caps)?;
         let digest: [u8; 32] = Sha256::digest(serde_json::to_vec(&settings).map_err(|_| error("invalid", "Invalid broadcast settings."))?).into();
         let mut registry = self.broadcasts.lock().unwrap();
         self.broadcast_sweep_locked(&mut registry);
@@ -46,6 +45,7 @@ impl App {
             if entry.digest != digest { return Err(error("conflict", "This request_id already belongs to different settings.")); }
             return Ok(snapshot(entry));
         }
+        validate(&settings, &caps)?;
         if registry.entries.values().filter(|e| !e.control.progress().state.terminal()).count() >= caps.max_outputs { return Err(error("busy", "The maximum number of simultaneous broadcasts is already running.")); }
         if registry.entries.len() >= 256 { return Err(error("busy", "Too many recent broadcast requests. Try again after the ten-minute retry window.")); }
         let (sink, control) = (self.broadcast_backend.start)(settings.clone()).map_err(|_| error("unavailable", "Could not start the broadcast worker."))?;

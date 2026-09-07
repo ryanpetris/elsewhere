@@ -14,6 +14,7 @@ export function BroadcastsPanel({ viewer, open }) {
   const [caps, setCaps] = useState(null), [edit, setEdit] = useState(null);
   const [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const pending = useRef(new Map());
+  const generation = useRef(0);
   const refreshPresets = () => { try { setPresets(loadPresets()); } catch { setError('Browser storage is unavailable. Settings cannot be saved.'); } };
   useEffect(() => {
     refreshPresets();
@@ -25,7 +26,8 @@ export function BroadcastsPanel({ viewer, open }) {
     if (!open) return;
     let active = true, timer;
     const update = async () => {
-      try { const [runs, capabilities] = await Promise.all([listBroadcasts(), broadcastCapabilities()]); if (active) { setStreams(runs); setCaps(capabilities); } }
+      const current = generation.current;
+      try { const [runs, capabilities] = await Promise.all([listBroadcasts(), broadcastCapabilities()]); if (active && current === generation.current) { setStreams(runs); setCaps(capabilities); } }
       catch (e) { if (active) setError(e.message); }
       finally { if (active) timer = setTimeout(update, 1500); }
     };
@@ -34,8 +36,8 @@ export function BroadcastsPanel({ viewer, open }) {
   }, [open]);
   const action = async fn => {
     if (busy) return;
-    setBusy(true); setError('');
-    try { await fn(); setStreams(await listBroadcasts()); }
+    setBusy(true); setError(''); generation.current++;
+    try { await fn(); const runs = await listBroadcasts(); generation.current++; setStreams(runs); }
     catch (e) { setError(e.message); }
     finally { setBusy(false); }
   };

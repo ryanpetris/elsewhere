@@ -45,6 +45,8 @@ pub fn capabilities(audio: bool) -> Capabilities {
 
 pub fn start(settings: Start, socket: Option<PathBuf>) -> Result<(Box<dyn FrameSink>, Arc<dyn broadcast::Control>)> {
     gst::init()?;
+    // RTMP debug output includes URI credentials and AMF arguments. Public errors come from Progress.
+    gst::log::set_threshold_for_name("rtmp*", gst::DebugLevel::None);
     let (tx, rx) = watch::channel(None);
     let stopped = Arc::new(AtomicBool::new(false));
     let progress = Arc::new(Mutex::new(Progress::default()));
@@ -52,9 +54,9 @@ pub fn start(settings: Start, socket: Option<PathBuf>) -> Result<(Box<dyn FrameS
     let sink = Sink { tx, cursor: None, x: 0.0, y: 0.0, scale: 1.0, fps: settings.fps, stopped: stopped.clone() };
     std::thread::Builder::new().name("broadcast".into()).spawn(move || {
         run(settings, socket, rx, &stopped, &progress);
-        stopped.store(true, Ordering::Relaxed);
+        let cancelled = stopped.swap(true, Ordering::Relaxed);
         let mut p = progress.lock().unwrap();
-        if p.state != State::Failed { p.state = State::Stopped; }
+        if cancelled || p.state != State::Failed { p.state = State::Stopped; }
     })?;
     Ok((Box::new(sink), control))
 }
@@ -67,7 +69,7 @@ fn pipeline(s: &Start, socket: Option<&PathBuf>) -> Result<Pipeline> {
     let desc = format!(
         "appsrc name=video is-live=true format=time do-timestamp=true block=false max-buffers=1 leaky-type=downstream \
          ! videoconvertscale add-borders=true ! video/x-raw,format=I420,width={},height={},framerate={}/1,pixel-aspect-ratio=1/1 \
-         ! x264enc tune=zerolatency speed-preset=veryfast bitrate={} key-int-max={} bframes=0 vbv-buf-capacity=1000 \
+         ! x264enc name=encoder tune=zerolatency speed-preset=veryfast bitrate={} key-int-max={} bframes=0 vbv-buf-capacity=1000 option-string=nal-hrd=cbr \
          ! h264parse config-interval=-1 ! video/x-h264,stream-format=avc,alignment=au \
          ! queue max-size-buffers=60 max-size-bytes=0 max-size-time=0 ! mux.video \
          {audio} ! audioconvert ! audioresample ! audio/x-raw,rate=44100,channels=2 \
@@ -75,6 +77,8 @@ fn pipeline(s: &Start, socket: Option<&PathBuf>) -> Result<Pipeline> {
          flvmux name=mux streamable=true ! rtmp2sink name=output timeout=5 sync=false",
         s.width, s.height, s.fps, s.bitrate_kbps, s.fps * 2);
     let pipeline = gst::parse::launch(&desc)?.downcast::<gst::Pipeline>().map_err(|_| anyhow::anyhow!("broadcast pipeline unavailable"))?;
+    let encoder = pipeline.by_name("encoder").unwrap();
+    if encoder.find_property("nal-hrd").is_some() { encoder.set_property_from_str("nal-hrd", "cbr"); }
     let src = pipeline.by_name("video").unwrap().downcast::<app::AppSrc>().unwrap();
     let output = pipeline.by_name("output").unwrap();
     // Connection strings are properties, never pipeline syntax or diagnostic text.
@@ -132,7 +136,7 @@ fn run(settings: Start, socket: Option<PathBuf>, pictures: watch::Receiver<Optio
                         pipe.src.set_caps(Some(&gst::Caps::builder("video/x-raw").field("format", "BGRx").field("width", size.0 as i32).field("height", size.1 as i32).field("framerate", gst::Fraction::new(settings.fps as i32, 1)).field("pixel-aspect-ratio", gst::Fraction::new(1, 1)).build()));
                     }
                     let bytes = if settings.cursor { blend_cursor(&picture) } else { picture.data.clone() };
-                    let mut buffer = gst::Buffer::from_mut_slice(bytes.to_vec());
+                    let mut buffer = gst::Buffer::from_slice(bytes);
                     buffer.get_mut().unwrap().set_duration(gst::ClockTime::from_nseconds(interval.as_nanos() as u64));
                     if pipe.src.push_buffer(buffer).is_err() { break; }
                     progress.lock().unwrap().frames += 1;
