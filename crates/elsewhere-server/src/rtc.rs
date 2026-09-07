@@ -36,8 +36,10 @@ const FRAGMENT: usize = 16 * 1024;
 /// What the CLI decided: the UDP port, the address to advertise, and the ICE servers the browser should use.
 pub struct Config {
     pub port: u16,
+    /// Explicit UDP port to advertise with the browser hostname; otherwise use its page port.
+    pub page_port: Option<u16>,
     /// The one address browsers reach us at, when it isn't ours (a Docker bridge maps the host's port to
-    /// the container); without it the answer advertises the viewer's page endpoint.
+    /// the container); without it the answer uses the viewer's page hostname and the selected port.
     pub addr: Option<IpAddr>,
     /// STUN and TURN servers as the page's `RTCPeerConnection` wants them (`urls`, `username`, `credential`).
     pub ice_servers: Vec<serde_json::Value>,
@@ -62,6 +64,7 @@ pub struct Hub {
     open: Arc<Open>,
     pub ice_servers: Arc<Vec<serde_json::Value>>,
     page_endpoint: bool,
+    page_port: Option<u16>,
 }
 
 impl Hub {
@@ -87,7 +90,7 @@ impl Hub {
         }
         anyhow::ensure!(!sockets.is_empty(), "no local address to listen on");
         let (tx, rx) = mpsc::channel(256);
-        let hub = Hub { tx, open: Default::default(), ice_servers: Arc::new(cfg.ice_servers), page_endpoint: cfg.addr.is_none() };
+        let hub = Hub { tx, open: Default::default(), ice_servers: Arc::new(cfg.ice_servers), page_endpoint: cfg.addr.is_none(), page_port: cfg.page_port };
         tokio::spawn(run(sockets, rx, hub.open.clone()));
         tracing::info!(port = cfg.port, "WebRTC: data channels on UDP");
         Ok(hub)
@@ -103,7 +106,7 @@ impl Hub {
     /// would be a stuck viewer or a lingering peer.
     pub async fn offer(&self, session: u64, sdp: String, g: u64, reply: mpsc::Sender<Bytes>, endpoint: Option<&serde_json::Value>) {
         let endpoint = if self.page_endpoint {
-            match resolve_endpoint(endpoint).await {
+            match resolve_endpoint(endpoint, self.page_port).await {
                 Ok(endpoint) => Some(endpoint),
                 Err(e) => {
                     tracing::warn!(session, "WebRTC endpoint refused: {e:#}");
@@ -137,13 +140,13 @@ impl Hub {
 }
 
 /// Resolve outside the shared hub so a slow DNS lookup cannot stall other viewers.
-async fn resolve_endpoint(value: Option<&serde_json::Value>) -> Result<Vec<SocketAddr>> {
+async fn resolve_endpoint(value: Option<&serde_json::Value>, port: Option<u16>) -> Result<Vec<SocketAddr>> {
     let value = value.context("page endpoint is required")?;
     #[derive(serde::Deserialize)]
     struct Endpoint { host: String, port: u16 }
     let endpoint: Endpoint = serde_json::from_value(value.clone())?;
     anyhow::ensure!(!endpoint.host.is_empty() && endpoint.host.len() <= 253 && endpoint.port != 0, "invalid page endpoint");
-    let mut addrs: Vec<_> = tokio::time::timeout(Duration::from_secs(2), tokio::net::lookup_host((endpoint.host.as_str(), endpoint.port)))
+    let mut addrs: Vec<_> = tokio::time::timeout(Duration::from_secs(2), tokio::net::lookup_host((endpoint.host.as_str(), port.unwrap_or(endpoint.port))))
         .await.context("page endpoint DNS timeout")??.collect();
     addrs.sort_unstable();
     addrs.dedup();
@@ -426,7 +429,7 @@ mod endpoint_tests {
         let (tx, mut rx) = mpsc::channel(1);
         let (reply, _events) = mpsc::channel(1);
         reply.try_send(protocol::rtc(&serde_json::json!({}))).unwrap();
-        let mut hub = Hub { tx, open: Default::default(), ice_servers: Default::default(), page_endpoint: true };
+        let mut hub = Hub { tx, open: Default::default(), ice_servers: Default::default(), page_endpoint: true, page_port: None };
         let invalid = serde_json::json!({"host": "", "port": 0});
         tokio::time::timeout(Duration::from_millis(100), hub.offer(1, String::new(), 1, reply.clone(), Some(&invalid))).await.unwrap();
         assert!(rx.try_recv().is_err());
@@ -441,16 +444,19 @@ mod endpoint_tests {
 
     #[tokio::test]
     async fn endpoint_resolution_and_wire_candidates() {
-        assert!(resolve_endpoint(None).await.is_err());
+        assert!(resolve_endpoint(None, None).await.is_err());
         for value in [serde_json::json!({"host": "", "port": 443}), serde_json::json!({"host": "localhost", "port": 0}), serde_json::json!({"host": "localhost", "port": 65536})] {
-            assert!(resolve_endpoint(Some(&value)).await.is_err());
+            assert!(resolve_endpoint(Some(&value), None).await.is_err());
         }
-        assert!(resolve_endpoint(Some(&serde_json::json!({"host": "0.0.0.0", "port": 443}))).await.is_err());
+        assert!(resolve_endpoint(Some(&serde_json::json!({"host": "0.0.0.0", "port": 443})), None).await.is_err());
         let mut endpoints = vec![vec!["192.0.2.1:443".parse().unwrap(), "[2001:db8::1]:443".parse().unwrap()]];
         for host in ["127.0.0.1", "::1", "localhost"] {
             let value = serde_json::json!({"host": host, "port": 9443});
-            let addrs = resolve_endpoint(Some(&value)).await.unwrap();
+            let addrs = resolve_endpoint(Some(&value), None).await.unwrap();
             assert!(addrs.iter().all(|addr| addr.port() == 9443 && addr.ip().is_loopback()));
+            endpoints.push(addrs);
+            let addrs = resolve_endpoint(Some(&value), Some(19501)).await.unwrap();
+            assert!(addrs.iter().all(|addr| addr.port() == 19501 && addr.ip().is_loopback()));
             endpoints.push(addrs);
         }
         assert!(advertise_endpoint("v=0\r\n", &endpoints[0]).is_err());

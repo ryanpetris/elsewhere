@@ -117,17 +117,16 @@ The default WebSocket transport carries the desktop through nginx alone. To offe
 replace `--no-rtc` in each container command with:
 
 ```text
-Alice: --rtc-addr <reachable-ip> --rtc-port 50001
-Bob:   --rtc-addr <reachable-ip> --rtc-port 50002
+Alice: --rtc-port 50001
+Bob:   --rtc-port 50002
 ```
 
 Also add `-p 50001:50001/udp` to Alice's Docker options and `-p 50002:50002/udp` to Bob's, before the
-image name. Open or forward those UDP ports on the firewall or router. Both instances can advertise
-the same public IP. With `--rtc-addr`, the advertised port and local port are the same, so keep the
-port number unchanged when forwarding.
+image name. Open or forward those UDP ports on the firewall or router without changing port numbers.
+Each instance advertises the browser's hostname with its explicit RTC port. The hostname must resolve
+to the reachable address from inside the container. Add `--rtc-addr <reachable-ip>` only when the
+UDP address differs from the page hostname or the container sees different DNS results.
 
-Specify both flags when UDP uses a different endpoint from HTTPS. `--rtc-port` alone changes the
-local bind port; without `--rtc-addr`, Elsewhere advertises the page's hostname and port instead.
 URL prefixes do not route UDP traffic. nginx's HTTP proxy is not in this video path.
 
 WebRTC uses its own generated DTLS certificate, whose fingerprint is exchanged through WebSocket

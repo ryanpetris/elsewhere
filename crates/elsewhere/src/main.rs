@@ -61,7 +61,7 @@ struct Cli {
     /// No WebRTC: the video stays on the WebSocket (TCP) for every viewer.
     #[arg(long)]
     no_rtc: bool,
-    /// Local UDP port for WebRTC (default: the listen port's number). Without --rtc-addr, viewers use the page's port.
+    /// Local and advertised UDP port for WebRTC. If unset, bind the listen port and advertise the page's port.
     #[arg(long)]
     rtc_port: Option<u16>,
     /// Advertise this WebRTC IP and --rtc-port instead of the page's hostname and port.
@@ -253,7 +253,7 @@ fn main() -> Result<()> {
         if let Some(turn) = &cli.turn {
             ice_servers.push(serde_json::json!({ "urls": turn, "username": cli.turn_user, "credential": cli.turn_pass }));
         }
-        elsewhere_server::rtc::Config { port: cli.rtc_port.unwrap_or(cli.listen.port()), addr: cli.rtc_addr, ice_servers }
+        elsewhere_server::rtc::Config { port: cli.rtc_port.unwrap_or(cli.listen.port()), page_port: cli.rtc_port, addr: cli.rtc_addr, ice_servers }
     });
     let server = elsewhere_server::Config { listen: cli.listen, tls: !cli.no_tls, url_prefix: cli.url_prefix, proxy_strips_prefix: cli.proxy_strips_prefix, codec, codecs, software, bitrate_kbps: cli.bitrate, initial, fixed_size: cli.screen_size.is_some(), data_dir, elements: cli.elements, files_dir, version: env!("ELSEWHERE_VERSION"), sinks, broadcast, audio_available: audio.is_some(), mixer: audio.as_mut().and_then(|session| session.mixer.take()), mic: audio.as_ref().map(|session| session.mic.clone()), cam: cam.as_ref().map(|(_, tx)| tx.clone()), rtc };
     // Ctrl+C and SIGTERM (`docker stop`, a service manager) return here so the audio devices get unloaded
