@@ -14,6 +14,11 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
 | Method and path | Body or query | Result |
 |---|---|---|
 | `GET /api/windows` | | JSON array of **Window** |
+| `GET /api/broadcasts/capabilities` | | broadcast encoder availability and limits |
+| `POST /api/broadcasts/start` | **BroadcastStart** | control token; runtime status without connection credentials |
+| `GET /api/broadcasts` | | runtime statuses; no saved configurations or credentials |
+| `GET /api/broadcasts/{id}` | | runtime status; `404` unknown ID |
+| `POST /api/broadcasts/{id}/stop` | | control token; stop and return runtime status; `404` unknown ID |
 | `GET /api/codecs` | | JSON array of `{codec, hardware}`: what this server encodes, in the order Auto prefers |
 | `GET /api/applications` | | JSON array of **Application**: the installed launchers, for `launch` |
 | `GET /api/applications/{id}/icon` | | the application's icon, SVG or PNG; `404` none |
@@ -39,6 +44,79 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
 | `POST /api/token/rotate` | | `{"token": …, "viewer_token": …}`: new tokens replace both at once (files, viewers, API); the CLI reads the new tokens from their files |
 | `POST /mcp` | MCP Streamable HTTP | the tools below |
 | `GET /skill/SKILL.md`, `GET /skill/reference.md` | no token needed | this documentation |
+
+## BroadcastStart
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Start",
+  "type": "object",
+  "properties": {
+    "audio": {
+      "$ref": "#/$defs/Audio"
+    },
+    "bitrate_kbps": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "cursor": {
+      "type": "boolean"
+    },
+    "fps": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "height": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "label": {
+      "type": "string"
+    },
+    "request_id": {
+      "description": "Retry the same request with this ID for up to ten minutes.",
+      "type": "string"
+    },
+    "stream_key": {
+      "type": "string"
+    },
+    "url": {
+      "type": "string"
+    },
+    "width": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "request_id",
+    "label",
+    "url",
+    "stream_key",
+    "width",
+    "height",
+    "fps",
+    "bitrate_kbps",
+    "audio",
+    "cursor"
+  ],
+  "$defs": {
+    "Audio": {
+      "type": "string",
+      "enum": [
+        "desktop",
+        "silence"
+      ]
+    }
+  }
+}
+```
 
 ## Window
 
@@ -1011,6 +1089,142 @@ The applications installed on the desktop (its .desktop launchers): id, name, co
 ```json
 {
   "properties": {},
+  "type": "object"
+}
+```
+
+### `broadcast_capabilities`
+
+Discover broadcast encoder availability and supported settings.
+
+```json
+{
+  "properties": {},
+  "type": "object"
+}
+```
+
+### `broadcast_get`
+
+Get a runtime broadcast's status without connection credentials.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "type": "object"
+}
+```
+
+### `broadcast_list`
+
+List this host's runtime broadcasts and sanitized status. No connection credentials are returned.
+
+```json
+{
+  "properties": {},
+  "type": "object"
+}
+```
+
+### `broadcast_start`
+
+Start a desktop broadcast with complete connection and encoding settings. Control token required. Returns runtime status without credentials. Retry the same request_id for ten minutes; different settings with that ID conflict.
+
+```json
+{
+  "$defs": {
+    "Audio": {
+      "enum": [
+        "desktop",
+        "silence"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "audio": {
+      "$ref": "#/$defs/Audio"
+    },
+    "bitrate_kbps": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "cursor": {
+      "type": "boolean"
+    },
+    "fps": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "height": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "label": {
+      "type": "string"
+    },
+    "request_id": {
+      "description": "Retry the same request with this ID for up to ten minutes.",
+      "type": "string"
+    },
+    "stream_key": {
+      "type": "string"
+    },
+    "url": {
+      "type": "string"
+    },
+    "width": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "request_id",
+    "label",
+    "url",
+    "stream_key",
+    "width",
+    "height",
+    "fps",
+    "bitrate_kbps",
+    "audio",
+    "cursor"
+  ],
+  "type": "object"
+}
+```
+
+### `broadcast_stop`
+
+Stop a runtime broadcast. Control token required; repeated stops are safe.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id"
+  ],
   "type": "object"
 }
 ```

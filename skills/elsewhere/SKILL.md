@@ -113,3 +113,21 @@ MCP tools return the same failures as tool errors with the same text.
   expose their content; without it you get `level: frame`. Firefox and GTK and Qt applications work as
   started by `spawn`.
 - The screen is whatever size the connected viewer is; with no viewer it is 1920×1080.
+
+## Desktop broadcasts
+
+`broadcast_capabilities` reports encoder availability and limits. `broadcast_start` takes complete
+settings: `request_id`, `label`, `url`, `stream_key`, `width`, `height`, `fps`, `bitrate_kbps`,
+`audio` (`desktop` or `silence`), and `cursor` (boolean). Use a fresh request ID for each intended run.
+Retry the identical request with the same ID for ten minutes to recover an uncertain response;
+changing its settings conflicts. A retry never restarts a retained stopped run.
+
+`broadcast_list` and `broadcast_get` return runtime IDs and status, never destination credentials.
+`broadcast_stop` takes an `id` and is idempotent while that record is retained. Start and stop require
+a control token, including when a different browser controls the pointer. The viewer token can read
+status only. `sending` means media transport is active, not that the service has made it public.
+
+Broadcasts continue without browser viewers. Up to four independent H.264/AAC outputs can run.
+Silent audio does not require the private audio service. Settings are not saved on the host;
+browser presets belong to that browser and cannot be retrieved through MCP. Supply connection
+settings yourself when using MCP. See the generated reference for the matching HTTP routes.

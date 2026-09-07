@@ -404,6 +404,10 @@ Elsewhere is the session's notification daemon when no other runs. A panel is op
 `elsewhere.windows()`, `elsewhere.activate(id)`, `elsewhere.control({...})`, `elsewhere.spawn(cmd)`, `elsewhere.snapshot(id)` and
 `elsewhere.elements(id)` do the same.
 
+The Broadcasts tab starts and stops independent desktop streams to RTMP/RTMPS services. Presets live
+in browser storage and share across instance paths on the same origin. The same controls are available
+through HTTP and MCP. See [desktop broadcasts](docs/broadcasts.md).
+
 The viewer lives in `web/` (React, Tailwind CSS, Vite) and is built into `web/dist`, which the binary
 embeds at compile time; `make` builds the viewer (Node 24) and then the binary, `make web` only the
 viewer, and a `cargo build` without `web/dist` stops with that hint. `npm run dev` in `web/` serves the
