@@ -11,7 +11,7 @@ case "$kind" in
         make build
         package_version=$(printf '%s' "${ELSEWHERE_VERSION#v}" | tr '-' '.')
         cargo deb -p elsewhere --locked --no-build --deb-version "$package_version-1" \
-            --output "dist/elsewhere_${ELSEWHERE_VERSION}-1_$(dpkg --print-architecture).deb"
+            --output "dist/elsewhere_${package_version}-1_$(dpkg --print-architecture).deb"
         ;;
     tar)
         make build
@@ -27,9 +27,6 @@ case "$kind" in
         export PKGDEST="$(pwd)/dist"
         cd packaging/arch
         makepkg -f --noconfirm
-        package=$(makepkg --packagelist)
-        suffix=${package##*.pkg.tar}
-        mv "$package" "$PKGDEST/elsewhere-$ELSEWHERE_VERSION-1-$(uname -m).pkg.tar$suffix"
         ;;
     *) echo "Unknown package type: $kind" >&2; exit 1 ;;
 esac
