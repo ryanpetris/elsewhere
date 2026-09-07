@@ -200,6 +200,12 @@ fn main() -> Result<()> {
         let sink = elsewhere_stream::GstSink::new(bitrate, &va_for_sinks, software, tx)?;
         Ok((Box::new(sink.clone()) as Box<dyn FrameSink>, Box::new(sink.control()) as Box<dyn StreamControl>))
     });
+    let broadcast_socket = audio.as_ref().and_then(|s| s.client_env().into_iter().find(|(k, _)| k == "PIPEWIRE_REMOTE").map(|(_, v)| std::path::PathBuf::from(v)));
+    let capabilities_socket = broadcast_socket.clone();
+    let broadcast = elsewhere_server::broadcast::Backend {
+        start: Box::new(move |settings| elsewhere_stream::broadcast::start(settings, broadcast_socket.clone())),
+        capabilities: Box::new(move || elsewhere_stream::broadcast::capabilities(capabilities_socket.as_ref().is_some_and(|p| p.exists()))),
+    };
     let mut exec_env = audio.as_ref().map(audio::Session::client_env).unwrap_or_else(|| {
         // An unavailable session must not send its applications to the host audio server.
         vec![("PIPEWIRE_REMOTE".into(), "/dev/null".into()), ("PULSE_SERVER".into(), "unix:/dev/null".into()), ("PIPEWIRE_CONFIG_DIR".into(), "/dev/null".into())]
@@ -249,7 +255,7 @@ fn main() -> Result<()> {
         }
         elsewhere_server::rtc::Config { port: cli.rtc_port.unwrap_or(cli.listen.port()), addr: cli.rtc_addr, ice_servers }
     });
-    let server = elsewhere_server::Config { listen: cli.listen, tls: !cli.no_tls, url_prefix: cli.url_prefix, proxy_strips_prefix: cli.proxy_strips_prefix, codec, codecs, software, bitrate_kbps: cli.bitrate, initial, fixed_size: cli.screen_size.is_some(), data_dir, elements: cli.elements, files_dir, version: env!("ELSEWHERE_VERSION"), sinks, audio_available: audio.is_some(), mixer: audio.as_mut().and_then(|session| session.mixer.take()), mic: audio.as_ref().map(|session| session.mic.clone()), cam: cam.as_ref().map(|(_, tx)| tx.clone()), rtc };
+    let server = elsewhere_server::Config { listen: cli.listen, tls: !cli.no_tls, url_prefix: cli.url_prefix, proxy_strips_prefix: cli.proxy_strips_prefix, codec, codecs, software, bitrate_kbps: cli.bitrate, initial, fixed_size: cli.screen_size.is_some(), data_dir, elements: cli.elements, files_dir, version: env!("ELSEWHERE_VERSION"), sinks, broadcast, audio_available: audio.is_some(), mixer: audio.as_mut().and_then(|session| session.mixer.take()), mic: audio.as_ref().map(|session| session.mic.clone()), cam: cam.as_ref().map(|(_, tx)| tx.clone()), rtc };
     // Ctrl+C and SIGTERM (`docker stop`, a service manager) return here so the audio devices get unloaded
     // and the pipelines stopped.
     let result = runtime.block_on(async {

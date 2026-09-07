@@ -103,12 +103,16 @@ pub fn shm_rgba(buffer: &WlBuffer) -> Option<(u32, u32, Vec<u8>)> {
 impl State {
     /// Send the current pointer image to the viewer.
     pub fn export_cursor(&mut self) {
-        let image = match &self.cursor_status {
+        let image = self.cursor_image();
+        let _ = self.events.send(Event::Cursor(image));
+    }
+
+    pub fn cursor_image(&mut self) -> Option<CursorImage> {
+        match &self.cursor_status {
             CursorImageStatus::Hidden => None,
             // a theme may lack some of the shapes cursor-shape-v1 lets clients name: show an arrow, not nothing
             CursorImageStatus::Named(icon) => self.cursor.image(*icon).or_else(|| self.cursor.image(CursorIcon::Default)),
             CursorImageStatus::Surface(surface) => surface_cursor(surface),
-        };
-        let _ = self.events.send(Event::Cursor(image));
+        }
     }
 }

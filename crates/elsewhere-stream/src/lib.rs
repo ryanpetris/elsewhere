@@ -2,6 +2,7 @@
 //! frames on a channel. One [`GstSink`] per viewer, each at its own size and codec.
 
 mod lease;
+pub mod broadcast;
 
 use std::{
     collections::HashMap,

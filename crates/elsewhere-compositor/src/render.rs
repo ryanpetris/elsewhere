@@ -96,24 +96,26 @@ impl State {
             self.refine_due = None;
             self.force_full_frame = true;
         }
-        if !(self.dirty || self.force_full_frame || self.window_streams.iter().any(|s| s.pending)) {
+        let broadcast_due = self.viewer_sinks.iter().filter_map(|(_, s)| s.cadence()).min().is_some_and(|interval| self.last_render.elapsed() >= interval);
+        let broadcast_only = broadcast_due && !self.dirty && !self.force_full_frame;
+        if !(broadcast_due || self.dirty || self.force_full_frame || self.window_streams.iter().any(|s| s.pending)) {
             return;
         }
         let force = self.force_full_frame; // render_frame clears it
-        if let Err(e) = self.render_frame(refine) {
+        if let Err(e) = self.render_frame(refine, broadcast_only) {
             tracing::warn!("render failed: {e:#}");
             self.force_full_frame = true; // the damage tracker advanced: the retry draws everything
         }
         self.render_window_streams(force && !refine); // a refine is the desktop's; the windows didn't change
     }
 
-    fn render_frame(&mut self, refine: bool) -> Result<()> {
+    fn render_frame(&mut self, refine: bool, broadcast_only: bool) -> Result<()> {
         // No free slot means the encoder still holds every buffer: skip this tick, stay dirty.
         let Some((mut target, age)) = self.gpu.targets.acquire(&mut self.gpu.renderer, self.gpu.fourcc)? else {
             tracing::debug!("no free swapchain slot: every frame is still with an encoder");
             return Ok(());
         };
-        let age = if self.force_full_frame { 0 } else { age };
+        let age = if self.force_full_frame || broadcast_only { 0 } else { age };
 
         if let (false, Target::Slot { dmabuf, .. }) = (self.gpu.modifier_verified, &target) {
             // The allocator was asked for exactly the negotiated modifier, but GBM can fall back to another
@@ -136,12 +138,13 @@ impl State {
         let elements = self.output_elements(self.geometry.scale);
         let size = (self.geometry.width_px as i32, self.geometry.height_px as i32).into();
         let texture = matches!(target, Target::Texture);
+        let broadcast = self.viewer_sinks.iter().any(|(_, s)| s.wants_pixels());
         let (sync, damaged, states, pixels) = {
             let Gpu { renderer, targets, fourcc, .. } = &mut self.gpu;
             let mut fb = targets.bind(renderer, &mut target)?;
             let res = self.damage_tracker.render_output(renderer, &mut fb, age, &elements, CLEAR)?;
             // no GPU: the pixels come back through the CPU now, while the framebuffer is bound
-            let pixels = if texture && res.damage.is_some() && !self.viewer_sinks.is_empty() { Some(read_pixels(renderer, &fb, size, *fourcc)?) } else { None };
+            let pixels = if (texture || broadcast) && res.damage.is_some() && !self.viewer_sinks.is_empty() { Some(read_pixels(renderer, &fb, size, if broadcast { smithay::backend::allocator::Fourcc::Xrgb8888 } else { *fourcc })?) } else { None };
             (res.sync, res.damage.is_some(), res.states, pixels)
         };
         self.last_render = Instant::now();
@@ -188,6 +191,8 @@ impl State {
             return Ok(()); // nothing new to show (or nobody watching): don't encode
         }
 
+        let cpu_pixels = pixels.map(elsewhere_core::Bytes::from);
+        let cursor = if broadcast { self.cursor_image() } else { None };
         self.frame_seq += 1;
         // one frame, every viewer's encoder: a dmabuf goes to each with its own dup of the fd and a share
         // of the lease, so the slot is free again when the last of them is done with it; memory is copied
@@ -205,15 +210,19 @@ impl State {
                 })
             }
             Target::Texture => {
-                let (data, stride) = (elsewhere_core::Bytes::from(pixels.unwrap()), self.geometry.width_px * 4); // read back above: damaged, with sinks
+                let (data, stride) = (cpu_pixels.clone().unwrap(), self.geometry.width_px * 4); // read back above: damaged, with sinks
                 Box::new(move || Ok(FrameBuffer::Memory { data: data.clone(), stride }))
             }
         };
         let now = self.clock.now(); // after the GPU wait: when the frame really left
         let (mut encoded, mut failed) = (0, false);
         for (key, sink) in &mut self.viewer_sinks {
-            let submitted = buffer().and_then(|buffer| {
-                sink.submit(Frame { width: self.geometry.width_px, height: self.geometry.height_px, fourcc: self.gpu.fourcc as u32, pts: now.into(), seq: self.frame_seq, refine, buffer })
+            if broadcast_only && !sink.wants_pixels() { continue; }
+            let raw = sink.wants_pixels();
+            if raw { sink.cursor(cursor.clone(), self.pointer_location.x, self.pointer_location.y, self.geometry.scale); }
+            let frame_buffer = if raw { Ok(FrameBuffer::Memory { data: cpu_pixels.clone().unwrap(), stride: self.geometry.width_px * 4 }) } else { buffer() };
+            let submitted = frame_buffer.and_then(|buffer| {
+                sink.submit(Frame { width: self.geometry.width_px, height: self.geometry.height_px, fourcc: if raw { smithay::backend::allocator::Fourcc::Xrgb8888 as u32 } else { self.gpu.fourcc as u32 }, pts: now.into(), seq: self.frame_seq, refine, buffer })
                     .map_err(|e| anyhow::anyhow!("{e}"))
             });
             match submitted {
@@ -227,7 +236,7 @@ impl State {
         }
         if encoded > 0 {
             self.dirty = false;
-            self.refine_due = if refine { None } else { Some(Instant::now() + REFINE_AFTER) };
+            if !broadcast_only { self.refine_due = if refine { None } else { Some(Instant::now() + REFINE_AFTER) }; }
             // an encoder has it: the closest thing to "presented" without a display; no MSC, so seq 0
             feedback.presented(now, Refresh::Fixed(self.frame_interval), 0, wp_presentation_feedback::Kind::empty());
         } else {

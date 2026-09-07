@@ -7,6 +7,7 @@ mod api;
 mod apps;
 mod elements;
 mod mcp;
+pub mod broadcast;
 mod mixer;
 pub use mixer::{Mixer, MixerAudience};
 pub mod files;
@@ -84,6 +85,7 @@ pub struct Config {
     pub version: &'static str,
     /// One encoder per viewer and per window stream.
     pub sinks: SinkFactory,
+    pub broadcast: broadcast::Backend,
     /// Whether session playback initialized successfully, independently of microphone capture.
     pub audio_available: bool,
     pub mixer: Option<Mixer>,
@@ -118,6 +120,8 @@ pub struct App {
     fixed_size: bool,
     viewers: Mutex<Viewers>,
     sinks: SinkFactory,
+    broadcast_backend: broadcast::Backend,
+    broadcasts: Mutex<broadcast::Registry>,
     audio_available: std::sync::atomic::AtomicBool,
     mixer: Option<Mixer>,
     mic: Option<mpsc::Sender<Bytes>>,
@@ -214,6 +218,8 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
         fixed_size: cfg.fixed_size,
         viewers: Mutex::new(Viewers { output: cfg.initial, ..Default::default() }),
         sinks: cfg.sinks,
+        broadcast_backend: cfg.broadcast,
+        broadcasts: Mutex::default(),
         audio_available: cfg.audio_available.into(),
         mixer,
         mic: cfg.mic,
@@ -239,6 +245,7 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
     tokio::spawn(ws::forward_events(app.clone(), events_rx));
     tokio::spawn(notify::serve(app.clone()));
     tokio::spawn(files::sweep(app.clone()));
+    tokio::spawn(broadcast::sweep(Arc::downgrade(&app)));
 
     let router = Router::new()
         .route("/", get(index))
@@ -255,6 +262,11 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
                 .route("/api/applications", get(api_applications))
                 .route("/api/applications/{id}/icon", get(api_application_icon))
                 .route("/api/control", post(api_control))
+                .route("/api/broadcasts", get(broadcast::list))
+                .route("/api/broadcasts/capabilities", get(broadcast::capabilities))
+                .route("/api/broadcasts/start", post(broadcast::start))
+                .route("/api/broadcasts/{id}", get(broadcast::get))
+                .route("/api/broadcasts/{id}/stop", post(broadcast::stop))
                 .route("/api/input", post(api_input))
                 .route("/api/windows/{id}/snapshot.png", get(api_window_snapshot))
                 .route("/api/screenshot.png", get(api_screenshot))

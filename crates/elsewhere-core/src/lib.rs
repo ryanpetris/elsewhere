@@ -2,6 +2,7 @@
 //! Nothing here depends on Smithay or GStreamer.
 
 pub mod audio;
+pub mod broadcast;
 pub mod snapshot;
 pub use snapshot::SnapshotSizing;
 
@@ -293,7 +294,7 @@ pub enum Drag {
     Cancel,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct CursorImage {
     pub width: u32,
     pub height: u32,
@@ -416,6 +417,11 @@ pub trait StreamControl: Send + Sync {
 pub type SinkError = Box<dyn std::error::Error + Send + Sync>;
 
 pub trait FrameSink: Send {
+    /// CPU pixels from the same rendered output; no compositor DMA buffer lease is retained.
+    fn wants_pixels(&self) -> bool { false }
+    /// Request regular desktop frames, including when no surface changed.
+    fn cadence(&self) -> Option<Duration> { None }
+    fn cursor(&mut self, _image: Option<CursorImage>, _x: f64, _y: f64, _scale: f64) {}
     /// Must not block. `Err` means the frame was not handed to the encoder and something is wrong.
     fn submit(&mut self, frame: Frame) -> Result<Submit, SinkError>;
     fn output_changed(&mut self, geo: OutputGeometry, fourcc: u32, modifier: u64);

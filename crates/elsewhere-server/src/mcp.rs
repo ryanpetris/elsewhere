@@ -71,6 +71,10 @@ pub struct WindowArg {
     pub window: u64,
 }
 
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BroadcastId { pub id: String }
+
 type ScreenshotArgs = elsewhere_core::SnapshotSizing;
 
 #[derive(Deserialize, JsonSchema)]
@@ -289,6 +293,23 @@ impl Mcp {
     fn resize_window(&self, Extension(parts): Extension<Parts>, Parameters(ResizeWindowArgs { window, w, h }): Parameters<ResizeWindowArgs>) -> ToolResult {
         self.control(&parts, window, ControlOp::Resize { w, h })
     }
+
+    #[tool(description = "Start a desktop broadcast with complete connection and encoding settings. Control token required. Returns runtime status without credentials. Retry the same request_id for ten minutes; different settings with that ID conflict.")]
+    fn broadcast_start(&self, Extension(parts): Extension<Parts>, Parameters(settings): Parameters<elsewhere_core::broadcast::Start>) -> ToolResult {
+        match self.app.broadcast_start(parts.extensions.get::<Key>().copied().unwrap_or(Key::Viewer), settings) { Ok(s) => json(s), Err(e) => done(Err(e)) }
+    }
+    #[tool(description = "Stop a runtime broadcast. Control token required; repeated stops are safe.")]
+    fn broadcast_stop(&self, Extension(parts): Extension<Parts>, Parameters(arg): Parameters<BroadcastId>) -> ToolResult {
+        match self.app.broadcast_stop(parts.extensions.get::<Key>().copied().unwrap_or(Key::Viewer), &arg.id) { Ok(s) => json(s), Err(e) => done(Err(e)) }
+    }
+    #[tool(description = "List this host's runtime broadcasts and sanitized status. No connection credentials are returned.")]
+    fn broadcast_list(&self) -> ToolResult { json(self.app.broadcast_list()) }
+    #[tool(description = "Get a runtime broadcast's status without connection credentials.")]
+    fn broadcast_get(&self, Parameters(arg): Parameters<BroadcastId>) -> ToolResult {
+        match self.app.broadcast_get(&arg.id) { Ok(s) => json(s), Err(e) => done(Err(e)) }
+    }
+    #[tool(description = "Discover broadcast encoder availability and supported settings.")]
+    fn broadcast_capabilities(&self) -> ToolResult { json(self.app.broadcast_capabilities()) }
 
     #[tool(description = "Start a program as a client of this desktop (`sh -c cmd`). Its window appears in `windows` after a moment.")]
     fn spawn(&self, Extension(parts): Extension<Parts>, Parameters(SpawnArgs { cmd }): Parameters<SpawnArgs>) -> ToolResult {

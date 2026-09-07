@@ -25,6 +25,7 @@ use crate::{App, apps, elements::Page};
 
 #[derive(Debug)]
 pub enum ApiError {
+    Broadcast { code: &'static str, message: String },
     File { code: &'static str, message: String },
     InvalidSize(&'static str),
     /// The feature is switched off (`--elements`).
@@ -52,6 +53,7 @@ pub enum ApiError {
 impl ApiError {
     pub fn status(&self) -> StatusCode {
         match self {
+            ApiError::Broadcast { code, .. } => match *code { "invalid" => StatusCode::BAD_REQUEST, "missing" => StatusCode::NOT_FOUND, "conflict" => StatusCode::CONFLICT, "busy" => StatusCode::TOO_MANY_REQUESTS, _ => StatusCode::SERVICE_UNAVAILABLE },
             ApiError::File { code, .. } => match *code {
                 "missing" => StatusCode::NOT_FOUND,
                 "permission_denied" => StatusCode::FORBIDDEN,
@@ -76,7 +78,7 @@ impl ApiError {
 impl std::fmt::Display for ApiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ApiError::File { message, .. } => f.write_str(message),
+            ApiError::Broadcast { message, .. } | ApiError::File { message, .. } => f.write_str(message),
             ApiError::InvalidSize(why) => f.write_str(why),
             ApiError::Disabled(what) => f.write_str(what),
             ApiError::Unauthorized => f.write_str("not the current token"),
@@ -94,7 +96,7 @@ impl std::fmt::Display for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let mut body = serde_json::json!({ "error": self.to_string() });
-        if let Self::File { code, .. } = &self { body["code"] = (*code).into(); }
+        if let Self::File { code, .. } | Self::Broadcast { code, .. } = &self { body["code"] = (*code).into(); }
         (self.status(), [(header::CACHE_CONTROL, "no-store")], Json(body)).into_response()
     }
 }
