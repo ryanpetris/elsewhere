@@ -196,6 +196,13 @@ A highlighted capture hint appears in the status bar, or over the picture in ful
 is remembered in your browser and starts off. Games that request pointer lock still capture automatically.
 Browsers may also release capture through their own Escape gesture.
 
+## Reverse proxies
+
+Use `--url-prefix /elsewhere/alice` to host an instance beneath a path, including nested paths.
+By default the proxy preserves the prefix; add `--proxy-strips-prefix` when it removes it.
+[Reverse proxy setup](docs/reverse-proxy.md) covers both nginx modes, multiple instances under one
+HTTPS hostname, TLS termination with `--no-tls`, and separate UDP ports for optional WebRTC.
+
 ## Transport
 
 The video travels on the WebSocket. A viewer can move it to a WebRTC data channel (UDP, ordered and
@@ -402,7 +409,7 @@ embeds at compile time; `make` builds the viewer (Node 24) and then the binary, 
 viewer, and a `cargo build` without `web/dist` stops with that hint. `npm run dev` in `web/` serves the
 page with hot reload, proxying `/ws` and `/api` to a server started with `--no-tls --listen 127.0.0.1:8080`.
 
-Useful flags: `--no-tls` (localhost development), `--listen`, `--bitrate <kbps>` (Medium ceiling),
+Useful flags: `--no-tls` (localhost or HTTPS proxy), `--url-prefix`, `--proxy-strips-prefix`, `--listen`, `--bitrate <kbps>` (Medium ceiling),
 `--codec auto|h264|hevc|vp9|av1|vp8` (what Auto resolves to when the browser decodes it; a codec this
 machine can't encode stops startup; auto prefers whatever the browser decodes in hardware, among what
 this machine encodes: AV1, then HEVC, VP9, H.264 on the GPU; VP8 first on the CPU),

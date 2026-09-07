@@ -5,6 +5,9 @@ button by name, click it, type, and check the result without interpreting pixels
 the design; [protocol.md](protocol.md) has the wire shapes and `skills/elsewhere/reference.md` the
 generated schemas.
 
+With `--url-prefix`, external clients prepend the public prefix to `/mcp` and HTTP routes.
+See [reverse proxy setup](reverse-proxy.md) for both path-forwarding modes.
+
 ## Decisions
 
 | Question | Decision |

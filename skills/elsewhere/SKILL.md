@@ -16,6 +16,9 @@ H="Authorization: Bearer $T"
 curl -s -H "$H" https://host:8443/api/windows | jq
 ```
 
+If the deployment uses a URL prefix, prepend it to every HTTP route in this skill and the reference.
+For example, `/elsewhere/alice/api/windows` and `/elsewhere/alice/mcp` address that instance.
+
 ## The loop that works
 
 1. **Look at the window list first** (`GET /api/windows`, tool `windows`). Each window has an `id`, a

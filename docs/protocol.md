@@ -5,6 +5,10 @@ for scripts. Both are guarded by two shared tokens from the data directory: `tok
 which may do everything, and `viewer-token`, which may only look (`elsewhere token --viewer` retrieves it): the video, the window list, elements, snapshots and the clipboard's text, but no input, window
 actions, programs or clipboard writes.
 
+Routes below are relative to the public URL prefix, if configured. For example, with
+`--url-prefix /elsewhere/alice`, the viewer connects to `/elsewhere/alice/ws` and API clients use
+`/elsewhere/alice/api/...`. See [reverse proxy setup](reverse-proxy.md) for forwarding modes.
+
 ## Authentication
 
 - **Viewer page** (`/`, `/app.js`, `/app.css`): public. The token arrives once in the
