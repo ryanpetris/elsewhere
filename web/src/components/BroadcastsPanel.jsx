@@ -13,6 +13,7 @@ export function BroadcastsPanel({ viewer, open }) {
   const [presets, setPresets] = useState([]), [streams, setStreams] = useState([]);
   const [caps, setCaps] = useState(null), [edit, setEdit] = useState(null);
   const [error, setError] = useState(''), [busy, setBusy] = useState(false);
+  const [pollError, setPollError] = useState('');
   const pending = useRef(new Map());
   const generation = useRef(0);
   const refreshPresets = () => { try { setPresets(loadPresets()); } catch { setError('Browser storage is unavailable. Settings cannot be saved.'); } };
@@ -27,8 +28,8 @@ export function BroadcastsPanel({ viewer, open }) {
     let active = true, timer;
     const update = async () => {
       const current = generation.current;
-      try { const [runs, capabilities] = await Promise.all([listBroadcasts(), broadcastCapabilities()]); if (active && current === generation.current) { setStreams(runs); setCaps(capabilities); } }
-      catch (e) { if (active) setError(e.message); }
+      try { const [runs, capabilities] = await Promise.all([listBroadcasts(), broadcastCapabilities()]); if (active && current === generation.current) { setStreams(runs); setCaps(capabilities); setPollError(''); } }
+      catch (e) { if (active && current === generation.current) setPollError(e.message); }
       finally { if (active) timer = setTimeout(update, 1500); }
     };
     update();
@@ -59,15 +60,16 @@ export function BroadcastsPanel({ viewer, open }) {
   };
   return <div className="flex flex-col gap-4 p-3" data-broadcasts>
     <p className="text-xs text-zinc-400">Presets are saved in this browser and shared with desktops on the same origin. Running streams belong to this desktop.</p>
-    {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
+    {(error || pollError) && <p role="alert" className="text-sm text-red-300">{error || pollError}</p>}
     {caps && !caps.available && <p className="text-sm text-amber-300">{caps.error}</p>}
     {!acts && <p className="text-sm text-zinc-400">A control token is required to start or stop broadcasts.</p>}
     <div className="flex items-center justify-between"><h3 className="text-sm font-medium">Saved presets</h3><button className={buttonClass} onClick={() => setEdit(defaults())}>Add preset</button></div>
     {presets.map(p => <div key={p.preset_id} className="rounded border border-zinc-700 p-2">
       <div className="truncate text-sm font-medium">{p.label}</div>
       <div className="mb-2 text-xs text-zinc-400">{p.width}×{p.height} · {p.fps} fps · {p.bitrate_kbps} kbps</div>
+      {p.audio === 'desktop' && caps && !caps.desktop_audio && <p className="mb-2 text-xs text-amber-300">Desktop audio is unavailable on this host.</p>}
       <div className="flex gap-2">
-        <button className={buttonClass} disabled={!acts || busy || !caps?.available} onClick={() => start(p)}>Start</button>
+        <button className={buttonClass} disabled={!acts || busy || !caps?.available || (p.audio === 'desktop' && !caps.desktop_audio)} onClick={() => start(p)}>Start</button>
         <button className={buttonClass} onClick={() => setEdit({ ...p })}>Edit</button>
         <button className={buttonClass} onClick={() => { try { removePreset(p.preset_id); refreshPresets(); } catch { setError('Could not remove the preset.'); } }}>Remove</button>
       </div>

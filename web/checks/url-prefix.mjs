@@ -178,6 +178,12 @@ try {
   for (const instance of [alice, bob]) {
     await instance.page.getByRole('button', { name: 'Broadcasts', exact: true }).click();
   }
+  let failPoll = true;
+  await alice.page.route('**/api/broadcasts', route => failPoll ? route.fulfill({ status: 502, contentType: 'text/plain', body: 'Upstream unavailable' }) : route.continue());
+  await alice.page.getByRole('alert').filter({ hasText: 'Broadcast request failed (HTTP 502).' }).waitFor();
+  failPoll = false;
+  await wait('broadcast polling recovers', async () => await alice.page.getByRole('alert').filter({ hasText: 'Broadcast request failed' }).count() === 0);
+  await alice.page.unroute('**/api/broadcasts');
   await alice.page.getByRole('button', { name: 'Add preset', exact: true }).click();
   const preset = alice.page.getByRole('form', { name: 'Broadcast preset' });
   await preset.getByLabel('Name', { exact: true }).fill('Shared broadcast check');

@@ -19,7 +19,7 @@ fn error(code: &'static str, message: &str) -> ApiError { ApiError::Broadcast { 
 fn validate(s: &Start, c: &Capabilities) -> Result<(), ApiError> {
     if !c.available { return Err(error("unavailable", c.error.as_deref().unwrap_or("Broadcasting unavailable."))); }
     if s.request_id.is_empty() || s.request_id.len() > 128 || !s.request_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') { return Err(error("invalid", "request_id must contain 1–128 letters, digits, hyphens or underscores.")); }
-    if s.label.is_empty() || s.label.len() > 120 || s.label.chars().any(char::is_control) { return Err(error("invalid", "label must contain 1–120 bytes without control characters.")); }
+    if s.label.is_empty() || s.label.encode_utf16().count() > 120 || s.label.chars().any(char::is_control) { return Err(error("invalid", "label must contain 1–120 UTF-16 code units without control characters.")); }
     let uri: axum::http::Uri = s.url.parse().map_err(|_| error("invalid", "Invalid RTMP destination URL."))?;
     if !matches!(uri.scheme_str(), Some("rtmp" | "rtmps")) || uri.host().is_none() || uri.authority().is_some_and(|a| a.as_str().contains('@')) || s.url.len() > 4096 || s.url.chars().any(char::is_whitespace) || s.url.contains('#') {
         return Err(error("invalid", "Use an RTMP or RTMPS URL without user information, fragments or whitespace."));

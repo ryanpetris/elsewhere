@@ -43,7 +43,8 @@ hardware or upload bandwidth can sustain every combination.
 
 The compositor reads its rendered pixels once for CPU consumers. Broadcasts own those pixels and
 retain no compositor DMA buffer leases. Browser encoders keep their existing frame path. A worker
-repeats the latest picture at the requested rate, uses regular two-second keyframes, and scales
+repeats the latest picture at the requested rate (unique pictures remain limited by the desktop
+refresh rate, normally 30 Hz with software rendering and 60 Hz with GPU rendering), uses regular two-second keyframes, and scales
 with letterboxing to a fixed output size when the desktop resizes. Pointer blending affects only
 the broadcast output. The browser controls are outside the generated desktop image.
 
@@ -52,7 +53,8 @@ selecting it requires that source to be available. An audio failure fails the af
 Silence generates an AAC track independently of desktop audio. There is no separate microphone mix.
 
 Raw input holds only the latest picture. Pipeline queues are bounded. Network errors retry with
-backoff up to 32 seconds, with connection timeouts and a 15-second output watchdog. `sending` means
+backoff up to 32 seconds until stopped; ten seconds of healthy sending resets the delay. Connections
+use connection timeouts and a 15-second output watchdog. `sending` means
 media transport is active; service publication also depends on its own live-event settings.
 Encoding and readback consume CPU resources, and each output adds upload bandwidth.
 

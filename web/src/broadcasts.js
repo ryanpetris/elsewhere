@@ -14,8 +14,9 @@ export const savePreset = preset => localStorage.setItem(PRESET_PREFIX + preset.
 export const removePreset = id => localStorage.removeItem(PRESET_PREFIX + id);
 async function request(path, body) {
   const response = await api('/api/broadcasts' + path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error || 'Broadcast request failed.');
+  const result = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(result?.error || `Broadcast request failed (HTTP ${response.status}).`);
+  if (result === null) throw new Error('Invalid broadcast response.');
   return result;
 }
 export const listBroadcasts = () => request('');

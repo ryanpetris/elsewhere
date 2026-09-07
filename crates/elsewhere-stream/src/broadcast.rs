@@ -1,5 +1,5 @@
 //! Independent RTMP outputs. CPU frames own their pixels and never retain compositor leases.
-use std::{path::PathBuf, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}, time::{Duration, Instant}};
+use std::{path::PathBuf, sync::{Arc, Mutex, Once, atomic::{AtomicBool, Ordering}}, time::{Duration, Instant}};
 use anyhow::{Context, Result};
 use elsewhere_core::{broadcast::{self, Audio, Capabilities, Control, Progress, Start, State}, Bytes, CursorImage, Frame, FrameBuffer, FrameSink, OutputGeometry, SinkError, Submit};
 use gstreamer as gst;
@@ -11,7 +11,7 @@ use tokio::sync::watch;
 struct Picture { data: Bytes, width: u32, height: u32, cursor: Option<CursorImage>, x: f64, y: f64, scale: f64 }
 struct Sink { tx: watch::Sender<Option<Picture>>, cursor: Option<CursorImage>, x: f64, y: f64, scale: f64, fps: u32, stopped: Arc<AtomicBool> }
 impl FrameSink for Sink {
-    fn wants_pixels(&self) -> bool { true }
+    fn wants_pixels(&self) -> bool { !self.stopped.load(Ordering::Relaxed) }
     fn cadence(&self) -> Option<Duration> { (!self.stopped.load(Ordering::Relaxed)).then(|| Duration::from_secs_f64(1.0 / self.fps as f64)) }
     fn output_changed(&mut self, _: OutputGeometry, _: u32, _: u64) {}
     fn cursor(&mut self, image: Option<CursorImage>, x: f64, y: f64, scale: f64) { self.cursor = image; self.x = x; self.y = y; self.scale = scale; }
@@ -27,10 +27,10 @@ impl FrameSink for Sink {
 
 struct Running { stopped: Arc<AtomicBool>, progress: Arc<Mutex<Progress>> }
 impl Control for Running {
-    fn progress(&self) -> Progress { self.progress.lock().unwrap().clone() }
+    fn progress(&self) -> Progress { self.progress.lock().unwrap_or_else(|e| e.into_inner()).clone() }
     fn stop(&self) {
         self.stopped.store(true, Ordering::Relaxed);
-        let mut p = self.progress.lock().unwrap();
+        let mut p = self.progress.lock().unwrap_or_else(|e| e.into_inner());
         if !p.state.terminal() { p.state = State::Stopping; }
     }
 }
@@ -46,17 +46,19 @@ pub fn capabilities(audio: bool) -> Capabilities {
 pub fn start(settings: Start, socket: Option<PathBuf>) -> Result<(Box<dyn FrameSink>, Arc<dyn broadcast::Control>)> {
     gst::init()?;
     // RTMP debug output includes URI credentials and AMF arguments. Public errors come from Progress.
-    gst::log::set_threshold_for_name("rtmp*", gst::DebugLevel::None);
+    static DEBUG_FILTER: Once = Once::new();
+    DEBUG_FILTER.call_once(|| gst::log::set_threshold_for_name("rtmp*", gst::DebugLevel::None));
     let (tx, rx) = watch::channel(None);
     let stopped = Arc::new(AtomicBool::new(false));
     let progress = Arc::new(Mutex::new(Progress::default()));
     let control = Arc::new(Running { stopped: stopped.clone(), progress: progress.clone() });
     let sink = Sink { tx, cursor: None, x: 0.0, y: 0.0, scale: 1.0, fps: settings.fps, stopped: stopped.clone() };
     std::thread::Builder::new().name("broadcast".into()).spawn(move || {
-        run(settings, socket, rx, &stopped, &progress);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(settings, socket, rx, &stopped, &progress)));
         let cancelled = stopped.swap(true, Ordering::Relaxed);
-        let mut p = progress.lock().unwrap();
-        if cancelled || p.state != State::Failed { p.state = State::Stopped; }
+        let mut p = progress.lock().unwrap_or_else(|e| e.into_inner());
+        if result.is_err() && !cancelled { p.state = State::Failed; p.error = Some("Broadcast worker failed.".into()); }
+        else if cancelled || p.state != State::Failed { p.state = State::Stopped; }
     })?;
     Ok((Box::new(sink), control))
 }
@@ -98,16 +100,19 @@ fn pipeline(s: &Start, socket: Option<&PathBuf>) -> Result<Pipeline> {
 fn run(settings: Start, socket: Option<PathBuf>, pictures: watch::Receiver<Option<Picture>>, stop: &AtomicBool, progress: &Mutex<Progress>) {
     let interval = Duration::from_secs_f64(1.0 / settings.fps as f64);
     let mut attempts = 0u32;
+    let mut consecutive = 0u32;
     while !stop.load(Ordering::Relaxed) {
         let pipe = match pipeline(&settings, socket.as_ref()) {
             Ok(p) => p,
-            Err(_) => { let mut p = progress.lock().unwrap(); p.state = State::Failed; p.error = Some("Could not initialize the broadcast encoder or audio source.".into()); return; }
+            Err(_) => { let mut p = progress.lock().unwrap_or_else(|e| e.into_inner()); p.state = State::Failed; p.error = Some("Could not initialize the broadcast encoder or audio source.".into()); return; }
         };
         let bus = pipe.pipeline.bus().unwrap();
         let mut size = (0, 0);
         let mut next = Instant::now();
         let mut last_bytes = 0;
         let mut last_output = Instant::now();
+        let mut sending_since = None;
+        let mut failure_since = None;
         let mut failed_audio = false;
         let mut failed_encoder = false;
         let mut failed_network = false;
@@ -127,7 +132,14 @@ fn run(settings: Start, socket: Option<PathBuf>, pictures: watch::Receiver<Optio
                     _ => {}
                 }
             }
-            if failed || last_output.elapsed() > Duration::from_secs(15) { break; }
+            if failed { failure_since.get_or_insert_with(Instant::now); }
+            // Downstream failures can post upstream flow errors before their own bus message.
+            if let Some(since) = failure_since {
+                if since.elapsed() >= Duration::from_millis(100) { break; }
+                std::thread::sleep(Duration::from_millis(5));
+                continue;
+            }
+            if last_output.elapsed() > Duration::from_secs(15) { break; }
             if Instant::now() >= next {
                 let picture = pictures.borrow().clone();
                 if let Some(picture) = picture {
@@ -139,7 +151,7 @@ fn run(settings: Start, socket: Option<PathBuf>, pictures: watch::Receiver<Optio
                     let mut buffer = gst::Buffer::from_slice(bytes);
                     buffer.get_mut().unwrap().set_duration(gst::ClockTime::from_nseconds(interval.as_nanos() as u64));
                     if pipe.src.push_buffer(buffer).is_err() { break; }
-                    progress.lock().unwrap().frames += 1;
+                    progress.lock().unwrap_or_else(|e| e.into_inner()).frames += 1;
                 }
                 next += interval;
                 if next < Instant::now() { next = Instant::now() + interval; }
@@ -147,10 +159,13 @@ fn run(settings: Start, socket: Option<PathBuf>, pictures: watch::Receiver<Optio
                 let bytes = stats.get::<u64>("out-bytes-total").unwrap_or(0);
                 if bytes > last_bytes {
                     last_output = Instant::now();
-                    let mut p = progress.lock().unwrap();
+                    let mut p = progress.lock().unwrap_or_else(|e| e.into_inner());
                     p.bytes += bytes - last_bytes;
                     // Handshake bytes alone do not mean the media is being sent.
-                    if bytes > 8192 && p.state != State::Stopping { p.state = State::Sending; p.error = None; }
+                    if bytes > 8192 && p.state != State::Stopping {
+                        p.state = State::Sending; p.error = None;
+                        if sending_since.get_or_insert_with(Instant::now).elapsed() >= Duration::from_secs(10) { consecutive = 0; }
+                    }
                     last_bytes = bytes;
                 }
             }
@@ -158,14 +173,15 @@ fn run(settings: Start, socket: Option<PathBuf>, pictures: watch::Receiver<Optio
         }
         drop(pipe);
         if stop.load(Ordering::Relaxed) { break; }
-        if failed_audio || (failed_encoder && !failed_network) {
-            let mut p = progress.lock().unwrap(); p.state = State::Failed;
+        if !failed_network && (failed_audio || failed_encoder) {
+            let mut p = progress.lock().unwrap_or_else(|e| e.into_inner()); p.state = State::Failed;
             p.error = Some(if failed_audio { "Desktop audio became unavailable." } else { "Broadcast encoding failed." }.into());
             return;
         }
-        attempts += 1;
-        { let mut p = progress.lock().unwrap(); if p.state != State::Stopping { p.state = State::Reconnecting; } p.retries = attempts; p.error = Some("Destination disconnected or timed out. Check the address, key and network.".into()); }
-        let until = Instant::now() + Duration::from_secs(1u64 << attempts.min(5));
+        attempts = attempts.saturating_add(1);
+        consecutive = consecutive.saturating_add(1);
+        { let mut p = progress.lock().unwrap_or_else(|e| e.into_inner()); if p.state != State::Stopping { p.state = State::Reconnecting; } p.retries = attempts; p.error = Some("Destination disconnected or timed out. Check the address, key and network.".into()); }
+        let until = Instant::now() + Duration::from_secs(1u64 << consecutive.min(5));
         while !stop.load(Ordering::Relaxed) && Instant::now() < until { std::thread::sleep(Duration::from_millis(25)); }
     }
 }
