@@ -24,8 +24,8 @@ shallow checkouts and checkouts with no reachable release tag cannot derive a ve
 `make package-deb`, `make package-tar` and `make package-arch` build into `dist`. Debian needs
 `cargo-deb` and the Debian packaging tools; Arch needs `makepkg` and a non-root build user. The release
 workflow uses these same targets on their native distributions. Filenames and the binary's
-`--version` retain the `v` prefix. Debian metadata omits `v` and adds package revision `-1`; Arch
-metadata also spells `-dirty` as `.dirty`, because its version field cannot contain a hyphen.
+`--version` retain the `v` prefix. Debian and Arch metadata omit `v`, spell `-dirty` as `.dirty`,
+and add package revision `-1`, so `v0.1.2.3-dirty` becomes `0.1.2.3.dirty-1` in both packages.
 The Arch `PKGBUILD` in `packaging/arch` also derives the version when used directly.
 Package targets always derive their version from Git. `make check-version` runs the version fixtures
 with Python 3 and Git; run it in the Docker rig.

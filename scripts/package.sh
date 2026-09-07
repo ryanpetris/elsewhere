@@ -9,7 +9,8 @@ mkdir -p dist
 case "$kind" in
     deb)
         make build
-        cargo deb -p elsewhere --locked --no-build --deb-version "${ELSEWHERE_VERSION#v}-1" \
+        package_version=$(printf '%s' "${ELSEWHERE_VERSION#v}" | tr '-' '.')
+        cargo deb -p elsewhere --locked --no-build --deb-version "$package_version-1" \
             --output "dist/elsewhere_${ELSEWHERE_VERSION}-1_$(dpkg --print-architecture).deb"
         ;;
     tar)
