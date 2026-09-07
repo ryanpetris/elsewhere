@@ -406,7 +406,8 @@ Elsewhere is the session's notification daemon when no other runs. A panel is op
 
 The Broadcasts tab starts and stops independent desktop streams to RTMP/RTMPS services. Presets live
 in browser storage and share across instance paths on the same origin. The same controls are available
-through HTTP and MCP. See [desktop broadcasts](docs/broadcasts.md).
+through HTTP and MCP. See [desktop broadcasts](docs/broadcasts.md), including
+[YouTube and Twitch setup](docs/broadcasts.md#youtube-and-twitch-setup).
 
 The viewer lives in `web/` (React, Tailwind CSS, Vite) and is built into `web/dist`, which the binary
 embeds at compile time; `make` builds the viewer (Node 24) and then the binary, `make web` only the

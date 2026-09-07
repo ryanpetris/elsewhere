@@ -12,6 +12,91 @@ hostname, or port differences create separate storage. Tabs refresh presets thro
 Editing or removing a preset does not affect any running output. Running-stream status always
 comes from the currently connected host. Clearing browser storage removes presets.
 
+## YouTube and Twitch setup
+
+Service instructions and encoder recommendations checked against the linked official documentation
+on 2026-09-07. Elsewhere is the encoder in these instructions. Connect with a control token and
+open **Broadcasts → Add preset**. Choose **Desktop sound** if host audio is available, otherwise
+**Silence**, and choose whether to include the pointer. The preset name is a local label; set the
+public title, category, audience, and visibility on the service itself.
+
+### YouTube
+
+1. In [YouTube Studio](https://studio.youtube.com/), choose **Create → Go live**. Complete the
+   channel's live-streaming activation if prompted; first-time activation can take up to 24 hours.
+2. In Live Control Room, use **Stream** for an immediate broadcast, or **Manage → Schedule stream**
+   for a scheduled event. Set the title, audience, and visibility. Use **Unlisted** or **Private**
+   for a test. Open the intended event before copying its connection settings.
+3. Copy that event's RTMPS server URL into Elsewhere's **Ingest URL**, and its stream key into
+   **Stream key**. In **Stream settings → Stream URL**, click the lock icon to display the RTMPS
+   URL; the default displayed URL may be RTMP.
+   Keep the key separate from the URL. YouTube describes this in its
+   [RTMPS setup guide](https://support.google.com/youtube/answer/10364924?hl=en).
+4. Choose a YouTube row from the settings table below, then **Save preset → Start** in Elsewhere.
+   Check the preview and stream health in Live Control Room. Immediate streams can publish when
+   the encoder starts; for a scheduled event, click **Go live** when the preview is ready, unless
+   auto-start is enabled. Elsewhere's `sending` status alone does not confirm publication.
+5. To finish a scheduled event, click **End Stream** in YouTube and **Stop** on its Elsewhere output.
+   For an immediate stream, **Stop** in Elsewhere ends the encoder feed. Confirm the event has ended
+   in YouTube before leaving it. Closing the Elsewhere tab does not stop the feed.
+
+The [YouTube encoder walkthrough](https://support.google.com/youtube/answer/2907883?hl=en) covers
+immediate and scheduled events. For scheduled automation, check the event's auto-start and auto-stop
+options in [Live Control Room settings](https://support.google.com/youtube/answer/9854503?hl=en).
+
+### Twitch
+
+1. Open the [Twitch Creator Dashboard](https://dashboard.twitch.tv/). Under **Settings → Stream**,
+   copy your primary stream key into Elsewhere's **Stream key**. Complete any account setup Twitch
+   requests before the key is available. See the
+   [stream key FAQ](https://help.twitch.tv/s/article/twitch-stream-key-faq?language=en_US).
+2. Choose an endpoint from [Twitch's ingest recommendations](https://help.twitch.tv/s/twitch-ingest-recommendation?language=en_US).
+   Paste the server URL through `/app` into **Ingest URL**. Remove the trailing `/{stream_key}`
+   placeholder from the recommended endpoint; Elsewhere appends the separately entered key.
+   Use the scheme Twitch supplies. The connection originates on the Elsewhere host, so a regional
+   endpoint should suit that host's network, which may differ from your browser's location.
+3. Choose a Twitch row from the table below and **Save preset**. In Twitch's **Stream Manager →
+   Edit Stream Info**, set the public title and category before starting. See
+   [Twitch's category instructions](https://help.twitch.tv/s/article/about-twitch-categories).
+4. Press **Start** in Elsewhere. A normal Twitch ingest publishes to your channel as it receives
+   the stream; there is no separate YouTube-style preview approval step. Check Stream Manager
+   and your channel player for picture and sound. Press **Stop** in Elsewhere to end that feed.
+
+To test the connection without publishing, append `?bandwidthtest=true` to the **Stream key**,
+start the output, and inspect it in [Twitch Inspector](https://inspector.twitch.tv/). Stop the output,
+remove the suffix, save, and start again to go live. Editing a preset does not change a running
+output. Twitch documents the test parameter in its
+[broadcast URL guide](https://dev.twitch.tv/docs/video-broadcast/).
+
+### Encoding settings
+
+These video bitrates follow the services' H.264 recommendations. Start with 720p at 30 fps if you
+have not measured the host's encoding capacity and upload bandwidth.
+
+| Service | Width × height | Frame rate | Video bitrate, kbps |
+| --- | --- | --- | --- |
+| YouTube | 1280 × 720 | 30 | 4000 |
+| YouTube | 1280 × 720 | 60 | 6000 |
+| YouTube | 1920 × 1080 | 30 | 10000 |
+| YouTube | 1920 × 1080 | 60 | 12000 |
+| Twitch | 1280 × 720 | 30 | 3000 |
+| Twitch | 1280 × 720 | 60 | 4500 |
+| Twitch | 1920 × 1080 | 30 | 4500 |
+| Twitch | 1920 × 1080 | 60 | 6000 |
+
+Sources: [YouTube encoder settings](https://support.google.com/youtube/answer/2853702?hl=en) and
+[Twitch broadcasting guidelines](https://help.twitch.tv/s/article/broadcasting-guidelines?language=en_US).
+Elsewhere supplies H.264 CBR, two-second keyframes, and 128 kbps stereo AAC at 44.1 kHz automatically.
+The browser's viewing codec and quality controls do not configure these outputs. The desktop's
+refresh rate still limits unique pictures, as described below. These Twitch settings use a single
+video rendition; Elsewhere does not implement Twitch Enhanced Broadcasting.
+
+To broadcast to both services, save one preset for each and start both. Each output uses its own
+encoder and upload bandwidth. Allow upload capacity for the sum of the video bitrates, both audio
+tracks, and transport overhead. Stop each output separately. If an output keeps reconnecting,
+check the event or channel's current key and the URL/key split, then inspect service-side stream
+health. Copy a replacement key into the preset and stop/start the output to apply it.
+
 ## API and MCP
 
 HTTP and MCP call the same backend. Start takes all settings in one request and returns a runtime
