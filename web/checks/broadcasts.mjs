@@ -55,6 +55,7 @@ try {
   }
   assert.equal((await api('/start', { ...settings('bad-size', 19357), width: 641 })).status, 400);
   assert.equal((await api('/start', { ...settings('long-label', 19357), label: '界'.repeat(121) })).status, 400);
+  assert.equal((await api('/start', { ...settings('astral-label', 19357), label: '𝄞'.repeat(61) })).status, 400);
   await mcp('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'broadcast-check', version: '1' } });
   const tools = await mcp('tools/list', {});
   assert.ok(tools.result.tools.some(t => t.name === 'broadcast_start'));
@@ -62,7 +63,7 @@ try {
   assert.equal(denied.result.isError, true);
   const sinkA = await ingest(19357, 'capture-a'), sinkB = await ingest(19358, 'capture-b');
   await sleep(500);
-  const first = { ...settings('first', 19357), label: '界'.repeat(120) }, second = { ...settings('second', 19358, 60), width: 320, height: 240, cursor: false };
+  const first = { ...settings('first', 19357), label: '界'.repeat(120) }, second = { ...settings('second', 19358, 60), label: '𝄞'.repeat(60), width: 320, height: 240, cursor: false };
   const [a, duplicate] = await Promise.all([api('/start', first), api('/start', first)]);
   assert.equal(a.status, 200); assert.equal(a.body.id, duplicate.body.id);
   assert.equal((await api('/start', { ...first, bitrate_kbps: 900 })).status, 409);

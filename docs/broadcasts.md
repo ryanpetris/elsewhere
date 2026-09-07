@@ -44,12 +44,16 @@ hardware or upload bandwidth can sustain every combination.
 The compositor reads its rendered pixels once for CPU consumers. Broadcasts own those pixels and
 retain no compositor DMA buffer leases. Browser encoders keep their existing frame path. A worker
 repeats the latest picture at the requested rate (unique pictures remain limited by the desktop
-refresh rate, normally 30 Hz with software rendering and 60 Hz with GPU rendering), uses regular two-second keyframes, and scales
+refresh rate, normally 30 Hz with software rendering and 60 Hz with GPU rendering), uses regular
+two-second keyframes, and scales
 with letterboxing to a fixed output size when the desktop resizes. Pointer blending affects only
 the broadcast output. The browser controls are outside the generated desktop image.
 
 Video and audio use one GStreamer pipeline clock. Desktop audio captures the private output source;
-selecting it requires that source to be available. An audio failure fails the affected broadcast.
+selecting it requires that source to be available. An audio failure fails the affected broadcast
+unless the destination also fails in the same error-collection window. Coincident network failures
+retry and rebuild the pipeline; unavailable audio then fails initialization or capture once the
+destination is reachable.
 Silence generates an AAC track independently of desktop audio. There is no separate microphone mix.
 
 Raw input holds only the latest picture. Pipeline queues are bounded. Network errors retry with

@@ -178,12 +178,6 @@ try {
   for (const instance of [alice, bob]) {
     await instance.page.getByRole('button', { name: 'Broadcasts', exact: true }).click();
   }
-  let failPoll = true;
-  await alice.page.route('**/api/broadcasts', route => failPoll ? route.fulfill({ status: 502, contentType: 'text/plain', body: 'Upstream unavailable' }) : route.continue());
-  await alice.page.getByRole('alert').filter({ hasText: 'Broadcast request failed (HTTP 502).' }).waitFor();
-  failPoll = false;
-  await wait('broadcast polling recovers', async () => await alice.page.getByRole('alert').filter({ hasText: 'Broadcast request failed' }).count() === 0);
-  await alice.page.unroute('**/api/broadcasts');
   await alice.page.getByRole('button', { name: 'Add preset', exact: true }).click();
   const preset = alice.page.getByRole('form', { name: 'Broadcast preset' });
   await preset.getByLabel('Name', { exact: true }).fill('Shared broadcast check');
@@ -198,6 +192,17 @@ try {
   await participant.getByRole('button', { name: 'Connect', exact: true }).click();
   await participant.waitForFunction(() => window.elsewhere?.store.get().role === 'participant');
   await participant.getByRole('button', { name: 'Broadcasts', exact: true }).click();
+  await participant.route('**/api/broadcasts/start', route => route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'Invalid test destination.' }) }));
+  await participant.getByRole('button', { name: 'Start', exact: true }).click();
+  await participant.getByRole('alert').filter({ hasText: 'Invalid test destination.' }).waitFor();
+  await participant.unroute('**/api/broadcasts/start');
+  let failPoll = true;
+  await participant.route('**/api/broadcasts', route => failPoll ? route.fulfill({ status: 502, contentType: 'text/plain', body: 'Upstream unavailable' }) : route.continue());
+  await participant.getByRole('alert').filter({ hasText: 'Broadcast request failed (HTTP 502).' }).waitFor();
+  assert.equal(await participant.getByRole('alert').filter({ hasText: 'Invalid test destination.' }).count(), 1);
+  failPoll = false;
+  await wait('broadcast polling recovers', async () => await participant.getByRole('alert').filter({ hasText: 'Broadcast request failed' }).count() === 0);
+  await participant.unroute('**/api/broadcasts');
   await participant.getByRole('button', { name: 'Start', exact: true }).click();
   const authAlice = { Authorization: 'Bearer ' + alice.token };
   await wait('participant starts broadcast', async () => (await (await context.request.get(origin + alice.prefix + '/api/broadcasts', { headers: authAlice })).json()).length === 1);

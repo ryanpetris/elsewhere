@@ -116,6 +116,12 @@ MCP tools return the same failures as tool errors with the same text.
 
 ## Desktop broadcasts
 
+Broadcast workers repeat the newest picture at the requested frame rate. Unique pictures remain
+limited by desktop refresh, normally 30 Hz with software rendering and 60 Hz with GPU rendering.
+Destination failures retry until stopped, with backoff up to 32 seconds. Coincident audio and
+network errors retry; an audio failure without a destination failure ends that output.
+
+
 `broadcast_capabilities` reports encoder availability and limits. `broadcast_start` takes complete
 settings: `request_id`, `label`, `url`, `stream_key`, `width`, `height`, `fps`, `bitrate_kbps`,
 `audio` (`desktop` or `silence`), and `cursor` (boolean). Use a fresh request ID for each intended run.

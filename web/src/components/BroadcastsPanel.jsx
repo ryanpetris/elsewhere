@@ -60,7 +60,8 @@ export function BroadcastsPanel({ viewer, open }) {
   };
   return <div className="flex flex-col gap-4 p-3" data-broadcasts>
     <p className="text-xs text-zinc-400">Presets are saved in this browser and shared with desktops on the same origin. Running streams belong to this desktop.</p>
-    {(error || pollError) && <p role="alert" className="text-sm text-red-300">{error || pollError}</p>}
+    {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
+    {pollError && <p role="alert" className="text-sm text-red-300">{pollError}</p>}
     {caps && !caps.available && <p className="text-sm text-amber-300">{caps.error}</p>}
     {!acts && <p className="text-sm text-zinc-400">A control token is required to start or stop broadcasts.</p>}
     <div className="flex items-center justify-between"><h3 className="text-sm font-medium">Saved presets</h3><button className={buttonClass} onClick={() => setEdit(defaults())}>Add preset</button></div>
