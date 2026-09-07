@@ -2,14 +2,13 @@
 
 The server speaks two things: a binary WebSocket protocol for the viewer page and a JSON/PNG HTTP API
 for scripts. Both are guarded by two shared tokens from the data directory: `token`, the control token,
-which may do everything, and `viewer-token`, which may only look (the server prints its URL as "view
-only"): the video, the window list, elements, snapshots and the clipboard's text, but no input, window
+which may do everything, and `viewer-token`, which may only look (`elsewhere token --viewer` retrieves it): the video, the window list, elements, snapshots and the clipboard's text, but no input, window
 actions, programs or clipboard writes.
 
 ## Authentication
 
 - **Viewer page** (`/`, `/app.js`, `/app.css`): public. The token arrives once in the
-  URL fragment (`/#token=…`, the URLs the server prints), is moved into
+  URL fragment (`/#token=…`, supplied by the user), is moved into
   `sessionStorage` and stripped from the address bar; a page with no token shows a dialog asking for one.
 - **WebSocket** (`/ws`): the first message must be `AUTH` with a token. Until then the socket is
   nobody: nothing is processed. A wrong token, or five seconds of silence, closes it with code **4001**
@@ -128,7 +127,7 @@ the viewer's panel opens one, sized to the window). The same messages as `/ws`, 
 ## HTTP API
 
 ```sh
-T=$(cat ~/.config/elsewhere/token)
+T=$(elsewhere token)
 curl -s -H "Authorization: Bearer $T" https://host:8443/api/windows
 curl -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
      https://host:8443/api/control -d '{"id":3,"op":"minimize"}'
@@ -159,7 +158,7 @@ curl -s -H "Authorization: Bearer $T" https://host:8443/api/windows/3/elements  
 | `PUT /api/clipboard` | Body: UTF-8 text, a PNG with `Content-Type: image/png`, or `file://` URIs with `Content-Type: text/uri-list`; it becomes the desktop clipboard. `202`; `413` over 1 MiB of text or 16 MiB of image. |
 | `POST /api/clipboard/files` | Body `{"names": [...]}`, files of the transfer folder, or with `"batch"` of that staged batch: they become the desktop clipboard as a file manager's copy (`text/uri-list` and `x-special/gnome-copied-files`). `202`. |
 | `GET /api/clipboard/files/{index}` | The `index`th file of the URI list on the desktop clipboard, as an attachment. `404` when the clipboard holds no such list or entry. |
-| `POST /api/token/rotate` | Replaces both tokens: written to the data directory, printed as new URLs, returned as `{"token": …, "viewer_token": …}`; every session is closed with `4001 token rotated` and the old tokens stop working. Control token only; not an MCP tool. |
+| `POST /api/token/rotate` | Replaces both tokens: written to the data directory and returned as `{"token": …, "viewer_token": …}`; every session is closed with `4001 token rotated` and the old tokens stop working. Control token only; not an MCP tool. |
 | `GET /api/windows/{id}/elements` | The window's UI elements (below). `501` the server runs without `--elements`, `503` the tree couldn't be read: no D-Bus session or accessibility bus, the application went away, or 2 s passed (body: `{"error": …}`), `404` unknown id. |
 
 Status codes: `401` (empty body) missing or wrong bearer token; `403` `read-only token` from `POST

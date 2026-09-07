@@ -5,7 +5,7 @@ Generated from the code (`UPDATE_REFERENCE=1 cargo test -p elsewhere-server refe
 ## HTTP API
 
 Every `/api` request carries `Authorization: Bearer <token>`; `401` (empty body) otherwise. The
-viewer token (the server prints it as "view only") reads: the acting routes and tools answer `403`
+viewer token (`elsewhere token --viewer`) reads: the acting routes and tools answer `403`
 `read-only token` to it. The
 statuses in the table come with a JSON body `{"error": "..."}`. A request body the server can't read is
 rejected before that with a plain-text message: `400` invalid JSON, `415` missing
@@ -36,7 +36,7 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
 | `PUT /api/clipboard` | UTF-8 text body, a PNG with `Content-Type: image/png`, or `file://` URIs with `text/uri-list` | becomes the desktop clipboard; `202`; `413` over 1 MiB (text) or 16 MiB (PNG) |
 | `POST /api/clipboard/files` | `{"names": [...]}` from the transfer folder, or with `"batch"` from that staged batch | those files become the desktop clipboard, as a file manager's copy; `202` |
 | `GET /api/clipboard/files/{index}` | | control token; the `index`th file on the desktop clipboard, as an attachment; `404` |
-| `POST /api/token/rotate` | | `{"token": …, "viewer_token": …}`: new tokens replace both at once (files, viewers, API); the server prints the new URLs |
+| `POST /api/token/rotate` | | `{"token": …, "viewer_token": …}`: new tokens replace both at once (files, viewers, API); the CLI reads the new tokens from their files |
 | `POST /mcp` | MCP Streamable HTTP | the tools below |
 | `GET /skill/SKILL.md`, `GET /skill/reference.md` | no token needed | this documentation |
 

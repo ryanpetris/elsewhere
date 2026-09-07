@@ -13,7 +13,7 @@ of a window, and a small desktop UI in the viewer built on the same data. Wire f
 | Window identity | `u64` from a counter, stored in the `Window` user data on first sight. Stable, never reused. |
 | Where the page talks | The existing WebSocket: `Windows` (server → client) and `Control` (client → server) JSON messages. |
 | Where scripts talk | `/api/...` on the same axum router, bearer token. |
-| Two tokens | The control token acts; the viewer token (`viewer-token`, printed as "view only") reads: window list, elements, snapshots, the clipboard (text, image, copied files), the video. Acting routes answer `403`, acting MCP tools a tool error. |
+| Two tokens | The control token acts; the viewer token (`viewer-token`, retrieved with `elsewhere token --viewer`) reads: window list, elements, snapshots, the clipboard (text, image, copied files), the video. Acting routes answer `403`, acting MCP tools a tool error. |
 | Several viewers | Each session has its own encoder (codec and size of its own); one controller at a time drives input and sizes the output, the first control-token session or whoever took control last; the rest watch letterboxed. |
 | "Focused" | The compositor's intent: the window `focus_window` last activated (or that was just mapped), not the client-acknowledged xdg state, which lags a round trip and is wrong for a hung client. |
 | Update timestamps | Whole-second resolution. It is part of the diffed list, so finer resolution would turn a 60 fps client into sixty lists a second. |
@@ -651,7 +651,7 @@ rendering is bounded by the one-in-flight rule and the pixel cap. The viewer rec
 its URL fragment (so it never reaches the server's or a proxy's log), moves it into `sessionStorage` (this
 tab only) and strips it from the address bar, so the URL can be shared or bookmarked without it; a tab with no token shows a dialog asking for one. `POST /api/token/rotate`
 (control token) replaces both tokens everywhere at once and closes every session with `4001 token
-rotated`; the server prints the new URLs. Per-person tokens with individual revocation are not implemented. Window streams (`/ws/window/{id}`)
+rotated`; the CLI reads the new tokens from their files. Per-person tokens with individual revocation are not implemented. Window streams (`/ws/window/{id}`)
 cost an encoder and a swapchain each and are not limited: the token holder is trusted with that.
 
 ## Deferred

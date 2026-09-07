@@ -273,7 +273,7 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
         // Compare this with the browser's certificate viewer before accepting the warning.
         println!("certificate SHA-256: {}", fingerprint(cert)?);
     }
-    app.print_urls();
+    app.print_access();
 
     if let Some((cert, key)) = tls_pem {
         let tls = axum_server::tls_rustls::RustlsConfig::from_pem(cert, key).await?;
@@ -510,7 +510,7 @@ async fn api_control(Extension(key): Extension<Key>, State(app): State<Arc<App>>
     }
 }
 
-/// New tokens, both: written to the data directory, printed like at startup, returned to the caller;
+/// New tokens, both: written to the data directory and returned to the caller;
 /// every viewer is closed with "token rotated" so a leaked link stops working at once.
 async fn api_token_rotate(headers: HeaderMap, State(app): State<Arc<App>>) -> Response {
     let presented = headers.get(header::AUTHORIZATION).and_then(|a| a.to_str().ok()).and_then(|a| a.strip_prefix("Bearer ")).unwrap_or_default();
@@ -599,14 +599,14 @@ impl App {
         }
     }
 
-    /// The tokens ride in the URL fragment, which browsers never send, so no server or proxy logs them.
-    fn print_urls(&self) {
+    /// Connection URLs and local retrieval instructions contain no token values.
+    fn print_access(&self) {
         let scheme = if self.tls { "https" } else { "http" };
-        let (control, viewer) = &*self.tokens.read().unwrap();
         for ip in lan_ips() {
-            println!("{scheme}://{ip}:{}/#token={control}", self.port);
-            println!("{scheme}://{ip}:{}/#token={viewer}   (view only)", self.port);
+            println!("{scheme}://{ip}:{}/", self.port);
         }
+        println!("Tokens are stored in {}", self.data_dir.display());
+        println!("Run `elsewhere token` for control or `elsewhere token --viewer` for read-only access, using the same user and XDG_CONFIG_HOME as the server.");
     }
 
     /// Only the holder of the current control token may rotate, checked again under the write lock so
@@ -636,8 +636,8 @@ impl App {
         }
         self.window_viewers.lock().unwrap().clear();
         let _ = self.commands.send(Command::ReleaseAllInput);
-        println!("tokens rotated; new viewer URLs:");
-        self.print_urls();
+        println!("tokens rotated");
+        self.print_access();
         Ok(fresh)
     }
 }

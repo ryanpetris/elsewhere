@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, path::PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use elsewhere_core::{Codec, FrameSink, StreamControl};
 use clap::Parser;
 use tokio::sync::mpsc;
@@ -10,6 +10,8 @@ mod audio;
 #[derive(Parser)]
 #[command(about = "A Wayland compositor whose screen is a browser tab", version = env!("ELSEWHERE_VERSION"))]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Operation>,
     #[arg(long, hide = true)]
     audio_worker: bool,
     /// Address to serve the viewer on.
@@ -84,6 +86,16 @@ struct Cli {
     files_dir: Option<PathBuf>,
 }
 
+#[derive(clap::Subcommand)]
+enum Operation {
+    /// Print an existing token from the server's configuration directory without starting the server.
+    Token {
+        /// Print the read-only viewer token instead of the control token.
+        #[arg(long)]
+        viewer: bool,
+    },
+}
+
 const DEFAULT_RENDER_NODE: &str = "/dev/dri/renderD128";
 
 fn parse_screen_size(value: &str) -> std::result::Result<(u32, u32), String> {
@@ -95,6 +107,13 @@ fn parse_screen_size(value: &str) -> std::result::Result<(u32, u32), String> {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    if let Some(Operation::Token { viewer }) = cli.command {
+        let path = elsewhere_server::Config::default_data_dir()?.join(if viewer { "viewer-token" } else { "token" });
+        let token = std::fs::read_to_string(&path).with_context(|| format!("read saved token from {}; start Elsewhere once with this configuration to create tokens", path.display()))?;
+        anyhow::ensure!(!token.trim().is_empty(), "saved token file is empty: {}", path.display());
+        println!("{}", token.trim());
+        return Ok(());
+    }
     if cli.audio_worker {
         tracing_subscriber::fmt().with_writer(std::io::stderr).init();
         return audio::worker();

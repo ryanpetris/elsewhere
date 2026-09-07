@@ -258,7 +258,7 @@ and panel, Firefox, Chromium, PipeWire and Mesa's GL and Vulkan drivers (`make d
 needs no panel: the viewer's application menu (`GET /api/applications`, from the `.desktop` files) and
 power menu, with its window list, stand in for one. Practical notes: `--exec` runs at startup, with a
 Wayland session's environment; nested desktops need `--kiosk`; the data directory should be persisted in
-containers or every start prints a new token.
+containers or each new container creates new tokens.
 
 ## Known limitations
 

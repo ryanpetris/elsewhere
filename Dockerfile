@@ -15,11 +15,11 @@
 # encodes. For the browser's webcam, load v4l2loopback on the host
 # and add `--device /dev/videoN --group-add $(stat -c %g /dev/videoN)` to docker run and `--webcam /dev/videoN`
 # after the image name.
-# Open the https://<host>:8443/#token=... URL that `docker logs` prints, with <host> being the Docker
-# host's address (the log shows the container's own), and accept the self-signed certificate. The
-# volume keeps the token and certificate across runs; without it every run prints a new token and
-# old URLs get "wrong token". The page keeps the token in its sessionStorage (no cookies). Two URLs are
-# printed: the control token and a view-only one; any number of viewers, one controls at a time.
+# Open a plain https://<host>:8443/ URL from the startup log and accept the self-signed certificate
+# after checking its fingerprint. Use `docker exec <container> elsewhere token` to retrieve the
+# control token, or add `--viewer` for read-only access, and paste it into the connection dialog.
+# The volume keeps tokens and certificates across runs; without it each new container creates new
+# tokens and old tokens stop working. Any number of viewers can connect; one controls at a time.
 # Arguments after the image name go to elsewhere, e.g. `... elsewhere --codec h264`.
 # If /dev/dri/renderD128 isn't world-accessible on the host, add `--group-add $(stat -c %g /dev/dri/renderD128)`.
 # Hardware encoding uses the host GPU through VA-API: Intel (iHD) and AMD (Mesa) drivers are included,

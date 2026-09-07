@@ -50,15 +50,27 @@ make run ARGS="--exec foot"                   # any Wayland client; WAYLAND_DISP
 
 (`make web` once, then plain `cargo run --release -- --exec foot` works too.)
 
-The server prints the certificate fingerprint and two URLs like `https://<lan-ip>:8443/#token=…`: one
-with the control token, one with the view-only token. Open the first in a browser on the LAN, compare
-the fingerprint before accepting the self-signed certificate, and the desktop appears. The desktop takes
-the size of the controlling viewer's display area; the fullscreen button hands it the whole screen, with
+The server prints its certificate fingerprint and plain connection URLs, without tokens. Open a URL
+in a browser, compare the fingerprint before accepting the self-signed certificate, and paste a token
+into the connection dialog. Retrieve an existing token on the server with:
+
+```sh
+elsewhere token           # control access
+elsewhere token --viewer  # read-only access
+```
+
+Use the same user and environment as the running server. Tokens are stored in
+`$XDG_CONFIG_HOME/elsewhere/token` and `viewer-token`, or `~/.config/elsewhere/` when
+`XDG_CONFIG_HOME` is unset. The command only reads the selected file; it does not start the server,
+create files or rotate tokens. Start the server once to create tokens. In Docker, run
+`docker exec <container> elsewhere token`, adding `--viewer` for read-only access.
+
+The desktop takes the size of the controlling viewer's display area; the fullscreen button hands it the whole screen, with
 keyboard lock so shortcuts like Ctrl+W reach the desktop.
 
 Any number of people can watch at once, each with a stream scaled to their own window. The first to
 connect with the control token drives the pointer and keyboard; anyone else with that token sees a
-"Take control" button, and the desktop then takes their window's size. Whoever opens the view-only URL
+"Take control" button, and the desktop then takes their window's size. Anyone using the view-only token
 can watch, read the window list and elements, and take snapshots, but not act.
 
 Use `--screen-size 1920x1080` to set a fixed desktop resolution from startup. Browser resizes and
@@ -311,10 +323,11 @@ asking for one. There are no cookies and a token is never in a URL the server se
 works for everything below that reads (the window list, elements, snapshots, the clipboard, copied files
 included) and
 gets `403` for everything that acts. `POST /api/token/rotate` (with the control token) issues new
-tokens: the files, the API and every viewer switch at once and the server prints the new URLs.
+tokens: the files, the API and every viewer switch at once. The API returns the new tokens;
+`elsewhere token` reads the updated files. Token values are not printed to server output.
 
 ```sh
-T=$(cat ~/.config/elsewhere/token)
+T=$(elsewhere token)
 curl -s -H "Authorization: Bearer $T" http://host:8443/api/windows | jq        # the window list
 curl -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
      http://host:8443/api/control -d '{"id":3,"op":"minimize"}'                # act on a window

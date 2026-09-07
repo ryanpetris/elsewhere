@@ -1,4 +1,4 @@
-// No usable token: ask for the one the server printed. The page reloads with it in sessionStorage.
+// No usable token: ask for a token retrieved on the server. The page reloads with it in sessionStorage.
 import { useState } from 'react';
 import { KeyRound } from 'lucide-react';
 import { useStore } from '../store.js';
@@ -22,7 +22,7 @@ export function TokenForm({ viewer }) {
           <h2 className="text-base font-semibold">Connect to the desktop</h2>
         </div>
         <p className="mt-2 text-sm text-zinc-400">
-          {status === 'unauthorized' ? `${reason}. ` : ''}Paste the token the server printed at startup (the part after <span className="font-mono">#token=</span> in its URL).
+          {status === 'unauthorized' ? `${reason}. ` : ''}Paste a token from the server. Run <code>elsewhere token</code> there for control access, or <code>elsewhere token --viewer</code> for read-only access.
         </p>
         <input
           autoFocus

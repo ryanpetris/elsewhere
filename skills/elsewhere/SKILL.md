@@ -7,7 +7,7 @@ description: Drive an Elsewhere desktop (Wayland compositor streamed to a browse
 
 Elsewhere is a Wayland compositor whose screen is a browser tab. It is also the window manager,
 so it can tell you what is on the screen and act on it. You talk to it over HTTP with a bearer token
-(the same token the server prints in the viewer URL as `#token=`), or through its MCP tools, which are the same
+(retrieve it on the server with `elsewhere token`), or through its MCP tools, which are the same
 operations under the same names. `reference.md` next to this file lists every route, tool and field.
 
 ```sh

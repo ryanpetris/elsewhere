@@ -33,7 +33,7 @@ const ROUTES: &str = "\
 | `PUT /api/clipboard` | UTF-8 text body, a PNG with `Content-Type: image/png`, or `file://` URIs with `text/uri-list` | becomes the desktop clipboard; `202`; `413` over 1 MiB (text) or 16 MiB (PNG) |
 | `POST /api/clipboard/files` | `{\"names\": [...]}` from the transfer folder, or with `\"batch\"` from that staged batch | those files become the desktop clipboard, as a file manager's copy; `202` |
 | `GET /api/clipboard/files/{index}` | | control token; the `index`th file on the desktop clipboard, as an attachment; `404` |
-| `POST /api/token/rotate` | | `{\"token\": …, \"viewer_token\": …}`: new tokens replace both at once (files, viewers, API); the server prints the new URLs |
+| `POST /api/token/rotate` | | `{\"token\": …, \"viewer_token\": …}`: new tokens replace both at once (files, viewers, API); the CLI reads the new tokens from their files |
 | `POST /mcp` | MCP Streamable HTTP | the tools below |
 | `GET /skill/SKILL.md`, `GET /skill/reference.md` | no token needed | this documentation |
 ";
@@ -46,7 +46,7 @@ pub fn markdown() -> String {
     let mut out = String::new();
     out.push_str("# Elsewhere API and MCP reference\n\n");
     out.push_str("Generated from the code (`UPDATE_REFERENCE=1 cargo test -p elsewhere-server reference`); do not edit.\n\n");
-    out.push_str("## HTTP API\n\nEvery `/api` request carries `Authorization: Bearer <token>`; `401` (empty body) otherwise. The\nviewer token (the server prints it as \"view only\") reads: the acting routes and tools answer `403`\n`read-only token` to it. The\nstatuses in the table come with a JSON body `{\"error\": \"...\"}`. A request body the server can't read is\nrejected before that with a plain-text message: `400` invalid JSON, `415` missing\n`Content-Type: application/json`, `422` wrong shape. Coordinates are logical pixels.\n\n");
+    out.push_str("## HTTP API\n\nEvery `/api` request carries `Authorization: Bearer <token>`; `401` (empty body) otherwise. The\nviewer token (`elsewhere token --viewer`) reads: the acting routes and tools answer `403`\n`read-only token` to it. The\nstatuses in the table come with a JSON body `{\"error\": \"...\"}`. A request body the server can't read is\nrejected before that with a plain-text message: `400` invalid JSON, `415` missing\n`Content-Type: application/json`, `422` wrong shape. Coordinates are logical pixels.\n\n");
     out.push_str(ROUTES);
     for (name, s) in [("Window", schema::<WindowInfo>()), ("Application", schema::<AppInfo>()), ("Notification", schema::<crate::notify::Notification>()), ("FileQuery", schema::<crate::files::FileQuery>()), ("FileListing", schema::<crate::files::FileListing>()), ("FileAction", schema::<crate::files::FileAction>()), ("SavedFile", schema::<crate::files::SavedFile>()), ("Control", schema::<ControlMsg>()), ("Input", schema::<InputMsg>()), ("Elements", schema::<Page>())] {
         out.push_str(&format!("\n## {name}\n\n```json\n{s}\n```\n"));
