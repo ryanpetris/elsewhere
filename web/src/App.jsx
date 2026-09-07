@@ -13,6 +13,7 @@ import { Settings } from './components/Settings.jsx';
 import { MixerPanel } from './components/MixerPanel.jsx';
 import { AudioPanel } from './components/AudioPanel.jsx';
 import { Keyboard, focusKeyboard } from './components/Keyboard.jsx';
+import '@xterm/xterm/css/xterm.css';
 
 // A remembered on/off switch.
 function usePref(key, fallback) {
@@ -27,6 +28,17 @@ export function App({ viewer }) {
   const [audioPanel, setAudioPanel] = useState(false);
   const [mixerPanel, setMixerPanel] = useState(false);
   const [keyboard, setKeyboard] = useState(false);
+  const [terminal, setTerminal] = useState(false);
+  const [TerminalPanel, setTerminalPanel] = useState(null);
+  const [terminalError, setTerminalError] = useState(null);
+  const toggleTerminal = () => {
+    if (terminal) { setTerminal(false); return; }
+    setTerminal(true); setTerminalError(null);
+    if (!TerminalPanel) import('./components/TerminalPanel.jsx')
+      .then(module => setTerminalPanel(() => module.default))
+      .catch(() => setTerminalError('Terminal could not load. Reload the page to retry.'));
+  };
+  const closeTerminal = () => { setTerminal(false); document.getElementById('terminal-toggle')?.focus(); };
   const [borders, setBorders] = usePref('borders', false);
   const [elements, setElements] = usePref('elements', false);
   const [tab, setTab] = useState('windows');
@@ -57,6 +69,7 @@ export function App({ viewer }) {
         onFullscreen={viewer.fullscreen}
         menu={menu} onMenu={m => setMenu(menu === m ? null : m)}
         keyboard={keyboard} onKeyboard={() => (keyboard ? focusKeyboard() : setKeyboard(true))}
+        terminal={terminal} onTerminal={toggleTerminal}
       />
       {menu === 'about' && !fullscreen && <About viewer={viewer} onClose={closeMenu} />}
       {menu === 'apps' && <Launcher viewer={viewer} onClose={closeMenu} />}
@@ -68,6 +81,9 @@ export function App({ viewer }) {
         {!windowMode && !PIP && <Sidebar viewer={viewer} tab={tab} onTab={setTab} hidden={!sidebar || fullscreen} />}
       </div>
       {keyboard && <Keyboard viewer={viewer} onClose={() => setKeyboard(false)} />}
+      {terminal && role !== 'viewer' && !PIP && (TerminalPanel
+        ? <TerminalPanel viewer={viewer} onClose={closeTerminal} />
+        : <div className="flex items-center gap-3 p-3 text-sm"><span role="status">{terminalError || 'Opening terminal…'}</span><button type="button" onClick={closeTerminal}>Close terminal</button></div>)}
       {audioPanel && !windowMode && <AudioPanel viewer={viewer} hidden={fullscreen} onClose={() => setAudioPanel(false)} />}
       {mixerPanel && !windowMode && <MixerPanel viewer={viewer} hidden={fullscreen} onClose={() => { setMixerPanel(false); document.getElementById('session-mixer-toggle')?.focus(); }} />}
       {!PIP && <StatusBar mixerPanel={mixerPanel} onMixer={!windowMode ? () => setMixerPanel(!mixerPanel) : undefined} viewer={viewer} audioPanel={audioPanel} onAudioPanel={!windowMode ? () => setAudioPanel(!audioPanel) : undefined} />}

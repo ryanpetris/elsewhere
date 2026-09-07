@@ -516,6 +516,31 @@ browser shortcuts. The checks live in `web/checks/picture-in-picture.mjs` and
 `web/checks/picture-in-picture-firefox.mjs`; they require the Docker release build, display `:95`,
 `wev`, and a geckodriver on port 4445 for Firefox.
 
+## Browser terminal
+
+The desktop toolbar's Terminal button opens an interactive shell for control-token holders, including
+participants. It has its own PTY, so shell typing does not require taking control of the desktop.
+Commands inherit the same current Wayland, Xwayland, toolkit, session-bus and private audio environment
+as programs launched from the desktop. `SHELL` selects the executable, with `/bin/sh` as the fallback;
+it runs with `-i` and `TERM=xterm-256color`. A graphical command opens on the active desktop.
+
+The terminal supports interactive programs, job control, scrollback and resizing. Closing the panel,
+leaving the page or losing its socket closes the PTY and reaps the shell. Detached applications follow
+normal terminal hangup behavior. A disconnected session offers New shell; it does not replay input or
+resume the old process. Read-only tokens cannot start a terminal. Token rotation revokes terminal input
+and closes idle terminal connections on the next 200 ms check.
+
+`/ws/terminal` uses the same first binary AUTH frame as the viewer. Subsequent binary frames carry raw
+terminal input and output. Client text frames contain either `{ "cols": 80, "rows": 24 }` or
+`{ "ack": 123 }`, acknowledging the number of output bytes rendered. The server permits at most
+256 KiB of unacknowledged output and queued input, and at most 64 KiB per incoming frame. Sizes must
+be 2–1000 columns and 1–1000 rows. The browser uses xterm.js and its FitAddon, loaded when the panel opens.
+
+`npm run check:terminal` in the Docker rig checks real shell commands, environment equality with
+desktop launches, a Wayland application, Ctrl+C, Ctrl+Z, PTY resizing, output beyond the acknowledgement
+window, shell cleanup, read-only denial and token rotation. It needs Chromium, foot, the private audio
+stack and a release binary; `ELSEWHERE_BINARY` can select a build mounted into the image.
+
 ## Browser UI (`web/src`)
 
 React and Tailwind, built by Vite into `web/dist` by `make web` and embedded (see the README). The engine

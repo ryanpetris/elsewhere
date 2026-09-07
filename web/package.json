@@ -7,9 +7,12 @@
     "build": "vite build",
     "check:visualiser": "node checks/visualiser.mjs",
     "check:structured-input": "node checks/structured-input.mjs",
-    "check:clipboard-firefox": "node checks/clipboard-firefox.mjs"
+    "check:clipboard-firefox": "node checks/clipboard-firefox.mjs",
+    "check:terminal": "node checks/terminal.mjs"
   },
   "dependencies": {
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
     "audiomotion-analyzer": "4.5.4",
     "lucide-react": "^1.41.0",
     "react": "^19.2.8",

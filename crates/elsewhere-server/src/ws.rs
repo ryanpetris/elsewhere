@@ -101,7 +101,7 @@ pub async fn forward_events(app: Arc<App>, mut rx: mpsc::UnboundedReceiver<Event
 
 /// The first message must be AUTH with a token; until then this socket is nobody. A wrong token, or
 /// five seconds of silence, ends it. Returns the token the session came in with and which one it is.
-async fn authenticate(socket: &mut WebSocket, app: &App) -> Option<(String, Key)> {
+pub(super) async fn authenticate(socket: &mut WebSocket, app: &App) -> Option<(String, Key)> {
     let auth = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match socket.recv().await {

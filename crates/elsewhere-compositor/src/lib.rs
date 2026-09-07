@@ -401,10 +401,20 @@ impl State {
     /// Run a shell command as a client of this compositor: WAYLAND_DISPLAY, DISPLAY and a Wayland
     /// session's environment set.
     pub fn spawn_client(&self, cmd: &str) {
-        let mut command = std::process::Command::new("sh");
+        let mut command = self.client_command(std::ffi::OsStr::new("sh"));
+        command.arg("-c").arg(cmd);
+        match command.spawn() {
+            Ok(mut child) => {
+                let cmd = cmd.to_string();
+                std::thread::spawn(move || tracing::info!(cmd, status = ?child.wait(), "client exited"));
+            }
+            Err(e) => tracing::error!("spawn {cmd:?}: {e}"),
+        }
+    }
+
+    pub(crate) fn client_command(&self, program: &std::ffi::OsStr) -> std::process::Command {
+        let mut command = std::process::Command::new(program);
         command
-            .arg("-c")
-            .arg(cmd)
             .env("WAYLAND_DISPLAY", &self.socket_name)
             .env_remove("WAYLAND_SOCKET")
             // the environment a Wayland session gives its programs: each toolkit's own switch, and the
@@ -424,13 +434,7 @@ impl State {
             Some(d) => command.env("DISPLAY", format!(":{d}")),
             None => command.env_remove("DISPLAY"),
         };
-        match command.spawn() {
-            Ok(mut child) => {
-                let cmd = cmd.to_string();
-                std::thread::spawn(move || tracing::info!(cmd, status = ?child.wait(), "client exited"));
-            }
-            Err(e) => tracing::error!("spawn {cmd:?}: {e}"),
-        }
+        command
     }
 
     fn run(mut self, event_loop: &mut EventLoop<'static, State>, rx: channel::Channel<Command>) {

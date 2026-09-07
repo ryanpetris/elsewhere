@@ -131,6 +131,12 @@ impl State {
                 self.pointer_motion(self.pointer_location);
             }
             Command::Control(msg) => self.control(msg),
+            Command::ShellCommand { reply } => {
+                let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
+                let mut command = self.client_command(&shell);
+                command.arg("-i");
+                let _ = reply.send(command);
+            }
             Command::Snapshot { id, sizing, reply } => (reply.0)(self.snapshot(id, sizing)),
             Command::WindowIcon { id, reply } => (reply.0)(self.window_icon(id)),
             Command::WindowStream { key, window, sink: Some(sink) } => self.start_window_stream(key, window, sink),

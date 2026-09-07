@@ -1,4 +1,4 @@
-import { PictureInPicture2, CornerUpLeft, Expand, Eye, Info, Hand, Keyboard, LayoutGrid, LayoutList, MousePointer2, PanelRight, Power, Settings } from 'lucide-react';
+import { PictureInPicture2, CornerUpLeft, Expand, Eye, Info, Hand, Keyboard, LayoutGrid, LayoutList, MousePointer2, PanelRight, Power, Settings, Terminal } from 'lucide-react';
 import { useStore } from '../store.js';
 import { WINDOW, PIP } from '../api.js';
 import { IconButton, codecName } from './ui.jsx';
@@ -14,7 +14,7 @@ const STATUS = {
   quit: ['bg-zinc-500', 'Shut down'],
 };
 
-export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, menu, onMenu, keyboard, onKeyboard }) {
+export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, menu, onMenu, keyboard, onKeyboard, terminal, onTerminal }) {
   const status = useStore(viewer.store, s => s.status);
   const stream = useStore(viewer.store, s => s.stream);
   const windowTitle = useStore(viewer.store, s => s.windowTitle);
@@ -41,6 +41,7 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, m
         <span className="hidden truncate sm:inline">{windowMode ? windowTitle || `Window ${WINDOW}` : 'Elsewhere'}</span>
       </div>
       {acts && <IconButton data-menu-trigger id="apps-toggle" icon={LayoutGrid} label="Applications" active={menu === 'apps'} onClick={() => onMenu('apps')} />}
+      {acts && <IconButton id="terminal-toggle" icon={Terminal} label="Terminal" active={terminal} onClick={onTerminal} />}
       <div className="flex min-w-0 shrink-0 items-center gap-2 text-xs text-zinc-400">
         <span className={`size-2 shrink-0 rounded-full ${dot}`} title={text} />
         <span className="hidden truncate sm:inline">{text}</span>

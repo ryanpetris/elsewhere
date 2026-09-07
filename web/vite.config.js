@@ -18,7 +18,10 @@ export default defineConfig({
     generateBundle() {
       const notice = readFileSync(new URL('../LICENSE', import.meta.url), 'utf8')
         + '\naudioMotion-analyzer 4.5.4: AGPL-3.0-or-later. Source and build instructions: https://github.com/ryanpetris/elsewhere. The viewer build omits the library context-resumption click listener.\n\n'
-        + readFileSync(new URL('node_modules/audiomotion-analyzer/LICENSE', import.meta.url), 'utf8');
+        + readFileSync(new URL('node_modules/audiomotion-analyzer/LICENSE', import.meta.url), 'utf8')
+        + '\n\nxterm.js and FitAddon:\n'
+        + readFileSync(new URL('node_modules/@xterm/xterm/LICENSE', import.meta.url), 'utf8')
+        + '\n' + readFileSync(new URL('node_modules/@xterm/addon-fit/LICENSE', import.meta.url), 'utf8');
       this.emitFile({ type: 'asset', fileName: 'THIRD_PARTY.txt', source: notice });
       this.emitFile({ type: 'asset', fileName: 'assets/license-notices.txt', source: notice });
     },

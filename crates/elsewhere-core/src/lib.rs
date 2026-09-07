@@ -51,6 +51,8 @@ pub enum Command {
     ResumePointerLock,
     /// A window action or spawn from the viewer page or the HTTP API.
     Control(ControlMsg),
+    /// Prepare an interactive shell with the current desktop client environment.
+    ShellCommand { reply: std::sync::mpsc::Sender<std::process::Command> },
     /// Text or an image (`image/png`) from the browser or the API becomes the desktop clipboard.
     SetClipboard { mime: String, data: Vec<u8> },
     /// The browser is dragging local files over the desktop (the pointer is already where the drag is).

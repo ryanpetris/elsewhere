@@ -16,6 +16,7 @@ mod protocol;
 #[cfg(test)]
 mod reference;
 mod ws;
+mod terminal;
 
 use std::{
     collections::HashMap,
@@ -237,6 +238,7 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
         .route("/assets/{*path}", get(web_asset))
         .route("/ws", get(websocket))
         .route("/ws/window/{id}", get(window_websocket))
+        .route("/ws/terminal", get(terminal::upgrade))
         .merge(
             Router::new()
                 .route("/api/windows", get(api_windows))
