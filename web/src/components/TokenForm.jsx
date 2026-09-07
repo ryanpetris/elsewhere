@@ -1,3 +1,4 @@
+import { storageKey } from '../urls.js';
 // No usable token: ask for a token retrieved on the server. The page reloads with it in sessionStorage.
 import { useState } from 'react';
 import { KeyRound } from 'lucide-react';
@@ -11,7 +12,7 @@ export function TokenForm({ viewer }) {
     e.preventDefault();
     const t = token.trim();
     if (!t) return;
-    try { sessionStorage.setItem('elsewhere.token', t); } catch {}
+    try { sessionStorage.setItem(storageKey('token'), t); } catch {}
     location.reload();
   };
   return (

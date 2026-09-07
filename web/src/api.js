@@ -1,3 +1,5 @@
+import { url, storageKey } from './urls.js';
+
 // The token and the HTTP API. The token arrives once in the URL fragment (`#token=`, which never
 // reaches the server or a proxy log), then lives in sessionStorage (this
 // tab only, copied into popups this page opens) and leaves the address bar.
@@ -5,13 +7,13 @@ export const TOKEN = (() => {
   const url = new URL(location);
   const t = new URLSearchParams(url.hash.slice(1)).get('token');
   if (t) {
-    try { sessionStorage.setItem('elsewhere.token', t); } catch {}
+    try { sessionStorage.setItem(storageKey('token'), t); } catch {}
     url.hash = '';
   }
   url.searchParams.delete('token');
   try { history.replaceState(null, '', url); } catch {}
   if (t) return t;
-  try { return sessionStorage.getItem('elsewhere.token') ?? ''; } catch { return ''; }
+  try { return sessionStorage.getItem(storageKey('token')) ?? ''; } catch { return ''; }
 })();
 
 /// `?window=ID`: this tab shows one application window as its own stream.
@@ -24,7 +26,7 @@ export const PIP = (() => {
 })();
 
 /// fetch() with the bearer token.
-export const api = (path, init = {}) => fetch(path, { ...init, headers: { ...init.headers, Authorization: `Bearer ${TOKEN}` } });
+export const api = (path, init = {}) => fetch(url(path), { ...init, headers: { ...init.headers, Authorization: `Bearer ${TOKEN}` } });
 export const snapshotUrl = (id, sizing = {}) => `${id == null ? '/api/screenshot.png' : `/api/windows/${id}/snapshot.png`}?${new URLSearchParams(sizing)}`;
 export const snapshot = async (id, sizing = {}, signal) => {
   const response = await api(snapshotUrl(id, sizing), { signal });
@@ -84,9 +86,9 @@ export const queueSnapshot = run => (queue = queue.then(run, run));
 
 /// A remembered UI preference.
 export const pref = {
-  get: (key, fallback) => { try { const v = localStorage.getItem(`elsewhere.${key}`); return v === null ? fallback : v === '1'; } catch { return fallback; } },
-  set: (key, on) => { try { localStorage.setItem(`elsewhere.${key}`, on ? '1' : '0'); } catch {} },
-  getStr: (key, fallback) => { try { return localStorage.getItem(`elsewhere.${key}`) ?? fallback; } catch { return fallback; } },
-  setStr: (key, v) => { try { localStorage.setItem(`elsewhere.${key}`, v); } catch {} },
+  get: (key, fallback) => { try { const v = localStorage.getItem(storageKey(key)); return v === null ? fallback : v === '1'; } catch { return fallback; } },
+  set: (key, on) => { try { localStorage.setItem(storageKey(key), on ? '1' : '0'); } catch {} },
+  getStr: (key, fallback) => { try { return localStorage.getItem(storageKey(key)) ?? fallback; } catch { return fallback; } },
+  setStr: (key, v) => { try { localStorage.setItem(storageKey(key), v); } catch {} },
 };
 export const codecs = async () => (await api('/api/codecs')).json();

@@ -25,6 +25,8 @@ fn main() {
         eprintln!("web/dist is missing: run make web with Node 24, or make to build the viewer and binary");
         std::process::exit(1);
     }
+    assert!(fs::read_to_string(root.join("index.html")).unwrap().contains("<base href=\"/\">"),
+        "web/dist/index.html must contain <base href=\"/\"> for the public URL prefix");
     let root = root.canonicalize().unwrap();
     println!("cargo:rerun-if-changed={}", root.display());
     let mut entries = String::from("&[\n");

@@ -10,6 +10,7 @@ function patchAudioMotion(code) {
   return code.replace(listener, '// Modified by elsewhere: playback owner resumes the shared context.');
 }
 export default defineConfig({
+  base: './',
   plugins: [react(), tailwindcss(), {
     name: 'visualiser-notices',
     transform(code, id) {

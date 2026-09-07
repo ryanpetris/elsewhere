@@ -1,3 +1,4 @@
+import { websocketUrl, storageKey } from './urls.js';
 // The streaming engine: WebSocket, WebCodecs decode onto the canvas, input, clipboard, audio.
 // React only draws the chrome around it (App.jsx) and reads what it publishes on `store`.
 // Wire format mirrors crates/elsewhere-server/src/protocol.rs.
@@ -163,7 +164,7 @@ export function createViewer() {
     if (!TOKEN) { store.set({ status: 'no-token' }); return; }
     audioSeq = -1; // the server kept counting while we were away
     connects++;
-    const socket = ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws${WINDOW ? '/window/' + WINDOW : ''}`);
+    const socket = ws = new WebSocket(websocketUrl(`/ws${WINDOW ? '/window/' + WINDOW : ''}`));
     ws.binaryType = 'arraybuffer';
     ws.onopen = async () => {
       if (disposed || ws !== socket) return;
@@ -201,7 +202,7 @@ export function createViewer() {
       reconnectTimer = setTimeout(() => { if (ws === socket) connect(); }, 1000);
     };
   }
-  function forgetToken() { try { sessionStorage.removeItem('elsewhere.token'); } catch {} }
+  function forgetToken() { try { sessionStorage.removeItem(storageKey('token')); } catch {} }
 
   function send(type, size, fill) {
     if (ws?.readyState !== WebSocket.OPEN) return;

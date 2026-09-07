@@ -1,3 +1,4 @@
+import { websocketUrl } from '../urls.js';
 import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -15,7 +16,7 @@ export default function TerminalPanel({ viewer, onClose }) {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host.current);
-    const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/terminal`);
+    const socket = new WebSocket(websocketUrl('/ws/terminal'));
     socket.binaryType = 'arraybuffer';
     const send = data => { if (socket.readyState === WebSocket.OPEN) socket.send(data); };
     const control = data => send(JSON.stringify(data));

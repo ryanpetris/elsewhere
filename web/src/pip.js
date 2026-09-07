@@ -1,3 +1,4 @@
+import { url as publicUrl } from './urls.js';
 import { TOKEN, WINDOW, PIP } from './api.js';
 
 // Each iframe keeps the existing viewer's handlers, renderer and media in its own document.
@@ -52,7 +53,7 @@ export function createPip(viewer) {
       frame.title = target === null ? 'Remote desktop' : `Remote window ${target}`;
       frame.style.cssText = 'width:100%;height:100%;border:0;display:block';
       frame.allow = 'autoplay; clipboard-read; clipboard-write';
-      const url = new URL(location.pathname, location.origin);
+      const url = new URL(publicUrl('/'), location.origin);
       url.searchParams.set('pip', '1');
       if (target !== null) url.searchParams.set('window', target);
       url.hash = new URLSearchParams({ token: TOKEN }).toString();

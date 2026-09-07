@@ -31,10 +31,10 @@ use anyhow::{Context, Result};
 use api::ApiError;
 use axum::{
     Extension, Json, Router,
-    extract::{Path as UrlPath, Query, Request, State, ws::WebSocketUpgrade},
+    extract::{OriginalUri, Path as UrlPath, Query, Request, State, ws::WebSocketUpgrade},
     http::{HeaderMap, StatusCode, header},
     middleware::{self, Next},
-    response::{Html, IntoResponse, Response},
+    response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post, put},
 };
 use elsewhere_core::{Bytes, Codec, Command, ControlMsg, Event, FrameSink, InputMsg, OutputGeometry, StreamControl, StreamMsg, WindowInfo};
@@ -59,6 +59,11 @@ pub enum Key {
 pub struct Config {
     pub listen: SocketAddr,
     pub tls: bool,
+    /// Public path validated by the CLI: empty for root, otherwise literal ASCII segments,
+    /// a leading slash and no trailing slash, escapes, dot segments or route parameters.
+    pub url_prefix: String,
+    /// Accept root routes because the proxy strips the public prefix before forwarding.
+    pub proxy_strips_prefix: bool,
     pub codec: CodecPolicy,
     /// What the encoder side can produce (`elsewhere_stream::codecs`), best first, and whether on the CPU.
     pub codecs: Vec<Codec>,
@@ -134,6 +139,8 @@ pub struct App {
     version: &'static str,
     tls: bool,
     port: u16,
+    url_prefix: String,
+    proxy_strips_prefix: bool,
 }
 
 /// The connected viewers and what they all see. One of them, the controller, drives the pointer and
@@ -224,6 +231,8 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
         version: cfg.version,
         tls: cfg.tls,
         port: cfg.listen.port(),
+        url_prefix: cfg.url_prefix.clone(),
+        proxy_strips_prefix: cfg.proxy_strips_prefix,
     });
     if let Some(errors) = mixer_errors { tokio::spawn(mixer::errors(app.clone(), errors)); }
     tokio::spawn(ws::distribute_audio(app.clone(), audio_rx));
@@ -268,6 +277,13 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
         .route("/skill/reference.md", get(|| async { markdown(mcp::REFERENCE) }))
         .with_state(app.clone());
 
+    let router = if cfg.url_prefix.is_empty() || cfg.proxy_strips_prefix {
+        router
+    } else {
+        // Keep the router intact, including the nested MCP fallback service.
+        Router::new().nest_service(&cfg.url_prefix, router)
+    };
+
     let tls_pem = if cfg.tls { Some(load_or_create_cert(&cfg.data_dir)?) } else { None };
     if let Some((cert, _)) = &tls_pem {
         // Compare this with the browser's certificate viewer before accepting the warning.
@@ -290,8 +306,12 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
 
 /// The page is public; it authenticates its WebSocket with the token from its URL fragment (or sessionStorage).
 /// The viewer is built from `web/` into `web/dist` (`npm run build`), and embedded here.
-async fn index() -> Html<&'static str> {
-    Html(include_str!("../../../web/dist/index.html"))
+async fn index(State(app): State<Arc<App>>, OriginalUri(uri): OriginalUri) -> Response {
+    if !app.url_prefix.is_empty() && uri.path() == app.url_prefix {
+        let query = uri.query().map(|q| format!("?{q}")).unwrap_or_default();
+        return Redirect::permanent(&format!("{}/{query}", app.url_prefix)).into_response();
+    }
+    Html(include_str!("../../../web/dist/index.html").replace("<base href=\"/\">", &format!("<base href=\"{}/\">", app.url_prefix))).into_response()
 }
 
 const WEB_ASSETS: &[(&str, &str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/web_assets.rs"));
@@ -602,8 +622,12 @@ impl App {
     /// Connection URLs and local retrieval instructions contain no token values.
     fn print_access(&self) {
         let scheme = if self.tls { "https" } else { "http" };
-        for ip in lan_ips() {
-            println!("{scheme}://{ip}:{}/", self.port);
+        if self.proxy_strips_prefix && !self.url_prefix.is_empty() {
+            println!("Open {}/ through the reverse proxy.", self.url_prefix);
+        } else {
+            for ip in lan_ips() {
+                println!("{scheme}://{ip}:{}{}/", self.port, self.url_prefix);
+            }
         }
         println!("Tokens are stored in {}", self.data_dir.display());
         println!("Run `elsewhere token` for control or `elsewhere token --viewer` for read-only access, using the same user and XDG_CONFIG_HOME as the server.");

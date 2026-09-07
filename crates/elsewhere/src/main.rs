@@ -17,9 +17,15 @@ struct Cli {
     /// Address to serve the viewer on.
     #[arg(long, default_value = "0.0.0.0:8443")]
     listen: SocketAddr,
-    /// Plain HTTP (WebCodecs then only works from localhost).
+    /// Plain HTTP for localhost or a reverse proxy that terminates HTTPS.
     #[arg(long)]
     no_tls: bool,
+    /// Public URL path, such as /elsewhere/alice. Nested paths are supported.
+    #[arg(long, default_value = "", value_parser = parse_url_prefix)]
+    url_prefix: String,
+    /// The proxy removes --url-prefix before forwarding requests to this server.
+    #[arg(long, requires = "url_prefix")]
+    proxy_strips_prefix: bool,
     /// Medium quality bitrate ceiling in kbit/s; other quality levels have their own ceilings.
     #[arg(long, default_value_t = 8000)]
     bitrate: u32,
@@ -243,7 +249,7 @@ fn main() -> Result<()> {
         }
         elsewhere_server::rtc::Config { port: cli.rtc_port.unwrap_or(cli.listen.port()), addr: cli.rtc_addr, ice_servers }
     });
-    let server = elsewhere_server::Config { listen: cli.listen, tls: !cli.no_tls, codec, codecs, software, bitrate_kbps: cli.bitrate, initial, fixed_size: cli.screen_size.is_some(), data_dir, elements: cli.elements, files_dir, version: env!("ELSEWHERE_VERSION"), sinks, audio_available: audio.is_some(), mixer: audio.as_mut().and_then(|session| session.mixer.take()), mic: audio.as_ref().map(|session| session.mic.clone()), cam: cam.as_ref().map(|(_, tx)| tx.clone()), rtc };
+    let server = elsewhere_server::Config { listen: cli.listen, tls: !cli.no_tls, url_prefix: cli.url_prefix, proxy_strips_prefix: cli.proxy_strips_prefix, codec, codecs, software, bitrate_kbps: cli.bitrate, initial, fixed_size: cli.screen_size.is_some(), data_dir, elements: cli.elements, files_dir, version: env!("ELSEWHERE_VERSION"), sinks, audio_available: audio.is_some(), mixer: audio.as_mut().and_then(|session| session.mixer.take()), mic: audio.as_ref().map(|session| session.mic.clone()), cam: cam.as_ref().map(|(_, tx)| tx.clone()), rtc };
     // Ctrl+C and SIGTERM (`docker stop`, a service manager) return here so the audio devices get unloaded
     // and the pipelines stopped.
     let result = runtime.block_on(async {
@@ -278,4 +284,34 @@ fn main() -> Result<()> {
     drop(audio);
     drop(cam);
     result
+}
+
+/// Keep prefixes literal in HTML, URLs and Axum routes; reject escapes and route parameters.
+fn parse_url_prefix(value: &str) -> Result<String, String> {
+    if value.is_empty() || value == "/" { return Ok(String::new()); }
+    let prefix = value.trim_end_matches('/');
+    if !prefix.starts_with('/') || prefix[1..].split('/').any(|part| {
+        part.is_empty() || part == "." || part == ".."
+            || !part.bytes().all(|b| b.is_ascii_alphanumeric() || b"-._~".contains(&b))
+    }) {
+        return Err("URL prefix must be an absolute path of nonempty segments using letters, digits, -, ., _, or ~; . and .. segments are not allowed".into());
+    }
+    Ok(prefix.into())
+}
+
+#[cfg(test)]
+mod url_prefix_tests {
+    use super::*;
+
+    #[test]
+    fn prefixes_are_literal_nested_paths() {
+        for (input, expected) in [("", ""), ("/", ""), ("/alice/", "/alice"), ("/elsewhere/alice/", "/elsewhere/alice"), ("/a-b/c_d.v~1", "/a-b/c_d.v~1")] {
+            assert_eq!(parse_url_prefix(input).unwrap(), expected);
+        }
+        for input in ["alice", "//", "//alice", "/a//b", "/a/../b", "/./b", "/%2e", "/a?b", "/a#b", "/a\\b", "/<script>", "/{id}", "/a:b", "/a b"] {
+            assert!(parse_url_prefix(input).is_err(), "{input}");
+        }
+        assert!(Cli::try_parse_from(["elsewhere", "--proxy-strips-prefix"]).is_err());
+        assert!(Cli::try_parse_from(["elsewhere", "--url-prefix", "/elsewhere/alice", "--proxy-strips-prefix"]).is_ok());
+    }
 }

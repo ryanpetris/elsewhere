@@ -1,3 +1,4 @@
+import { url } from '../urls.js';
 import { useEffect, useRef } from 'react';
 import { Popover } from './Launcher.jsx';
 
@@ -27,7 +28,7 @@ export function About({ viewer, onClose }) {
       </div>
       <p>Copyright © 2026 Ryan Petris.</p>
       <p>Elsewhere's original code is available under the MIT License. It includes open source software under other licenses and is provided without warranty.</p>
-      <a className={link} href="/assets/license-notices.txt" target="_blank" rel="noreferrer">Open source licenses</a>
+      <a className={link} href={url('/assets/license-notices.txt')} target="_blank" rel="noreferrer">Open source licenses</a>
       <p>You can download the source and find build instructions in the{' '}
         <a className={link} href="https://github.com/ryanpetris/elsewhere" target="_blank" rel="noreferrer">GitHub repository</a>.
       </p>
