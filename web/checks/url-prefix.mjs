@@ -175,6 +175,39 @@ try {
     console.log(name + ': HTTPS, assets, auth, API, uploads, MCP, terminal, window popup, PiP, WebRTC and fallback passed');
   }
   const [alice, bob] = instances;
+  for (const instance of [alice, bob]) {
+    await instance.page.getByRole('button', { name: 'Broadcasts', exact: true }).click();
+  }
+  await alice.page.getByRole('button', { name: 'Add preset', exact: true }).click();
+  const preset = alice.page.getByRole('form', { name: 'Broadcast preset' });
+  await preset.getByLabel('Name', { exact: true }).fill('Shared broadcast check');
+  await preset.getByLabel('Ingest URL').fill('rtmp://127.0.0.1:19399/live');
+  await preset.getByLabel('Stream key').fill('browser-secret-sentinel');
+  await preset.getByRole('button', { name: 'Save preset' }).click();
+  await bob.page.getByText('Shared broadcast check', { exact: true }).waitFor();
+  assert.equal(await bob.page.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('elsewhere.broadcastPreset.')).length), 1);
+  const participant = await context.newPage();
+  await participant.goto(origin + alice.prefix + '/');
+  await participant.getByPlaceholder('token', { exact: true }).fill(alice.token);
+  await participant.getByRole('button', { name: 'Connect', exact: true }).click();
+  await participant.waitForFunction(() => window.elsewhere?.store.get().role === 'participant');
+  await participant.getByRole('button', { name: 'Broadcasts', exact: true }).click();
+  await participant.getByRole('button', { name: 'Start', exact: true }).click();
+  const authAlice = { Authorization: 'Bearer ' + alice.token };
+  await wait('participant starts broadcast', async () => (await (await context.request.get(origin + alice.prefix + '/api/broadcasts', { headers: authAlice })).json()).length === 1);
+  assert.equal((await (await context.request.get(origin + bob.prefix + '/api/broadcasts', { headers: { Authorization: 'Bearer ' + bob.token } })).json()).length, 0);
+  await participant.getByRole('button', { name: 'Stop', exact: true }).click();
+  await wait('participant stops broadcast', async () => (await (await context.request.get(origin + alice.prefix + '/api/broadcasts', { headers: authAlice })).json())[0].state === 'stopped');
+  await participant.close();
+  await bob.page.getByRole('button', { name: 'Edit', exact: true }).click();
+  assert.equal(await bob.page.getByRole('form', { name: 'Broadcast preset' }).getByLabel('Stream key').inputValue(), 'browser-secret-sentinel');
+  await bob.page.getByRole('form', { name: 'Broadcast preset' }).getByLabel('Name', { exact: true }).fill('Shared edited preset');
+  await bob.page.getByRole('button', { name: 'Save preset', exact: true }).click();
+  await alice.page.getByText('Shared edited preset', { exact: true }).waitFor();
+  await alice.page.getByRole('button', { name: 'Remove', exact: true }).click();
+  await wait('preset removed in other instance', async () => await bob.page.getByText('Shared edited preset', { exact: true }).count() === 0);
+  console.log('Broadcast presets share across instance paths; participant control-token start/stop and host-specific status passed');
+
   assert.notEqual(await alice.popup.evaluate(() => window.name), await bob.popup.evaluate(() => window.name));
   assert.ok(!alice.popup.isClosed() && !bob.popup.isClosed(), 'both instance popups remain open');
   assert.equal(await alice.page.evaluate(() => elsewhere.clipboard.read()), 'alice');

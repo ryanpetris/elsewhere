@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { PictureInPicture2, Camera, ChevronDown, ChevronUp, ExternalLink, Maximize2, Minimize2, Play, X } from 'lucide-react';
 import { useStore } from '../store.js';
 import { queueSnapshot, snapshot, windowIcon } from '../api.js';
+import { BroadcastsPanel } from './BroadcastsPanel.jsx';
 import { FilesPanel } from './FilesPanel.jsx';
 import { thumbnailScheduler } from '../thumbnails.js';
 import { codecName, windowColor } from './ui.jsx';
@@ -16,12 +17,12 @@ export function Sidebar({ viewer, tab, onTab, hidden }) {
   return (
     <aside hidden={hidden} className="absolute inset-y-0 right-0 z-10 flex w-full max-w-sm shrink-0 flex-col border-l border-zinc-800 bg-zinc-900 md:static md:w-80 md:max-w-none">
       <nav className="flex shrink-0 border-b border-zinc-800 text-sm">
-        {[['windows', 'Windows'], ['files', 'Files'], ['stats', 'Statistics']].filter(([t]) => t !== 'files' || acts).map(([t, label]) => (
+        {[['windows', 'Windows'], ['files', 'Files'], ['stats', 'Statistics'], ['broadcasts', 'Broadcasts']].filter(([t]) => t !== 'files' || acts).map(([t, label]) => (
           <button
             key={t}
             type="button"
             onClick={e => { onTab(t); e.currentTarget.blur(); }}
-            className={`-mb-px flex-1 border-b-2 px-3 py-2 transition-colors ${tab === t ? 'border-indigo-400 text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}
+            className={`-mb-px flex-1 border-b-2 px-2 py-2 transition-colors ${tab === t ? 'border-indigo-400 text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}
           >
             {label}
           </button>
@@ -29,6 +30,7 @@ export function Sidebar({ viewer, tab, onTab, hidden }) {
       </nav>
       <div data-window-list hidden={tab !== 'windows'} className="min-h-0 flex-1 overflow-y-auto"><WindowList viewer={viewer} active={!hidden && tab === 'windows'} /></div>
       <div hidden={tab !== 'files'} className="min-h-0 flex-1 overflow-y-auto"><FilesPanel viewer={viewer} open={!hidden && tab === 'files' && acts} /></div>
+      <div hidden={tab !== 'broadcasts'} className="min-h-0 flex-1 overflow-y-auto"><BroadcastsPanel viewer={viewer} open={!hidden && tab === 'broadcasts'} /></div>
       <div hidden={tab !== 'stats'} className="min-h-0 flex-1 overflow-y-auto"><StatsPanel viewer={viewer} /></div>
     </aside>
   );
