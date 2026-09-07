@@ -8,6 +8,7 @@ export const ROLES = ['viewer', 'participant', 'controller'];
 export const CODEC_FAMILIES = ['h264', 'hevc', 'vp9', 'av1', 'vp8'];
 export const PRESETS = ['very-low', 'low', 'medium', 'high', 'max'];
 export const PRESET_IDS = { 'very-low': 1, low: 2, medium: 3, high: 4, max: 5 };
+export const EFFORTS = ['fast', 'balanced', 'high'];
 // how the video travels; the socket carries it unless a viewer picks the WebRTC data channel
 export const TRANSPORTS = ['websocket', 'webrtc'];
 // PointerEvent.button -> BTN_LEFT, MIDDLE, RIGHT, SIDE, EXTRA

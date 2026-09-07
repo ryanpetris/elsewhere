@@ -7,7 +7,7 @@ use std::{
 };
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
-use elsewhere_core::{AxisSource, Bytes, Codec, Command, ControlMsg, ControlOp, Event, InputMsg, OutputGeometry, StreamMsg, TouchKind};
+use elsewhere_core::{AxisSource, Bytes, Codec, Command, ControlMsg, ControlOp, EncodingEffort, Event, InputMsg, OutputGeometry, StreamMsg, TouchKind};
 use tokio::sync::mpsc;
 
 use crate::{apps, App, Key, ViewerSession, Viewers, api, protocol::{self, ClientMsg, Preset, Role}};
@@ -124,13 +124,13 @@ pub(super) async fn authenticate(socket: &mut WebSocket, app: &App) -> Option<(S
 }
 
 /// Hello, which picks the codec, before the pipeline exists; five seconds of silence ends the socket.
-async fn hello(socket: &mut WebSocket) -> Option<(u8, u8, Option<Codec>, Preset)> {
+async fn hello(socket: &mut WebSocket) -> Option<(u8, u8, Option<Codec>, Preset, EncodingEffort)> {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match socket.recv().await? {
                 Ok(Message::Binary(b)) => {
-                    if let Some(ClientMsg::Hello { hw, sw, codec, quality }) = protocol::decode(&b) {
-                        return Some((hw, sw, codec, quality));
+                    if let Some(ClientMsg::Hello { hw, sw, codec, quality, effort }) = protocol::decode(&b) {
+                        return Some((hw, sw, codec, quality, effort));
                     }
                 }
                 Ok(Message::Close(_)) | Err(_) => return None,
@@ -157,7 +157,7 @@ async fn send(socket: &mut WebSocket, msg: Bytes) -> bool {
 /// desktop scaled to their own window, and one with a control token may take control.
 pub async fn session(mut socket: WebSocket, app: Arc<App>) {
     let Some((token, key)) = authenticate(&mut socket, &app).await else { return };
-    let Some((hw, sw, want_codec, preset)) = hello(&mut socket).await else { return };
+    let Some((hw, sw, want_codec, preset, effort)) = hello(&mut socket).await else { return };
     let (tx, mut rx) = mpsc::channel::<StreamMsg>(16);
     let (sink, control) = match (app.sinks)(tx) {
         Ok(x) => x,
@@ -168,6 +168,7 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
     };
     let Some(codec) = app.pick_codec(want_codec, hw, sw) else { return close(&mut socket, GONE, "no codec in common").await };
     control.set_codec(codec);
+    control.set_effort(effort);
     let quality = preset.quality(app.bitrate_kbps);
     control.set_quality(quality);
     let mut auto = AutoRate::new(quality.bitrate_kbps);
@@ -277,11 +278,11 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
                     match decoded {
                         Some(ClientMsg::Notify(n)) if key == Key::Control => app.spawn_notification_action(n),
                         Some(ClientMsg::Stream(choice)) => {
-                            let (new_codec, preset) = app.apply_choice(id, &choice);
+                            let (restart, preset) = app.apply_choice(id, &choice);
                             if let Some(preset) = preset {
                                 auto = AutoRate::new(preset.quality(app.bitrate_kbps).bitrate_kbps);
                             }
-                            if new_codec {
+                            if restart {
                                 let _ = app.commands.send(Command::RequestFullFrame); // the new pipeline starts with a frame
                             }
                             let Some(state) = app.stream_state(id) else { break Some((UNAUTHORIZED, "token rotated")) };
@@ -354,7 +355,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
     if !app.viewers.lock().unwrap().window_list.iter().any(|w| w.id == id) {
         return close(&mut socket, GONE, "no such window").await;
     }
-    let Some((hw, sw, mut want_codec, mut preset)) = hello(&mut socket).await else { return };
+    let Some((hw, sw, mut want_codec, mut preset, effort)) = hello(&mut socket).await else { return };
     let (tx, mut rx) = mpsc::channel::<StreamMsg>(16);
     let (sink, control) = match (app.sinks)(tx) {
         Ok(x) => x,
@@ -368,7 +369,8 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
     let mut quality = preset.quality(app.bitrate_kbps);
     control.set_quality(quality);
     let mut auto = AutoRate::new(quality.bitrate_kbps);
-    let state = |codec, quality, want: Option<Codec>, preset| protocol::stream_state(codec, want.is_none(), quality, preset, app.bitrate_kbps);
+    control.set_effort(effort);
+    let state = |codec, quality, want: Option<Codec>, preset| protocol::stream_state(codec, want.is_none(), quality, preset, app.bitrate_kbps, control.effort());
     static KEY: AtomicU64 = AtomicU64::new(1);
     let stream = KEY.fetch_add(1, Ordering::Relaxed);
     let (etx, mut erx) = mpsc::channel::<Bytes>(32);
@@ -474,6 +476,10 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                                 quality = p.quality(app.bitrate_kbps);
                                 auto = AutoRate::new(quality.bitrate_kbps);
                                 control.set_quality(quality);
+                            }
+                            if let Some(effort) = choice.effort {
+                                control.set_effort(effort);
+                                cmd = Some(Command::RequestFullFrame);
                             }
                             let _ = etx.try_send(state(codec, quality, want_codec, preset));
                             cmd
@@ -610,16 +616,16 @@ impl App {
         }
     }
 
-    /// A desktop session's codec or quality choice: whether the codec changed, and the new preset when
+    /// A desktop session's codec, quality or effort choice: whether the stream restarts, and the new preset when
     /// the quality did.
     fn apply_choice(&self, id: u64, choice: &protocol::StreamChoice) -> (bool, Option<Preset>) {
         let mut v = self.viewers.lock().unwrap();
         let Some(s) = v.sessions.get_mut(&id) else { return (false, None) };
-        let mut new_codec = false;
+        let mut restart = false;
         if let Some(c) = &choice.codec {
             s.want_codec = protocol::codec_named(c);
             if let Some(picked) = self.pick_codec(s.want_codec, s.hw, s.sw) {
-                new_codec = picked != s.codec;
+                restart = picked != s.codec;
                 s.codec = picked;
                 s.control.set_codec(picked);
             }
@@ -630,14 +636,18 @@ impl App {
             s.quality = p.quality(self.bitrate_kbps);
             s.control.set_quality(s.quality);
         }
-        (new_codec, preset)
+        if let Some(effort) = choice.effort {
+            s.control.set_effort(effort);
+            restart = true; // an effort restart also needs a fresh frame
+        }
+        (restart, preset)
     }
 
     /// What a session's encoder does right now, for the page's labels; `None` once a rotation cleared it.
     fn stream_state(&self, id: u64) -> Option<Bytes> {
         let v = self.viewers.lock().unwrap();
         let s = v.sessions.get(&id)?;
-        Some(protocol::stream_state(s.codec, s.want_codec.is_none(), s.quality, s.preset, self.bitrate_kbps))
+        Some(protocol::stream_state(s.codec, s.want_codec.is_none(), s.quality, s.preset, self.bitrate_kbps, s.control.effort()))
     }
 
     /// Pick the codec for a browser whose `hw` mask passed the prefer-hardware probe and `sw` the plain one

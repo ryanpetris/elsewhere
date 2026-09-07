@@ -8,10 +8,11 @@ import { createStore } from './store.js';
 import { startMic, stopMic } from './mic.js';
 import { startCam, stopCam } from './cam.js';
 import { openRtc, pageEndpoint, RTC_TIMING } from './rtc.js';
-import { CONFIG, VIDEO, CURSOR, POINTER_LOCK, AUDIO, WINDOWS, CLIPBOARD, ROLE, NOTICE, CLIPBOARD_DATA, NOTIFICATIONS, STREAM_STATE, RTC, ROLES, CODEC_FAMILIES, PRESETS, PRESET_IDS, AUTH, HELLO, RESIZE, MOTION_ABS, MOTION_REL, BUTTON, AXIS, KEY, REQUEST_KEYFRAME, BLUR, POINTER_LOCK_LOST, POINTER_LOCK_GAINED, CONTROL, SET_CLIPBOARD, TAKE_CONTROL, NOTIFY, STREAM, DRAG, INPUT, TOUCH, MIC, CAM, RTC_CLIENT, REPORT, BTN, MIXER_STATE, MIXER_LEVELS, MIXER_ERROR, MIXER_CLIENT, SESSION, HANDOFF, FILE_RESULT } from './protocol.js';
+import { CONFIG, VIDEO, CURSOR, POINTER_LOCK, AUDIO, WINDOWS, CLIPBOARD, ROLE, NOTICE, CLIPBOARD_DATA, NOTIFICATIONS, STREAM_STATE, RTC, ROLES, CODEC_FAMILIES, EFFORTS, PRESETS, PRESET_IDS, AUTH, HELLO, RESIZE, MOTION_ABS, MOTION_REL, BUTTON, AXIS, KEY, REQUEST_KEYFRAME, BLUR, POINTER_LOCK_LOST, POINTER_LOCK_GAINED, CONTROL, SET_CLIPBOARD, TAKE_CONTROL, NOTIFY, STREAM, DRAG, INPUT, TOUCH, MIC, CAM, RTC_CLIENT, REPORT, BTN, MIXER_STATE, MIXER_LEVELS, MIXER_ERROR, MIXER_CLIENT, SESSION, HANDOFF, FILE_RESULT } from './protocol.js';
 
 const AUDIO_LEAD = 0.06;
 const qualityName = name => PRESETS.includes(name) ? name : 'max';
+const effortName = name => EFFORTS.includes(name) ? name : 'fast';
 
 export function createViewer() {
   const store = createStore({
@@ -31,8 +32,8 @@ export function createViewer() {
     notice: null, // { text, kind: 'warning' | 'success' }: a word about our last action, shown for a few seconds
     notifications: [], // open desktop notifications, oldest first
     upload: null, // { name, index, count } while files dropped on the page go up
-    streamState: null, // { codec, auto_codec, preset, ceiling_kbps, medium_kbps, bitrate_kbps, max_fps } from the server
-    choice: { codec: pref.getStr('codec', 'auto'), quality: qualityName(pref.getStr('quality', 'max')) }, // this viewer's picks
+    streamState: null, // { codec, auto_codec, preset, ceiling_kbps, medium_kbps, bitrate_kbps, max_fps, effort } from the server
+    choice: { codec: pref.getStr('codec', 'auto'), quality: qualityName(pref.getStr('quality', 'max')), effort: effortName(pref.getStr('effort', 'fast')) }, // this viewer's picks
     touchMouse: pref.get('touchmouse', false), // fingers as a mouse with gestures, instead of real touch points
     audioAvailable: false,
     mixer: { available: false, generation: '', nodes: [], routing: false, error: null },
@@ -273,17 +274,19 @@ export function createViewer() {
     }
     if (disposed || ws !== socket || socket.readyState !== WebSocket.OPEN) return;
     store.set({ decodable: CODEC_FAMILIES.filter((_, i) => sw & (1 << i)) });
-    const { codec, quality } = state().choice;
-    send(HELLO, 4, dv => { dv.setUint8(1, hw); dv.setUint8(2, sw); dv.setUint8(3, CODEC_FAMILIES.indexOf(codec) + 1); dv.setUint8(4, PRESET_IDS[quality]); });
+    const { codec, quality, effort } = state().choice;
+    send(HELLO, 5, dv => { dv.setUint8(1, hw); dv.setUint8(2, sw); dv.setUint8(3, CODEC_FAMILIES.indexOf(codec) + 1); dv.setUint8(4, PRESET_IDS[quality]); dv.setUint8(5, EFFORTS.indexOf(effort)); });
     if (!state().codecs.length) serverCodecs().then(list => store.set({ codecs: list })).catch(() => {});
   }
-  // A new codec or quality for this session, remembered for the next connection.
+  // A new codec, quality or effort for this session, remembered for the next connection.
   function setChoice(patch) {
     if (patch.quality !== undefined) patch = { ...patch, quality: qualityName(patch.quality) };
+    if (patch.effort !== undefined) patch = { ...patch, effort: effortName(patch.effort) };
     const choice = { ...state().choice, ...patch };
     store.set({ choice });
     if (patch.codec !== undefined) pref.setStr('codec', patch.codec);
     if (patch.quality !== undefined) pref.setStr('quality', patch.quality);
+    if (patch.effort !== undefined) pref.setStr('effort', patch.effort);
     if (ws?.readyState === WebSocket.OPEN) sendText(STREAM, JSON.stringify(patch));
   }
 

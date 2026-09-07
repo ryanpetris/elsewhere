@@ -348,8 +348,39 @@ pub struct Quality {
     pub max_fps: u32,
 }
 
-/// What became of a submitted frame: handed to the encoder, or held back on purpose (a rate cap), in
-/// which case the compositor offers the next frame whole, like after an error.
+/// Encoding work per frame, independent of the bitrate ceiling.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EncodingEffort {
+    #[default]
+    Fast,
+    Balanced,
+    High,
+}
+
+impl EncodingEffort {
+    pub fn from_id(id: u8) -> Self {
+        match id { 1 => Self::Balanced, 2 => Self::High, _ => Self::Fast }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct EffortState {
+    pub requested: EncodingEffort,
+    pub applied: Option<EncodingEffort>,
+    pub encoder: Option<String>,
+    pub setting: Option<String>,
+    pub pending: bool,
+}
+
+impl EffortState {
+    pub fn pending(requested: EncodingEffort) -> Self {
+        Self { requested, applied: None, encoder: None, setting: None, pending: true }
+    }
+}
+
+/// Whether a submitted frame can count as presented, or the compositor must offer another whole
+/// frame because of a rate cap or an encoder that still needs input to produce its first keyframe.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Submit {
     Encoded,
@@ -376,6 +407,10 @@ pub trait StreamControl: Send + Sync {
     fn set_size(&self, size: Option<(u32, u32)>);
     /// Bitrate and frame rate, applied to the running encoder where it allows, at the next restart otherwise.
     fn set_quality(&self, quality: Quality);
+    /// Restart the stream with a different encoding effort, keeping its rate target.
+    fn set_effort(&self, effort: EncodingEffort);
+    /// The applied property, or pending/unsupported when it has not been applied.
+    fn effort(&self) -> EffortState;
 }
 
 pub type SinkError = Box<dyn std::error::Error + Send + Sync>;

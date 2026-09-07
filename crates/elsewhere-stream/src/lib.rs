@@ -14,7 +14,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use elsewhere_core::{Bytes, Codec, EncodedFrame, Frame, FrameBuffer, FrameSink, OutputGeometry, Quality, SinkError, StreamControl, StreamInfo, StreamMsg, Submit};
+use elsewhere_core::{Bytes, Codec, EncodedFrame, EncodingEffort, EffortState, Frame, FrameBuffer, FrameSink, OutputGeometry, Quality, SinkError, StreamControl, StreamInfo, StreamMsg, Submit};
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_allocators as gst_allocators;
@@ -29,6 +29,8 @@ pub struct Stream {
     encoder: gst::Element,
     /// Set by the bus watcher on a pipeline error; the sink then rebuilds on the next frame.
     dead: Arc<AtomicBool>,
+    effort: EffortState,
+    started: Arc<AtomicBool>,
 }
 
 impl Drop for Stream {
@@ -52,6 +54,7 @@ struct EncodeOpts {
     height: u32,
     scale: f64,
     codec: Codec,
+    effort: EncodingEffort,
 }
 
 /// The parser after an encoder, producing one WebCodecs chunk per buffer.
@@ -71,7 +74,7 @@ fn parse_tail(codec: Codec) -> &'static str {
 /// viewer joining, a gap in what one got), so the periodic one is pushed out as far as the property goes:
 /// its hundred-odd kilobytes every second are the burst a lossy link chokes on.
 fn hardware_tail(codec: Codec, enc: &str, bitrate_kbps: u32) -> String {
-    let common = format!("{enc} name=enc rate-control=cbr bitrate={bitrate_kbps} target-usage=7 ref-frames=1 key-int-max=1024");
+    let common = format!("{enc} name=enc rate-control=cbr bitrate={bitrate_kbps} ref-frames=1 key-int-max=1024");
     match codec {
         Codec::H264 => format!("{common} b-frames=0 ! video/x-h264,profile=high {}", parse_tail(codec)),
         Codec::Hevc => format!("{common} b-frames=0 ! video/x-h265,profile=main {}", parse_tail(codec)),
@@ -80,20 +83,20 @@ fn hardware_tail(codec: Codec, enc: &str, bitrate_kbps: u32) -> String {
     }
 }
 
-/// A CPU encoder (`--software-encoding`) with its parser, at its fastest low-latency settings and with its
+/// A CPU encoder (`--software-encoding`) with its parser, at low-latency settings and with its
 /// periodic keyframe pushed out of reach, as for the VA encoders. `enc` is the element `software_encoder` found.
 fn software_tail(codec: Codec, enc: &str, bitrate_kbps: u32) -> String {
     let bps = bitrate_kbps * 1000;
     let encoder = match (codec, enc) {
-        (Codec::Vp8, _) => format!("vp8enc name=enc deadline=1 cpu-used=8 end-usage=cbr target-bitrate={bps} lag-in-frames=0 threads=4 keyframe-max-dist=2147483647"),
-        (Codec::Vp9, _) => format!("vp9enc name=enc deadline=1 cpu-used=8 end-usage=cbr target-bitrate={bps} lag-in-frames=0 row-mt=true threads=4 keyframe-max-dist=2147483647"),
-        (Codec::H264, "x264enc") => format!("x264enc name=enc tune=zerolatency speed-preset=superfast bitrate={bitrate_kbps} bframes=0 key-int-max=2147483647 ! video/x-h264,profile=main"),
+        (Codec::Vp8, _) => format!("vp8enc name=enc deadline=1 end-usage=cbr target-bitrate={bps} lag-in-frames=0 threads=4 keyframe-max-dist=2147483647"),
+        (Codec::Vp9, _) => format!("vp9enc name=enc deadline=1 end-usage=cbr target-bitrate={bps} lag-in-frames=0 row-mt=true threads=4 keyframe-max-dist=2147483647"),
+        (Codec::H264, "x264enc") => format!("x264enc name=enc tune=zerolatency bitrate={bitrate_kbps} bframes=0 key-int-max=2147483647 ! video/x-h264,profile=main"),
         (Codec::H264, _) => format!("openh264enc name=enc rate-control=bitrate bitrate={bps} gop-size=0"),
-        (Codec::Hevc, _) => format!("x265enc name=enc tune=zerolatency speed-preset=ultrafast bitrate={bitrate_kbps} key-int-max=2147483647 ! video/x-h265,profile=main"),
+        (Codec::Hevc, _) => format!("x265enc name=enc tune=zerolatency bitrate={bitrate_kbps} key-int-max=2147483647 ! video/x-h265,profile=main"),
         // a two-frame mini-GOP: about six frames of delay instead of thirty-odd (the library insists on
         // some lookahead); keyframes on request (the documented -1, no periodic intra, is refused in the
         // bitrate mode, so the period is the largest the property takes)
-        (Codec::Av1, _) => format!("svtav1enc name=enc preset=12 target-bitrate={bitrate_kbps} intra-period-length=2147483647 parameters-string=hierarchical-levels=1:force-key-frames=1"),
+        (Codec::Av1, _) => format!("svtav1enc name=enc target-bitrate={bitrate_kbps} intra-period-length=2147483647 parameters-string=hierarchical-levels=1:force-key-frames=1"),
     };
     format!("{encoder} {}", parse_tail(codec))
 }
@@ -154,15 +157,50 @@ fn hardware_codecs(prefix: &str) -> Vec<Codec> {
 
 static STREAM_SEQ: AtomicU32 = AtomicU32::new(1);
 
+fn apply_effort(encoder: &gst::Element, effort: EncodingEffort) -> EffortState {
+    let name = encoder.factory().map(|factory| factory.name().to_string()).unwrap_or_default();
+    let mapping = match name.as_str() {
+        "vp8enc" => Some(("cpu-used", ["8", "4", "2"])),
+        "vp9enc" => Some(("cpu-used", ["8", "6", "4"])),
+        "x264enc" => Some(("speed-preset", ["superfast", "fast", "medium"])),
+        "x265enc" => Some(("speed-preset", ["ultrafast", "superfast", "fast"])),
+        "svtav1enc" => Some(("preset", ["12", "10", "8"])),
+        _ if name.starts_with("va") => Some(("target-usage", ["7", "4", "1"])),
+        _ => None,
+    };
+    let mut state = EffortState { requested: effort, applied: None, encoder: Some(name), setting: None, pending: false };
+    if let Some((property, values)) = mapping {
+        let value = match effort { EncodingEffort::Fast => values[0], EncodingEffort::Balanced => values[1], EncodingEffort::High => values[2] };
+        if let Some(spec) = encoder.find_property(property) {
+            let valid = if let Some(spec) = spec.downcast_ref::<gst::glib::ParamSpecInt>() {
+                value.parse::<i32>().is_ok_and(|n| (spec.minimum()..=spec.maximum()).contains(&n))
+            } else if let Some(spec) = spec.downcast_ref::<gst::glib::ParamSpecUInt>() {
+                value.parse::<u32>().is_ok_and(|n| (spec.minimum()..=spec.maximum()).contains(&n))
+            } else if let Some(spec) = spec.downcast_ref::<gst::glib::ParamSpecEnum>() {
+                spec.enum_class().value_by_nick(value).is_some()
+            } else { false };
+            if valid && spec.flags().contains(gst::glib::ParamFlags::WRITABLE) {
+                encoder.set_property_from_str(property, value);
+                state.applied = Some(effort);
+                state.setting = Some(format!("{property}={value}"));
+            }
+        }
+    }
+    state
+}
+
 /// Build `<head> ! <tail: encoder and parser> ! appsink` and start it.
 fn build(head: &str, tail: &str, opts: EncodeOpts, tx: mpsc::Sender<StreamMsg>) -> Result<Stream> {
     let stream_id = STREAM_SEQ.fetch_add(1, Ordering::Relaxed);
     let desc = format!("{head} ! {tail} ! appsink name=sink sync=false max-buffers=0");
     let pipeline = gst::parse::launch(&desc)?.downcast::<gst::Pipeline>().expect("parse::launch returns a pipeline");
     let encoder = pipeline.by_name("enc").context("enc element")?;
+    let effort = apply_effort(&encoder, opts.effort);
     let sink = pipeline.by_name("sink").context("sink element")?.downcast::<gst_app::AppSink>().unwrap();
 
     let (codec, width, height) = (opts.codec, opts.width, opts.height);
+    let started = Arc::new(AtomicBool::new(false));
+    let produced = started.clone();
     let failed_tx = tx.clone();
     let mut info = Some(StreamInfo { stream_id, codec: String::new(), width, height, scale: opts.scale });
     sink.set_callbacks(
@@ -172,6 +210,7 @@ fn build(head: &str, tail: &str, opts: EncodeOpts, tx: mpsc::Sender<StreamMsg>) 
                 let buffer = sample.buffer().ok_or(gst::FlowError::Error)?;
                 let map = buffer.map_readable().map_err(|_| gst::FlowError::Error)?;
                 let keyframe = !buffer.flags().contains(gst::BufferFlags::DELTA_UNIT);
+                if keyframe { produced.store(true, Ordering::Relaxed); }
                 tracing::debug!(keyframe, bytes = map.len(), "encoded");
                 // First keyframe: derive the WebCodecs codec string from the SPS and announce the stream.
                 if keyframe && info.is_some() {
@@ -226,7 +265,7 @@ fn build(head: &str, tail: &str, opts: EncodeOpts, tx: mpsc::Sender<StreamMsg>) 
     });
 
     pipeline.set_state(gst::State::Playing)?;
-    Ok(Stream { pipeline, encoder, dead })
+    Ok(Stream { pipeline, encoder, dead, effort, started })
 }
 
 /// The WebCodecs codec string for the first keyframe, per the AVC/HEVC/VP9 codec registrations.
@@ -444,6 +483,7 @@ struct Inner {
     /// CPU encoders on linear frames instead of the GPU's.
     software: bool,
     quality: Quality,
+    effort: EncodingEffort,
     /// The last frame handed over (the frame cap), and the bitrate to restore after a refine frame.
     last_push: std::time::Instant,
     restore_kbps: Option<u32>,
@@ -483,6 +523,12 @@ impl StreamControl for GstControl {
             GstSink(inner).set_quality(quality);
         }
     }
+    fn set_effort(&self, effort: EncodingEffort) {
+        if let Some(inner) = self.0.upgrade() { GstSink(inner).set_effort(effort); }
+    }
+    fn effort(&self) -> EffortState {
+        self.0.upgrade().map(|inner| GstSink(inner).effort()).unwrap_or_else(|| EffortState::pending(EncodingEffort::Fast))
+    }
 }
 
 impl GstSink {
@@ -497,6 +543,7 @@ impl GstSink {
             prefix: prefix.to_string(),
             software,
             quality: Quality { bitrate_kbps, max_fps: 0 },
+            effort: EncodingEffort::Fast,
             last_push: std::time::Instant::now(),
             restore_kbps: None,
             codec: Codec::H264,
@@ -511,6 +558,22 @@ impl GstSink {
 }
 
 impl StreamControl for GstSink {
+    fn set_effort(&self, effort: EncodingEffort) {
+        let mut inner = self.0.lock().unwrap();
+        if inner.effort == effort { return; }
+        inner.effort = effort;
+        let old = inner.take_stream();
+        drop(inner);
+        discard(old);
+    }
+    fn effort(&self) -> EffortState {
+        let inner = self.0.lock().unwrap();
+        inner.stream.as_ref().map(|(stream, _)| {
+            let mut state = stream.effort.clone();
+            state.pending = !stream.started.load(Ordering::Relaxed);
+            state
+        }).unwrap_or_else(|| EffortState::pending(inner.effort))
+    }
     fn request_keyframe(&self) {
         let mut i = self.0.lock().unwrap();
         if i.stream.as_ref().is_some_and(|(s, _)| s.dead.load(Ordering::Relaxed)) {
@@ -638,7 +701,7 @@ impl Inner {
             (head, hardware_tail(self.codec, &enc, self.quality.bitrate_kbps))
         };
         let scale = geo.scale * width as f64 / geo.width_px as f64;
-        let opts = EncodeOpts { width, height, scale, codec: self.codec };
+        let opts = EncodeOpts { width, height, scale, codec: self.codec, effort: self.effort };
         let stream = build(&head, &tail, opts, self.tx.clone())?;
         let appsrc = stream.pipeline.by_name("src").unwrap().downcast::<gst_app::AppSrc>().unwrap();
         self.stream = Some((stream, appsrc));
@@ -700,9 +763,9 @@ impl Inner {
                 buffer
             }
         };
-        let (_, appsrc) = self.stream.as_ref().unwrap();
+        let (stream, appsrc) = self.stream.as_ref().unwrap();
         appsrc.push_buffer(buffer)?; // leaky appsrc drops on its own; the lease then frees the slot
-        Ok(Submit::Encoded)
+        Ok(if stream.started.load(Ordering::Relaxed) { Submit::Encoded } else { Submit::Held })
     }
 }
 

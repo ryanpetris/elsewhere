@@ -1,11 +1,12 @@
-// Viewer statistics, media controls, and this viewer's codec and quality choice.
+// Viewer statistics, media controls, and this viewer's codec, quality and effort choices.
 import { Activity, Camera, CameraOff, ClipboardCheck, Download, Lock, Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
 import { useStore } from '../store.js';
-import { PRESETS, TRANSPORTS } from '../protocol.js';
+import { EFFORTS, PRESETS, TRANSPORTS } from '../protocol.js';
 import { codecName } from './ui.jsx';
 import { downloadClipboardFile } from '../api.js';
 
 const PRESET_LABEL = { 'very-low': 'Very Low', low: 'Low', medium: 'Medium', high: 'High', max: 'Max' };
+const EFFORT_LABEL = { fast: 'Fast', balanced: 'Balanced', high: 'High' };
 const mbit = (kbps, digits = 3) => `${Number((kbps / 1000).toFixed(digits))} Mbit/s`;
 
 // The selected ceiling and current encoder target are separate from network throughput.
@@ -34,6 +35,16 @@ function Choice({ viewer }) {
       </select>
       <span className="inline-block w-[30ch] shrink-0 whitespace-nowrap" title="Current encoder target; actual network throughput depends on scene activity">
         {st?.preset === choice.quality ? `Target ${mbit(st.bitrate_kbps, 1)}${st.max_fps ? `, ${st.max_fps} fps cap` : ''}` : 'Applying quality…'}
+      </span>
+      <label title="Higher effort can improve the picture at the same bitrate, but uses more encoding time and can reduce responsiveness. Changes restart this stream immediately." className="inline-flex items-center gap-2">
+        <span>Effort</span>
+        <select value={choice.effort} onChange={event => viewer.setChoice({ effort: event.target.value })} className={cls} title="Encoding effort">
+          {EFFORTS.map(effort => <option key={effort} value={effort}>{EFFORT_LABEL[effort]}</option>)}
+        </select>
+      </label>
+      <span data-effort-status className="inline-block w-[23ch] shrink-0 whitespace-nowrap">
+        {!st || st.effort && (st.effort.pending || st.effort.requested !== choice.effort) ? 'Applying effort…'
+          : st?.effort?.applied ? `${EFFORT_LABEL[st.effort.applied]} effort applied` : 'Effort unavailable'}
       </span>
       {(rtcAvailable || transport === 'webrtc') && (
         <select value={transport} onChange={e => viewer.setTransport(e.target.value)} className={cls} title="Transport: how the video travels (the socket unless the data channel is picked and opens)">

@@ -192,7 +192,7 @@ the GPU the VA elements the driver registered for the render node (low-power var
 first (AV1, HEVC, VP9, H.264); with `--software-encoding` the CPU encoders installed, cheapest first (VP8,
 H.264, VP9, HEVC, AV1). `--codec` wins when both sides can, else the first the browser decodes in
 hardware, else any it decodes; a browser with none in common is closed. The AV1 and VP9 codec strings carry a level chosen from the picture size, not read
-from the stream. A resize, size or codec change tears the pipeline down and rebuilds it with a new
+from the stream. A resize, size, codec or encoding effort change tears the pipeline down and rebuilds it with a new
 stream id; the page resets its decoder when it sees a new id. Each session also has a quality: a preset's
 bitrate, the ceiling a rate controller works under. Very Low, Low, Medium, High and Max use 2, 5,
 `--bitrate` (8 by default), 12 and 25 Mbit/s. Max is the default. StreamState carries the selected
@@ -210,6 +210,12 @@ changes on the running encoder where the element allows (the VA encoders, x264, 
 frame cap holds frames in the sink (`Submit::Held`), which the compositor treats like a failed frame. 150 ms after the picture settles the compositor renders it once
 more as a refine frame, which the sink encodes at four times the bitrate before restoring it. Pipeline errors reach the server through a bus
 sync handler (freed with the pipeline; a watching thread would outlive it).
+
+Encoding effort is separate from the bitrate ceiling and its adaptation state. Fast is the default;
+Balanced and High request encoder-specific speed settings when the new pipeline starts. The sink
+continues requesting frames until the first keyframe so encoders with startup buffering also start on
+a static desktop or window. The page saves the choice and shows pending, applied or unavailable status.
+See [encoding-effort.md](encoding-effort.md) for mappings and Docker measurements.
 
 Window streams (`/ws/window/{id}`, see [desktop-api.md](desktop-api.md)) are further `GstSink`s, one
 per streamed window, fed from per-window swapchains in the compositor.

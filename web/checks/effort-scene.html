@@ -1,0 +1,56 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Encoding effort scene</title>
+<style>html,body { margin:0; overflow:hidden; background:#eee } canvas { display:block }</style>
+<canvas></canvas>
+<script>
+const canvas = document.querySelector('canvas'), context = canvas.getContext('2d');
+window.scene = 'text';
+window.sequence = 0;
+window.drawScene = (ctx, time, sequence, scene) => {
+  const { width, height } = ctx.canvas;
+  ctx.fillStyle = '#eef0f4'; ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = '#18212f'; ctx.fillRect(0, 0, width, 64);
+  // Millisecond wall clock and source-frame sequence survive the complete video path.
+  for (const [value, bits, y] of [[time, 48, 8], [sequence, 32, 32]]) {
+    for (let bit = 0; bit < bits; bit++) {
+      ctx.fillStyle = Math.floor(value / 2 ** bit) % 2 ? '#fff' : '#000';
+      ctx.fillRect(8 + bit * 16, y, 16, 16);
+    }
+  }
+  ctx.font = '14px monospace'; ctx.fillStyle = '#fff';
+  ctx.fillText('Encoding effort: ' + scene, 800, 29);
+  time = (sequence % 60) * 1000 / 30;
+  if (scene === 'motion') {
+    const shift = Math.floor(time / 8) % 48;
+    for (let y = 64; y < height; y += 24) for (let x = -48; x < width; x += 24) {
+      ctx.fillStyle = (x / 24 + (y - 64) / 24) % 2 ? '#3788c1' : '#e1b249';
+      ctx.fillRect(x + shift, y, 24, 24);
+    }
+    for (let i = 0; i < 18; i++) {
+      ctx.fillStyle = `hsl(${i * 20},75%,45%)`;
+      ctx.beginPath();
+      ctx.arc(width / 2 + Math.sin(time / 600 + i) * width * .4, height / 2 + Math.cos(time / 830 + i * 2) * height * .35, 12 + i * 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else {
+    ctx.save(); ctx.beginPath(); ctx.rect(0, 64, width, height - 64); ctx.clip();
+    const shift = scene === 'scroll' ? Math.floor(time / 12) % 28 : 0;
+    for (let row = -1; row < Math.ceil(height / 28); row++) {
+      const y = 72 + row * 28 - shift;
+      ctx.fillStyle = row % 2 ? '#d8e3ed' : '#f7f8fa'; ctx.fillRect(0, y - 20, width, 28);
+      ctx.font = '16px monospace'; ctx.fillStyle = '#243549';
+      ctx.fillText(`${String(row + 2).padStart(3, '0')}  const sample = { bitrate: 4000, width: 1280, height: 720 }; // AaZz 0123456789`, 16, y);
+      ctx.fillStyle = '#ac225b'; ctx.fillRect(width - 86, y - 15, 62, 2);
+      ctx.fillStyle = '#075987'; ctx.fillRect(width - 86, y - 9, 46, 2);
+    }
+    ctx.restore();
+  }
+};
+function frame() {
+  if (canvas.width !== innerWidth || canvas.height !== innerHeight) { canvas.width = innerWidth; canvas.height = innerHeight; }
+  drawScene(context, Date.now(), ++sequence, scene);
+  requestAnimationFrame(frame);
+}
+frame();
+</script>

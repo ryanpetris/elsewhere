@@ -53,13 +53,17 @@ control handoffs keep that resolution; each browser scales the picture to fit wh
 aspect ratio. Both dimensions must be even and between 2 and 8192 pixels. Without this option, the
 desktop follows the controlling browser's size.
 
-Each viewer picks its own codec and quality in the status bar: the codec list is what both the server
+Each viewer picks its own codec, quality and encoding effort in the status bar: the codec list is what both the server
 and that browser can do ("Auto (HEVC)" shows the pick). All five quality levels adapt under their
 selected ceiling: Very Low (2 Mbit/s), Low (5), Medium (`--bitrate`, 8 by default), High (12), and
 Max (25). Max is the default. The stream starts at its ceiling; under pressure the server halves the
 bitrate and holds it, then climbs back a quarter at a time. Targets below 3 Mbit/s have a 30 fps cap.
 The status bar shows the selected ceiling and current encoder target separately from measured video
 throughput. A custom Medium ceiling is displayed as configured, even if it exceeds another level.
+Effort defaults to Fast. Balanced and High spend more encoding time for possible picture improvements
+at the same bitrate. Changes restart the viewer's stream immediately and are remembered on reconnect;
+unsupported encoder controls show unavailable. See [encoding effort](docs/encoding-effort.md) for
+mappings and measured tradeoffs.
 `GET /api/codecs` lists the server's codecs. After the picture stops changing one more frame
 goes out, at four times the bitrate with the software encoders, so text left rough by motion sharpens.
 Frames are painted on a 2D canvas. `?renderer=webgpu` in the URL uses a WebGPU external-texture path

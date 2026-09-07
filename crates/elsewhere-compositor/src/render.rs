@@ -218,7 +218,7 @@ impl State {
             });
             match submitted {
                 Ok(Submit::Encoded) => encoded += 1,
-                Ok(Submit::Held) => failed = true, // a rate cap: the next frame is the whole picture again
+                Ok(Submit::Held) => failed = true, // rate cap or encoder priming: offer the whole picture again
                 Err(e) => {
                     failed = true;
                     tracing::warn!(key, "frame not encoded: {e}");

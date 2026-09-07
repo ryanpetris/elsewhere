@@ -1,6 +1,6 @@
 //! Binary WebSocket messages, little-endian, byte 0 = type. Mirrored in web/src/viewer.js.
 
-use elsewhere_core::{Bytes, Codec, ControlMsg, CursorImage, EncodedFrame, InputMsg, Quality, StreamInfo, WindowInfo};
+use elsewhere_core::{Bytes, Codec, ControlMsg, CursorImage, EncodedFrame, EncodingEffort, EffortState, InputMsg, Quality, StreamInfo, WindowInfo};
 
 // server -> client
 pub const CONFIG: u8 = 0x01;
@@ -269,10 +269,10 @@ impl Preset {
 }
 
 /// The selected ceiling and current encoder target, separate from measured throughput.
-pub fn stream_state(codec: Codec, auto_codec: bool, quality: Quality, preset: Preset, medium_kbps: u32) -> Bytes {
+pub fn stream_state(codec: Codec, auto_codec: bool, quality: Quality, preset: Preset, medium_kbps: u32, effort: EffortState) -> Bytes {
     let json = serde_json::json!({ "codec": codec_name(codec), "auto_codec": auto_codec,
         "preset": preset.name(), "ceiling_kbps": preset.quality(medium_kbps).bitrate_kbps, "medium_kbps": medium_kbps,
-        "bitrate_kbps": quality.bitrate_kbps, "max_fps": quality.max_fps });
+        "bitrate_kbps": quality.bitrate_kbps, "max_fps": quality.max_fps, "effort": effort });
     let mut b = vec![STREAM_STATE];
     b.extend_from_slice(json.to_string().as_bytes());
     b.into()
@@ -310,8 +310,8 @@ pub fn audio(pts_us: u64, data: &[u8], seq: u16) -> Bytes {
 
 #[derive(Debug, PartialEq)]
 pub enum ClientMsg {
-    /// The browser's decoders and codec and quality choices.
-    Hello { hw: u8, sw: u8, codec: Option<Codec>, quality: Preset },
+    /// The browser's decoders and codec, quality and effort choices.
+    Hello { hw: u8, sw: u8, codec: Option<Codec>, quality: Preset, effort: EncodingEffort },
     Resize { css_w: u16, css_h: u16, dpr: f32 },
     MotionAbs { x: f32, y: f32 },
     MotionRel { dx: f32, dy: f32 },
@@ -354,6 +354,7 @@ pub enum DragMsg {
 pub struct StreamChoice {
     pub codec: Option<String>,
     pub quality: Option<String>,
+    pub effort: Option<EncodingEffort>,
 }
 
 #[derive(Debug, PartialEq, serde::Deserialize)]
@@ -375,6 +376,7 @@ pub fn decode(b: &[u8]) -> Option<ClientMsg> {
             sw: u8_at(2)?,
             codec: u8_at(3)?.checked_sub(1).and_then(|id| CODECS.get(id as usize)).map(|(c, _)| *c),
             quality: Preset::from_id(u8_at(4)?),
+            effort: EncodingEffort::from_id(u8_at(5).unwrap_or(0)),
         },
         RESIZE => ClientMsg::Resize { css_w: u16_at(1)?, css_h: u16_at(3)?, dpr: f32_at(5)? },
         MOTION_ABS => ClientMsg::MotionAbs { x: f32_at(1)?, y: f32_at(5)? },
@@ -420,12 +422,12 @@ mod tests {
             assert_eq!(preset.name(), name);
             assert_eq!(preset as u8, id);
             assert_eq!(preset.quality(8000).bitrate_kbps, kbps);
-            assert_eq!(decode(&[HELLO, 0, 16, 5, id]), Some(ClientMsg::Hello { hw: 0, sw: 16, codec: Some(Codec::Vp8), quality: preset }));
+            assert_eq!(decode(&[HELLO, 0, 16, 5, id]), Some(ClientMsg::Hello { hw: 0, sw: 16, codec: Some(Codec::Vp8), quality: preset, effort: EncodingEffort::Fast }));
             for medium in [2500, 3000, 40000] {
                 let quality = preset.quality(medium);
                 assert_eq!(quality.bitrate_kbps, if preset == Preset::Medium { medium } else { kbps });
                 assert_eq!(quality.max_fps, if quality.bitrate_kbps < 3000 { 30 } else { 0 });
-                let packet = stream_state(Codec::Vp8, true, Quality { bitrate_kbps: 1000, max_fps: 30 }, preset, medium);
+                let packet = stream_state(Codec::Vp8, true, Quality { bitrate_kbps: 1000, max_fps: 30 }, preset, medium, EffortState::pending(EncodingEffort::Fast));
                 let state: serde_json::Value = serde_json::from_slice(&packet[1..]).unwrap();
                 assert_eq!(state["preset"], name);
                 assert_eq!(state["ceiling_kbps"], quality.bitrate_kbps);
@@ -439,7 +441,7 @@ mod tests {
         assert_eq!(Preset::named("auto"), None);
         assert_eq!(Preset::default(), Preset::Max);
         for packet in [vec![HELLO, 0, 16, 0, 0], vec![HELLO, 0, 16, 0, 255]] {
-            assert_eq!(decode(&packet), Some(ClientMsg::Hello { hw: 0, sw: 16, codec: None, quality: Preset::Max }));
+            assert_eq!(decode(&packet), Some(ClientMsg::Hello { hw: 0, sw: 16, codec: None, quality: Preset::Max, effort: EncodingEffort::Fast }));
         }
     }
 
