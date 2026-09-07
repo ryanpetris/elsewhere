@@ -527,18 +527,21 @@ it runs with `-i` and `TERM=xterm-256color`. A graphical command opens on the ac
 The terminal supports interactive programs, job control, scrollback and resizing. Closing the panel,
 leaving the page or losing its socket closes the PTY and reaps the shell. Detached applications follow
 normal terminal hangup behavior. A disconnected session offers New shell; it does not replay input or
-resume the old process. Read-only tokens cannot start a terminal. Token rotation revokes terminal input
-and closes idle terminal connections on the next 200 ms check.
+resume the old process. Read-only tokens cannot start a terminal. After token rotation, the next input
+frame is rejected; idle terminal connections close on the next 200 ms check.
 
 `/ws/terminal` uses the same first binary AUTH frame as the viewer. Subsequent binary frames carry raw
 terminal input and output. Client text frames contain either `{ "cols": 80, "rows": 24 }` or
 `{ "ack": 123 }`, acknowledging the number of output bytes rendered. The server permits at most
-256 KiB of unacknowledged output and queued input, and at most 64 KiB per incoming frame. Sizes must
-be 2–1000 columns and 1–1000 rows. The browser uses xterm.js and its FitAddon, loaded when the panel opens.
+256 KiB of unacknowledged output and queued input, and at most 64 KiB per incoming frame. Output waits
+while rendering acknowledgements are paused. Malformed control frames close the terminal. Sizes must
+be 2–1000 columns and 1–1000 rows. The browser loads the xterm.js and FitAddon JavaScript when the panel
+opens; their styles ship with the viewer stylesheet.
 
 `npm run check:terminal` in the Docker rig checks real shell commands, environment equality with
 desktop launches, a Wayland application, Ctrl+C, Ctrl+Z, PTY resizing, output beyond the acknowledgement
-window, shell cleanup, read-only denial and token rotation. It needs Chromium, foot, the private audio
+window, continuous-output interruption, desktop input isolation, shell cleanup, read-only denial,
+token rotation and failed-emulator-download isolation. It needs Chromium, foot, the private audio
 stack and a release binary; `ELSEWHERE_BINARY` can select a build mounted into the image.
 
 ## Browser UI (`web/src`)

@@ -27,7 +27,7 @@ pub async fn upgrade(ws: WebSocketUpgrade, State(app): State<Arc<App>>) -> Respo
 }
 
 #[derive(Deserialize)]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 enum Control {
     Resize { cols: u16, rows: u16 },
     Ack { ack: usize },

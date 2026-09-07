@@ -27,12 +27,17 @@ try {
   await page.addInitScript(() => {
     const Original = window.WebSocket;
     window.terminalBytes = 0;
+    window.desktopKeys = 0;
     window.WebSocket = class extends Original {
       constructor(...args) {
         super(...args);
         if (String(args[0]).endsWith('/ws/terminal')) this.addEventListener('message', event => {
           if (event.data instanceof ArrayBuffer) terminalBytes += event.data.byteLength;
         });
+      }
+      send(data) {
+        if (new URL(this.url).pathname === '/ws' && new Uint8Array(data)[0] === 0x87) desktopKeys++;
+        super.send(data);
       }
     };
   });
@@ -86,6 +91,7 @@ try {
   await command('echo $$ > shellpid');
   await wait('shell PID', () => contents(root + '/shellpid'));
   const shellpid = (await contents(root + '/shellpid')).trim();
+  assert.equal(await page.evaluate(() => desktopKeys), 0, 'terminal typing never sends desktop key events');
   await terminal.getByRole('button', { name: 'Close terminal' }).click();
   await wait('shell cleanup', async () => await contents('/proc/' + shellpid + '/status') === null);
   console.log('terminal: session environment, graphical launch, interactive commands, signals, job control, resize, flow control and cleanup passed');
@@ -116,6 +122,21 @@ try {
   }), viewerToken);
   assert.equal(denied, true, 'read-only token cannot open a shell');
   await viewer.close();
+  const malformedClosed = await page.evaluate(token => new Promise(resolve => {
+    const socket = new WebSocket(`ws://${location.host}/ws/terminal`);
+    socket.binaryType = 'arraybuffer';
+    let sent = false;
+    const deadline = setTimeout(() => { resolve(false); socket.close(); }, 3000);
+    socket.onopen = () => { const bytes = new TextEncoder().encode(token); const auth = new Uint8Array(bytes.length + 1); auth[0] = 0x80; auth.set(bytes, 1); socket.send(auth); };
+    socket.onmessage = event => {
+      if (!sent && event.data instanceof ArrayBuffer) {
+        sent = true;
+        socket.send(JSON.stringify({ cols: 80, rows: 24, ack: event.data.byteLength }));
+      }
+    };
+    socket.onclose = () => { clearTimeout(deadline); resolve(sent); };
+  }), token);
+  assert.equal(malformedClosed, true, 'combined control fields are rejected instead of silently losing acknowledgements');
   await page.getByRole('button', { name: 'Terminal', exact: true }).click();
   await terminal.getByRole('status').filter({ hasText: 'Connected' }).waitFor();
   await command('echo $$ > revokedpid');
