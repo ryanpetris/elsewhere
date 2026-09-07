@@ -166,6 +166,44 @@ Lifecycle and isolation checks pass on PipeWire 1.4.2 with WirePlumber 0.5.6 and
 1.6.8 with WirePlumber 0.5.17. Direct GStreamer device publication is unsuitable for idle startup; native virtual
 nodes keep device lifetime independent of browser capture and application streams.
 
+### Standalone native capture
+
+`python crates/elsewhere/checks/native-capture.py` runs 30 fresh private stacks in Docker. Each
+trial waits for running virtual nodes, captures output and idle microphone silence, then checks
+two microphone tone/stop cycles. Every capture must produce samples and exit within six seconds.
+Failures retain the configuration and logs inside the container; capture timeouts also save a graph snapshot.
+
+Keep the capture sink's default `async=true`, including when using `sync=false` for immediate
+delivery. This matches the application's audio appsink. The check accepts `--sink-async=false`
+to exercise immediate sink activation. On PipeWire/GStreamer-plugin 1.6.8, WirePlumber 0.5.17
+and GStreamer 1.28.6, that variant stalled on trial two after an idle microphone capture started.
+The dummy driver, virtual devices and capture client were running, with an active capture link;
+the client process still failed to deliver samples or exit.
+The same configuration passed 30 trials with `async=true`, totaling 180 captures. With
+`async=false --source-clock=false`, it also passed 30 trials. The latter disables the source's
+clock provider and is an alternative for standalone pipelines that need immediate sink activation.
+
+The failing native log shows streaming, pause, flushing, reactivation and a negotiation error.
+The [1.6.8 plugin state handler](https://github.com/PipeWire/pipewire/blob/1.6.8/src/gst/gstpipewiresrc.c)
+posts clock loss for a paused audio stream; `gst-launch` responds with a pause/play cycle.
+On reactivation, `wait_negotiated` rejects a still-flushing source before the parent state handler
+can clear flushing, and the error path bypasses the loop unlock. This source-level explanation
+matches the captured sequence. It is a native plugin state-transition dependency; the measured
+workarounds avoid that transition during these captures. They do not establish that arbitrary
+pause/resume sequences are safe in the affected plugin.
+The application does not respond to clock-loss messages with a pause/play cycle; it starts capture
+in PLAYING and tears it down with NULL. This is another difference from the failing standalone client.
+
+PipeWire/plugin 1.4.2, WirePlumber 0.5.8 and GStreamer 1.26.2 passed 30 trials with `async=false`
+using the current configuration. That plugin does not expose `provide-clock`, so do not pass
+`--source-clock` on that version. Its
+[state handler](https://github.com/PipeWire/pipewire/blob/1.4.2/src/gst/gstpipewiresrc.c)
+also lacks the newer clock-loss/renegotiation path. Earlier compatibility measurements saw a
+standalone output-capture timeout on this stack, but the current repeat did not reproduce it.
+The evidence does not attribute that earlier timeout to the 1.6.8 mechanism or establish a fixed
+upstream release. Application lifecycle and isolation coverage remains as described above.
+The retained default check also passed 30 trials on both the 1.4.2 and 1.6.8 stacks.
+
 References: [PipeWire configuration](https://docs.pipewire.org/page_daemon.html),
 [native loopback](https://docs.pipewire.org/page_module_loopback.html),
 [WirePlumber file isolation](https://pipewire.pages.freedesktop.org/wireplumber/daemon/locations.html),
