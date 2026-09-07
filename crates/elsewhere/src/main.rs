@@ -53,7 +53,7 @@ struct Cli {
     /// (no GPU at all: a VPS, a container without devices) and encodes in software.
     #[arg(long, default_value = DEFAULT_RENDER_NODE)]
     render_node: PathBuf,
-    #[arg(long, default_value = "wayland-browser")]
+    #[arg(long, default_value = "elsewhere")]
     socket_name: String,
     /// No audio either way: neither the clients' for the browser nor the browser's microphone for them.
     #[arg(long)]

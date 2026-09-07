@@ -99,7 +99,7 @@ Windows that don't draw their own title bar (X11 applications, Vulkan and SDL pr
 asks for server-side decorations) get one from the compositor: drag it, double-click it to maximize,
 resize from the edges, close, maximize and minimize with its buttons.
 
-Other clients can join later: `WAYLAND_DISPLAY=wayland-browser some-app`. X11 apps work too: an
+Other clients can join later: `WAYLAND_DISPLAY=elsewhere some-app`. X11 apps work too: an
 Xwayland is started automatically and the log prints its `DISPLAY`. Super (or Alt) + left drag moves
 any window from anywhere in it.
 
