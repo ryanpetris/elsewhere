@@ -14,8 +14,21 @@ Releases (made from `vX.Y.Z` tags; the tag is the version) carry a Debian packag
 stable that also installs on Ubuntu 24.04 and later, an Arch package, and a tarball with the binary.
 Building from source needs Rust stable, Node 24 (for the viewer) and the development packages for
 GStreamer (core and base), libgbm, libEGL and libxkbcommon; `make` builds the viewer and then
-`target/release/elsewhere`, which reports `0.0.0-dev` unless `ELSEWHERE_VERSION` is set. The Arch
-`PKGBUILD` is in `packaging/arch`.
+`target/release/elsewhere`. `make version` reports the nearest reachable `vX.Y.Z` release tag,
+adding `.N` for commits since that tag and `-dirty` for tracked changes or untracked files.
+For example, three commits after `v0.1.2` produce `v0.1.2.3`, or `v0.1.2.3-dirty` with local changes.
+Ignored build outputs do not make a checkout dirty. Fetch tags and full history before building;
+shallow checkouts and checkouts with no reachable release tag cannot derive a version. Plain Cargo builds report `0.0.0-dev` unless
+`ELSEWHERE_VERSION` is set.
+
+`make package-deb`, `make package-tar` and `make package-arch` build into `dist`. Debian needs
+`cargo-deb` and the Debian packaging tools; Arch needs `makepkg` and a non-root build user. The release
+workflow uses these same targets on their native distributions. Filenames and the binary's
+`--version` retain the `v` prefix. Debian metadata omits `v` and adds package revision `-1`; Arch
+metadata also spells `-dirty` as `.dirty`, because its version field cannot contain a hyphen.
+The Arch `PKGBUILD` in `packaging/arch` also derives the version when used directly.
+Package targets always derive their version from Git. `make check-version` runs the version fixtures
+with Python 3 and Git; run it in the Docker rig.
 
 ## Requirements
 

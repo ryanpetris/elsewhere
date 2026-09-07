@@ -5,14 +5,30 @@
 #   make run ARGS='--no-tls --listen 127.0.0.1:8080 --exec foot'
 #   make docker     the container image
 #   make docker-run the image, built if needed, on port 8443 (ARGS go to elsewhere)
+#   make version     the Git-derived build version
+#   make check-version test version derivation (Python 3 and Git)
+#   make package-deb Debian package (cargo-deb and dpkg required)
+#   make package-tar generic Linux tarball
+#   make package-arch Arch package (makepkg, run as a non-root user)
 #   make clean
 
-.PHONY: all build web test run docker docker-run clean
+.PHONY: all build web test run docker docker-run clean version check-version package-deb package-tar package-arch
+# Package targets share Cargo and viewer build outputs.
+.NOTPARALLEL:
 
 all: build
 
 build: web
-	cargo build --release --locked
+	version=$${ELSEWHERE_VERSION:-$$(sh scripts/version.sh)} && ELSEWHERE_VERSION="$$version" cargo build --release --locked
+
+version:
+	@sh scripts/version.sh
+
+check-version:
+	python3 scripts/check-version.py
+
+package-deb package-tar package-arch:
+	sh scripts/package.sh $(@:package-%=%)
 
 WEB_SRC := $(shell find web/src) web/index.html web/vite.config.js web/package.json web/package-lock.json LICENSE
 DIST := web/dist/index.html web/dist/app.js web/dist/app.css web/dist/THIRD_PARTY.txt
@@ -40,4 +56,4 @@ docker-run: docker
 		-p 8443:8443 -p 8443:8443/udp -v elsewhere-data:/home/elsewhere/.config/elsewhere elsewhere $(ARGS)
 
 clean:
-	rm -rf web/dist target
+	rm -rf web/dist target dist

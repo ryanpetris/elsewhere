@@ -1,15 +1,17 @@
 # Maintainer: Ryan Petris
 # Builds the checkout this file lives in (no source download): `cd packaging/arch && makepkg -f`.
-# The release workflow sets pkgver from the git tag; a local build stays at 0.0.0.
+# Arch metadata uses a numeric version and a dot before dirty; the binary keeps the Git version.
 pkgname=elsewhere
-pkgver=0.0.0
+_version=${ELSEWHERE_VERSION:-$(sh "$startdir/../../scripts/version.sh")}
+pkgver=${_version#v}
+pkgver=${pkgver//-/.}
 pkgrel=1
 pkgdesc="Headless Wayland compositor whose screen is a browser tab"
 arch=('x86_64')
 url="https://github.com/ryanpetris/elsewhere"
 license=('MIT' 'AGPL-3.0-or-later')
 depends=('gstreamer' 'gst-plugins-base' 'gst-plugins-good' 'gst-plugins-bad' 'gst-plugin-va' 'mesa' 'libxkbcommon' 'libpipewire')
-makedepends=('cargo' 'nodejs' 'npm' 'clang')
+makedepends=('cargo' 'nodejs' 'npm' 'clang' 'git' 'make')
 optdepends=('xorg-xwayland: X11 clients'
             'ttf-dejavu: titles on the window decorations the compositor draws'
             'pipewire: private native audio services (PipeWire 1.4.2 or later)'
@@ -23,7 +25,7 @@ options=('!lto' '!debug') # one package; no split -debug package with the symbol
 
 build() {
     cd "$startdir/../.."
-    ELSEWHERE_VERSION="$pkgver" make build
+    ELSEWHERE_VERSION="$_version" make build
 }
 
 package() {
