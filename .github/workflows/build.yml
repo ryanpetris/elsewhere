@@ -37,6 +37,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - name: Trust checkout in the build container
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Build dependencies
         run: |
           apt-get update
