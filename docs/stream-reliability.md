@@ -92,3 +92,77 @@ comparisons with other builds, browser checks and fixture workloads stopped.
 Each picture records its source sequence, source timestamp, capture time and observed StreamState target.
 That reported target can briefly precede the encoder's new stream. The text capture requires a source
 timestamp after the text switch and at least 60 source frames in that phase.
+
+## Recorded results
+
+The audited formal coverage below contains 48 single-viewer samples and 24 three-viewer 720p samples:
+three 60-second repeats of each scene for each listed codec/resolution. It uses an Intel Core Ultra
+7 155H with integrated Intel Arc graphics, FFmpeg 9.0.1, libavcodec 63.1.101, Chromium 152,
+libva 2.24, Intel media driver 26.2.4 and Mesa 26.2.2. Encoding uses VAAPI and Fast effort.
+The source, compositor, encoders and viewer browser share one machine; multiple viewers are pages
+in one browser instance, not independent physical clients.
+
+Forty-five single-viewer samples and the 24 three-viewer 720p samples use the same build. Three single-viewer
+samples use a build with equivalent hardware media code and settings; its software VP9 settings
+differ. These formal samples precede the RTC pressure-accounting correction that excludes intentional
+recovery replacement from congestion; the table describes those measured builds.
+
+Ranges span individual sample results, including every page for three-viewer timing and frame rate.
+Encoded rates are each sample's primary-viewer mean, not aggregate traffic or peak rate. Every row
+contains 12 samples. Single-viewer links use 12 Mbit/s and 100 packets; three-viewer links use
+36 Mbit/s and 300 packets. Both have 20 ms one-way delay.
+
+| Codec | Size | Viewers | p99 frame age (ms) | Worst paint gap (ms) | Painted frames/s | Encoded Mbit/s |
+|---|---|---:|---:|---:|---:|---:|
+| H.264 | 1280×720 | 1 | 121–185 | 104.3 | 54.3–54.5 | 6.519–6.606 |
+| AV1 | 1280×720 | 1 | 128–234 | 232.9 | 53.5–54.2 | 5.082–6.602 |
+| H.264 | 1920×1080 | 1 | 128–236 | 205.7 | 28.6–53.8 | 6.396–8.004 |
+| AV1 | 1920×1080 | 1 | 140–261 | 370.4 | 52.2–53.6 | 5.398–6.487 |
+| H.264 | 1280×720 | 3 | 127–184 | 104.1 | 53.9–54.4 | 6.470–6.546 |
+| AV1 | 1280×720 | 3 | 106–238 | 225.2 | 53.3–54.2 | 5.446–6.586 |
+
+Every observed viewer in both 720p matrices met the p99-below-300-ms and gap-below-500-ms targets.
+All 72 samples had zero qdisc packet drops, primary decoder-pressure drops, decoder errors and fallback.
+The three single-viewer AV1 720p scroll samples started at 4 Mbit/s and recovered to 8 Mbit/s, each
+with four reopens and four key requests. The other 45 single-viewer samples and every page in the
+three-viewer 720p samples held 8 Mbit/s during measurement.
+
+The primary protocol-loss counter totaled 16 across the single-viewer samples and two across the
+three-viewer 720p samples. Those counts are distinct from decoder-pressure drops and network loss:
+replacing unsent video with a key can leave protocol sequence gaps. Source-clock sequence gaps are
+different again. In single-viewer H.264 1080p cuts, byte admission delivered 28.6–29.1 frames/s from
+about 54 source positions/s, skipping roughly 1,500 source positions per sample to contain output
+rate. That is a visible cadence tradeoff despite bounded frame age and paint gaps.
+
+Per-session queue distributions stayed stable across sample quarters and repeatedly returned to
+empty, with at most 475 ms between observed empty states. The largest single-viewer primary queue
+was 393 kB with a 313 ms front-frame age; the three-viewer 720p primary maxima were 280 kB and
+177 ms. These observations show no accumulating server backlog in these samples.
+
+Matching decoded pictures still show a quality cost after dense cuts. One retained H.264 1080p
+first-cut picture at an observed 8 Mbit/s target had PSNR 14.80 dB and visibly smeared, noisy detail;
+its settled text was readable, with softened glyphs and thin rules. A retained AV1 720p first-cut
+picture lost detail at 20.11 dB, while its moving picture and settled text remained clear. These
+unequal resolutions do not establish a codec-quality ranking.
+
+Diagnostic native three-viewer 1080p samples from the same pre-correction build expose downstream
+playback pressure, tracked in
+[issue #73](https://github.com/ryanpetris/elsewhere/issues/73). One AV1 cuts sample averaged about 33 frames/s per
+viewer, reached 890 ms worst viewer p99 age and 2.585 s maximum displayed age, and ended near
+1–1.5 Mbit/s after decoder-pressure drops and reopens. AV1 game samples reached 1.860 s maximum
+age even while server queues were empty in about 97% of observations and native encoding p99 was
+about 18 ms. Receive-to-decoder-output and drawing timings locate delay downstream of native encoding
+and transport; the contributions of CPU, GPU, decoder backend, browser scheduling and measurement
+readback remain unresolved.
+H.264 scroll had an affected sample followed by two repeats at 8 Mbit/s and about 52–53 frames/s,
+with zero primary decoder-pressure drops and worst all-viewer gaps of 103 and 92 ms. These stress
+observations must not be described as uniformly low-latency playback, sustained H.264 failure, or
+measurements of the corrected controller.
+
+A separate three-viewer AV1 720p scroll condition kept only 100 packets at 36 Mbit/s. Its three
+samples recorded 36, 55 and 74 non-injected qdisc drops; the worst paint gap was 1.058 s. That
+capacity also holds the propagation delay's packets, so it provides substantially less queue time
+than 100 packets at 12 Mbit/s. A 300-packet diagnostic had zero drops and worst gap 75 ms; the
+maintained 300-packet 720p matrix is reported above. Sampled queue length did not directly capture
+the instantaneous overflow point. The 100-packet results remain evidence for the tighter-buffer
+condition, separate from the matrix with equivalent bandwidth headroom and approximate queue time.
