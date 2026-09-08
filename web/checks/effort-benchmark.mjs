@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, open, readFile, writeFile, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
 
 const root = await mkdtemp('/tmp/elsewhere-effort-benchmark-');
@@ -33,6 +33,8 @@ const wait = async predicate => {
   throw new Error('benchmark condition timed out');
 };
 const percentile = (values, fraction) => values.length ? values.slice().sort((a, b) => a - b)[Math.min(values.length - 1, Math.floor(values.length * fraction))] : null;
+const nativeRates = trace => [...trace.matchAll(/ffmpeg video rate[^\n]*stream_target_kbps=(\d+)[^\n]*encoder_target_bps=(\d+)[^\n]*buffer_bits=(\d+)/g)]
+  .map(([, stream, encoder, buffer]) => ({ stream_target_kbps: Number(stream), encoder_target_bps: Number(encoder), encoder_buffer_bits: Number(buffer) }));
 let browser, remote;
 try {
   await wait(async () => { try { return (await fetch(origin)).ok; } catch { return false; } });
@@ -116,7 +118,12 @@ try {
     await page.waitForFunction(({ codec, effort }) => { const state = elsewhere.store.get().streamState; return state?.codec === codec && state.effort.applied === effort; }, { codec, effort });
     await page.waitForTimeout(2500);
     assert.deepEqual(await scenePage.evaluate(() => [innerWidth, innerHeight, canvas.width, canvas.height]), [width, height, width, height], 'source canvas matches encoded output');
-    const beforeLog = (await stat(root + '/server.log')).size;
+    const precedingTrace = await readFile(root + '/server.log');
+    const beforeLog = precedingTrace.length;
+    // This fixed-target single viewer's last configuration precedes its warmed sample.
+    const nativeRate = nativeRates(precedingTrace.toString()).at(-1);
+    assert.ok(nativeRate, 'native encoder rate configuration was traced');
+    assert.equal(nativeRate.stream_target_kbps, bitrate, 'native configuration uses this stream target');
     const before = await page.evaluate(() => {
       window.captured = null;
       window.measurement = { latency: [], sequences: [], invalid: 0, bytes: 0, packets: 0, targets: [] };
@@ -131,10 +138,10 @@ try {
       result.png = captured.toDataURL();
       return result;
     });
-    assert.equal(before.state.bitrate_kbps, bitrate, 'fixed encoder target before sample');
-    assert.equal(after.state.bitrate_kbps, bitrate, 'fixed encoder target after sample');
+    assert.equal(before.state.bitrate_kbps, bitrate, 'fixed stream target before sample');
+    assert.equal(after.state.bitrate_kbps, bitrate, 'fixed stream target after sample');
     assert.equal(after.state.ceiling_kbps, bitrate);
-    assert.ok(after.measurement.targets.every(target => target === bitrate), 'encoder target stays fixed throughout sample');
+    assert.ok(after.measurement.targets.every(target => target === bitrate), 'stream target stays fixed throughout sample');
     assert.ok(after.measurement.latency.length > 10, 'decoded clock markers');
     assert.equal(after.measurement.invalid, 0, 'all clock markers decode');
     const expected = await scenePage.evaluate(({ marker, scene, width, height }) => {
@@ -158,10 +165,11 @@ try {
     await file.read(trace, 0, trace.length, beforeLog); await file.close();
     const encode = [...trace.toString().matchAll(/ffmpeg encoded[^\n]*\bencode_us=(\d+)/g)].map(match => Number(match[1]) / 1000);
     assert.ok(encode.length > 10, 'FFmpeg conversion and encode timing samples');
+    for (const rate of nativeRates(trace.toString())) assert.deepEqual(rate, nativeRate, 'native encoder rate stays fixed throughout sample');
     const seconds = (after.at - before.at) / 1000;
     const sequences = after.measurement.sequences, unique = new Set(sequences);
     const span = Math.max(...sequences) - Math.min(...sequences) + 1;
-    const row = { codec, effort, scene, width, height, encoder: after.state.effort.encoder, compositor_hz: 30, ceiling_kbps: bitrate,
+    const row = { codec, effort, scene, width, height, encoder: after.state.effort.encoder, compositor_hz: 30, ceiling_kbps: bitrate, ...nativeRate,
       source_sequence_fps: span / seconds,
       actual_kbps: after.measurement.bytes * 8 / seconds / 1000, delivered_fps: after.measurement.latency.length / seconds,
       encoder_ms: [percentile(encode, .5), percentile(encode, .95)], end_to_end_ms: [percentile(after.measurement.latency, .5), percentile(after.measurement.latency, .95)],
