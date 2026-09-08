@@ -7,7 +7,7 @@ import { chromium } from 'playwright-core';
 const root = await mkdtemp('/tmp/elsewhere-broadcast-check-');
 const children = [], handles = [];
 const withAudio = process.env.BROADCAST_AUDIO === '1';
-let browser, blackhole;
+let browser, blackhole, pipewirePid, audioEnv;
 const sockets = new Set();
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function wait(label, fn, seconds = 20) {
@@ -51,7 +51,12 @@ try {
   if (!withAudio) assert.equal((await api('/start', { ...settings('audio-unavailable', 19357), audio: 'desktop' })).status, 503);
   else {
     assert.equal((await api('/capabilities')).body.desktop_audio, true);
-    await fetch(base + '/api/control', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'spawn', cmd: 'gst-launch-1.0 -q audiotestsrc is-live=true wave=sine ! audioconvert ! audioresample ! pulsesink' }) });
+    const processes = execFileSync('ps', ['-eo', 'pid,ppid,comm'], { encoding: 'utf8' });
+    const pipewire = processes.split('\n').map(line => line.trim().split(/\s+/)).find(([, parent, name]) => +parent === desktop.pid && name === 'pipewire');
+    assert.ok(pipewire, 'private PipeWire service is a child of this desktop');
+    pipewirePid = +pipewire[0];
+    audioEnv = { ...process.env, ...Object.fromEntries((await readFile(`/proc/${pipewirePid}/environ`, 'utf8')).split('\0').filter(v => v.startsWith('PIPEWIRE_')).map(v => [v.slice(0, v.indexOf('=')), v.slice(v.indexOf('=') + 1)])) };
+    await fetch(base + '/api/control', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'spawn', cmd: 'ffmpeg -nostdin -hide_banner -loglevel error -f lavfi -i sine=frequency=440:sample_rate=48000 -af "volume=0.8,pan=stereo|c0=c0|c1=c0" -f f32le pipe:1 | pacat --playback --raw --format=float32le --rate=48000 --channels=2 --latency-msec=20' }) });
   }
   assert.equal((await api('/start', { ...settings('bad-size', 19357), width: 641 })).status, 400);
   assert.equal((await api('/start', { ...settings('long-label', 19357), label: '界'.repeat(121) })).status, 400);
@@ -80,6 +85,19 @@ try {
   await wait('stop stalled handshake', async () => (await api('/' + stalled.body.id)).body.state === 'stopped', 10);
   for (const socket of sockets) socket.destroy();
   await new Promise(resolve => blackhole.close(resolve)); blackhole = null;
+  const sinkC = await ingest(19360, 'capture-c'), sinkD = await ingest(19361, 'capture-d');
+  await sleep(400);
+  const c = await api('/start', { ...settings('third', 19360), audio: 'silence' });
+  const d = await api('/start', { ...settings('fourth', 19361), audio: 'silence' });
+  assert.equal(c.status, 200); assert.equal(d.status, 200);
+  await wait('four independent outputs sending', async () => (await api('')).body.filter(s => s.state === 'sending').length === 4);
+  assert.notEqual((await api('/start', { ...settings('fifth', 19362), audio: 'silence' })).status, 200);
+  await api('/' + c.body.id + '/stop', {});
+  await wait('one of four stops independently', async () => (await api('/' + c.body.id)).body.state === 'stopped');
+  for (const id of [a.body.id, b.id, d.body.id]) assert.equal((await api('/' + id)).body.state, 'sending');
+  await api('/' + d.body.id + '/stop', {});
+  await wait('fourth stopped', async () => (await api('/' + d.body.id)).body.state === 'stopped');
+  sinkC.kill('SIGINT'); sinkD.kill('SIGINT');
   const before = (await api('/' + a.body.id)).body.frames;
   if (withAudio) {
     browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: true, args: ['--no-sandbox'] });
@@ -99,7 +117,17 @@ try {
     await fetch(base + '/api/input', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'move', x: 200, y: 200 }) });
     await sleep(1200);
     await browser.close(); browser = null;
+    for (const quantum of [256, 2048, 1024]) {
+      execFileSync('pw-metadata', ['-n', 'settings', '0', 'clock.force-quantum', String(quantum)], { env: audioEnv, stdio: 'ignore' });
+      await sleep(500);
+    }
+    process.kill(pipewirePid, 'SIGSTOP');
+    await sleep(200);
+    process.kill(pipewirePid, 'SIGCONT');
+    await sleep(300);
+    for (const id of [a.body.id, b.id]) assert.equal((await api('/' + id)).body.state, 'sending', 'capture discontinuity keeps the output active');
   } else await sleep(6000);
+  if (process.env.BROADCAST_DURATION) await sleep(Number(process.env.BROADCAST_DURATION) * 1000);
   assert.ok((await api('/' + a.body.id)).body.frames > before + 150, 'idle output must keep producing frames');
   assert.equal((await api('/' + a.body.id + '/stop', {}, viewerToken)).status, 403);
   sinkA.kill('SIGINT');
@@ -114,7 +142,7 @@ try {
   await api('/' + a.body.id + '/stop', {});
   sinkB.kill('SIGINT'); replacement.kill('SIGINT'); await sleep(500);
   for (const [name, width, height, fps] of [['capture-a', 640, 360, 30], ['capture-b', 320, 240, 60]]) {
-    const probe = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_streams', '-show_format', '-show_packets', '-of', 'json', root + '/' + name + '.flv'], { maxBuffer: 20 * 1024 * 1024 }));
+    const probe = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'packet=stream_index,pts_time,dts_time,flags:stream=codec_type,codec_name,width,height,index:format=bit_rate', '-of', 'json', root + '/' + name + '.flv'], { maxBuffer: 20 * 1024 * 1024 }));
     const v = probe.streams.find(s => s.codec_type === 'video'), a = probe.streams.find(s => s.codec_type === 'audio');
     assert.ok(+probe.format.bit_rate > 800000 * 0.8, 'CBR video maintains its configured bitrate during idle');
     assert.equal(v.codec_name, 'h264'); assert.equal(a.codec_name, 'aac'); assert.equal(v.width, width); assert.equal(v.height, height);
@@ -127,6 +155,8 @@ try {
     for (let i = 1; i < keys.length; i++) assert.ok(keys[i] - keys[i-1] <= 2.3, 'regular keyframes');
     const audio = probe.packets.filter(p => p.stream_index === a.index);
     assert.ok(Math.abs(+audio[0].pts_time - +packets[0].pts_time) < 0.3, 'A/V startup synchronization');
+    assert.ok(Math.abs(+audio.at(-1).pts_time - +packets.at(-1).pts_time) < 0.1, 'A/V clocks stay synchronized');
+    for (const stream of [packets, audio]) for (let i = 1; i < stream.length; i++) assert.ok(+stream[i].dts_time > +stream[i-1].dts_time, 'monotonic decode timestamps');
     console.log(JSON.stringify({ name, width, height, fps: measured, frames: packets.length, keyframes: keys.length }));
   }
   if (withAudio) {
@@ -144,10 +174,7 @@ try {
     const audioRun = await api('/start', settings('audio-failure', 19357));
     const silentRun = await api('/start', { ...settings('silence-survives', 19358), audio: 'silence' });
     await wait('audio outputs sending', async () => (await api('/' + audioRun.body.id)).body.state === 'sending' && (await api('/' + silentRun.body.id)).body.state === 'sending');
-    const processes = execFileSync('ps', ['-eo', 'pid,ppid,comm'], { encoding: 'utf8' });
-    const pipewire = processes.split('\n').map(line => line.trim().split(/\s+/)).find(([, parent, name]) => +parent === desktop.pid && name === 'pipewire');
-    assert.ok(pipewire, 'private PipeWire service is a child of this desktop');
-    process.kill(+pipewire[0], 'SIGTERM');
+    process.kill(pipewirePid, 'SIGTERM');
     await wait('audio failure reported', async () => (await api('/' + audioRun.body.id)).body.state === 'failed');
     assert.equal((await api('/' + silentRun.body.id)).body.state, 'sending');
     const retried = await api('/start', settings('audio-failure', 19357));
@@ -163,6 +190,7 @@ try {
   assert.ok(!log.includes('secret-sentinel'), 'server diagnostics leaked key');
   console.log('Broadcast backend checks passed. Artifacts: ' + root);
 } finally {
+  if (pipewirePid) { try { process.kill(pipewirePid, 'SIGCONT'); } catch {} }
   await browser?.close();
   for (const socket of sockets) socket.destroy();
   blackhole?.close();

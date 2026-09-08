@@ -1,7 +1,7 @@
 # Architecture
 
 Elsewhere is a headless Wayland compositor whose display is a browser tab. Clients render on
-the GPU as usual; the composited frame is hardware-encoded (VA-API through GStreamer) and streamed
+the GPU as usual; the composited frame is hardware-encoded (VA-API through FFmpeg) and streamed
 over a WebSocket; the browser decodes it with WebCodecs and paints it on a canvas. Mouse, keyboard
 and (optionally) audio travel the same socket; the video moves to a WebRTC data channel (`elsewhere-server`'s
 `rtc.rs`, str0m) when a viewer picks that transport, which is what reaches a server across NAT through a
@@ -19,7 +19,7 @@ snapshots, browser UI).
 
 | Question | Decision |
 |---|---|
-| Stack | Rust + Smithay (git master, pinned by commit in `crates/elsewhere-compositor/Cargo.toml`; 0.7.0 kills a client that destroys a toplevel icon before its buffer, as Chromium 152 does); no wlroots, no C. GStreamer (via gstreamer-rs) for encoding. axum for HTTP/WebSocket. |
+| Stack | Rust + Smithay (git master, pinned by commit in `crates/elsewhere-compositor/Cargo.toml`; 0.7.0 kills a client that destroys a toplevel icon before its buffer, as Chromium 152 does); no wlroots. FFmpeg libraries via ffmpeg-next for encoding. axum for HTTP/WebSocket. |
 | Transport | WebSocket + WebCodecs. WebCodecs needs a secure context, so the server speaks HTTPS with a self-signed certificate unless `--no-tls` (localhost development). |
 | Windowing | Floating desktop: stacking, click-to-focus, decorations by the client or, for those that draw none, by the compositor, xdg move/resize, maximize/fullscreen, minimize, layer-shell panels. `--kiosk` fullscreens every window for nested desktops. |
 | Viewers | Any number, each with its own encoder at its own size and codec. One controls (input and output size): the first control-token session, or whoever took control last. A second, read-only token lets people watch. |
@@ -29,16 +29,17 @@ snapshots, browser UI).
 
 ## Process layout
 
-One process, three thread domains joined by channels:
+The main process has three thread domains joined by channels. Supervised helpers handle native audio
+and broadcast network I/O.
 
 ```
  Wayland clients ──► $WAYLAND_DISPLAY socket           Xwayland (rootless; we are its window manager)
                               │
   ┌───────────────────────────▼──────────────────┐  Frame (dmabuf + lease, or pixels)  ┌─────────────────────┐
-  │ compositor thread (calloop, Smithay)         │ ────────────────────────────► │ GStreamer, one pipeline   │
+  │ compositor thread (calloop, Smithay)         │ ────────────────────────────► │ FFmpeg worker             │
   │  wl_compositor · shm · linux-dmabuf · xdg     │      (every viewer's)          │ per viewer and window:    │
-  │  layer-shell · foreign-toplevel · seat · ...  │ ◄── last lease dropped ⇒ free ─│  appsrc → vapostproc      │
-  │  desktop::Space<Window>  (floating WM)        │                                │  (scale) → va*enc → sink  │
+  │  layer-shell · foreign-toplevel · seat · ...  │ ◄── last lease dropped ⇒ free ─│  DRM PRIME → scale_vaapi  │
+  │  desktop::Space<Window>  (floating WM)        │                                │  → VAAPI encoder         │
   │  GlesRenderer on GBM/EGL (render node)        │                                └────────────┬─────────────┘
   │  OutputDamageTracker → 4-slot dmabuf swapchain│                                             │ StreamMsg
   └──────────────▲───────────────────────────────┘                                             ▼
@@ -62,29 +63,30 @@ draw into shared memory.
 Audio uses a private PipeWire server, pipewire-pulse and WirePlumber per desktop. A native null sink
 receives application playback; a native mono loopback publishes the browser microphone. Hardware
 discovery and host routing state are excluded. The main process owns service startup and cleanup.
-A supervised helper process runs GStreamer `pipewiresrc` capture → stereo Opus and browser Opus →
-`pipewiresink` microphone injection, connected through explicit native socket descriptors. Framed
+A supervised helper process runs native PipeWire capture and FFmpeg stereo Opus encoding, plus
+FFmpeg decoding and native PipeWire microphone playback. Explicit native socket descriptors select
+the private graph. Framed
 Opus and typed mixer messages cross the helper's pipes; browser audio packet framing remains separate.
 The helper's native management loop subscribes to graph state and creates shared passive meters only
 while viewers subscribe. Controller epochs use a shared atomic mapping so delayed helper input cannot
 authorize queued commands after handoff. Authenticated desktop sockets receive authoritative snapshots
 and subscribed scalar levels through latest-value channels. The helper lets the
-owner bound GStreamer initialization and stop pipelines before destroying services, even when plugin
-startup blocks. The application launch path exports private native/Pulse selectors and clears inherited
+owner bound media initialization and stop workers before destroying services, even when native
+initialization blocks. The application launch path exports private native/Pulse selectors and clears inherited
 device overrides. See [session audio](session-audio.md) for readiness, failure and compatibility checks.
 
 The webcam comes back as VP8 frames decoded into a `v4l2loopback` device (`--webcam`), a camera to applications.
 
 ## Crates
 
-The compositor crate never depends on GStreamer and the stream crate never on Smithay; both depend on a
+The compositor crate never depends on FFmpeg and the stream crate never on Smithay; both depend on a
 small shared-types crate. That boundary keeps encoders and transports pluggable and compile times sane.
 
 | Crate | Role |
 |---|---|
 | `elsewhere-core` | Plain types shared by everything: `Command` (server → compositor), `Event` (compositor → server), `Frame`/`FrameBuffer`, `FrameSink`, `StreamMsg`, `WindowInfo`, `ControlMsg`, `InputMsg`, `Snapshot`, the decoration layout. Serde and JSON schemas on the API types. |
 | `elsewhere-compositor` | Smithay. `lib.rs` (state, loop, output, resize, spawn), `handlers.rs` (protocol delegates), `input.rs` (browser and API input → seat, focus, decorations), `render.rs` (frame), `gpu.rs` (render node, GBM, EGL and dmabuf swapchains, or the surfaceless platform and a texture read back), `grabs.rs` (move/resize), `decor.rs` (title bars), `xwayland.rs`, `foreign_toplevel.rs`, `workspace.rs`, `desktop.rs` (window list, control, snapshots), `window_stream.rs`, `clipboard.rs`, `cursor.rs`. |
-| `elsewhere-stream` | GStreamer. `GstSink: FrameSink` (dmabuf import or memory frames, pipeline build/rebuild, keyframes, codec and size switch), `lease.rs` (a custom `GstMeta` whose `free` drops the swapchain lease), the Opus audio source, the microphone and webcam sinks. |
+| `elsewhere-stream` | FFmpeg. `FfmpegSink: FrameSink` owns a bounded viewer worker. `encoder.rs` configures codecs and CPU conversion; `gpu.rs` imports DMA-bufs and performs VAAPI conversion. Native PipeWire capture/playback, Opus codecs, VP8 webcam decoding and V4L2 output, plus independent H.264/AAC RTMP broadcasts. |
 | `elsewhere-server` | axum. TLS and token bootstrap, the viewer assets (`web/dist`, embedded with `include_str!`; its build script insists on a web build first), `/ws` (viewer sessions, roles) and `/ws/window/{id}` sessions, `rtc.rs` (the WebRTC data-channel transport: str0m peers on one UDP socket per address, the video's other pipe), `/api` (`api.rs` holds the operations, `elements.rs` the accessibility walk), `/mcp` (`mcp.rs`), audio and event broadcast. |
 | `elsewhere` | The `elsewhere` binary: clap CLI, thread spawning, channel wiring, the audio devices, the render node or its absence. |
 
@@ -101,7 +103,7 @@ Chromium's table).
 **GPU without KMS.** `DrmNode` for the render node → `DrmDeviceFd` (unprivileged; the "unable to become
 drm master" log is expected) → `GbmDevice` → `EGLDisplay`/`EGLContext` → `GlesRenderer`. Frames render
 into a 4-slot `Swapchain<Dmabuf>` allocated through GBM with a modifier negotiated at startup: the
-intersection of the renderer's dmabuf formats and what `vapostproc` accepts, tiled preferred over linear.
+renderer-supported layouts that pass a real FFmpeg import/conversion trial, tiled preferred over linear.
 Each slot's `Dmabuf` is bound directly (the renderer caches FBOs by dmabuf identity).
 
 **Frame loop.** A calloop timer at the output refresh, plus on-demand rendering right after input or
@@ -111,7 +113,7 @@ goes to every viewer's encoder, each holding a share of the slot's lease (carrie
 hold the dmabuf, not by the converted frames the VPP or the CPU make of it, which the encoders keep). After rendering the
 GPU is waited on (`SyncPoint::wait`) before any early return, because the next commit releases client
 buffers. The rendered slot leaves as a `Frame` whose lease (the `Slot`) is attached to the
-`gst::Buffer` as a custom meta; the slot is free again when GStreamer drops the buffer.
+`AVBufferRef` owned by the imported frame; the slot is free after GPU conversion releases it.
 
 **Client buffer safety.** A pre-commit hook blocks the commit until the client's GPU work is done:
 the explicit-sync acquire point when the client uses linux-drm-syncobj (GTK's Vulkan renderer puts no
@@ -122,7 +124,7 @@ GTK renderer and Qt backend overrides are inherited from the launcher environmen
 **Output.** One `Output` ("ELSEWHERE-1") whose mode is the browser's canvas in device pixels and whose
 scale is the browser's `devicePixelRatio`, so logical pixels equal CSS pixels and pointer coordinates
 need no conversion. `Command::Resize` changes the mode, resizes the swapchain, re-arranges layers,
-re-fits windows (`relayout`), and rebuilds the encoder pipeline with a new stream id. Sizes are rounded
+re-fits windows (`relayout`), and reopens the encoder with a new stream id. Sizes are rounded
 down to even for 4:2:0 encoders.
 
 **Windows.** `desktop::Space<Window>` holds Wayland toplevels and X11 windows alike. New windows
@@ -170,59 +172,72 @@ make waybar and xfce4-panel work as ordinary clients. Details in [panels.md](pan
 
 ## Streaming
 
-One `GstSink` per viewer (and per window stream) builds, per frame size, target size and codec, a
-pipeline of the shape
+One `FfmpegSink` per desktop or window viewer owns a long-lived encoder thread. It creates, uses and
+destroys its native contexts on that thread. Hardware encoding uses this path:
 
 ```
-appsrc (memory:DMABuf, DMA_DRM caps) ! vapostproc ! video/x-raw(memory:VAMemory),format=NV12,width=W,height=H
-  ! va{h264,h265,vp9,av1}enc ! {h264,h265,vp9,av1}parse ! appsink
+compositor DMA-buf → DRM PRIME import → scale_vaapi to NV12 → VAAPI encoder → raw WebCodecs packet
 ```
 
-with low-latency encoder settings (constant bitrate at the session's quality, no B-frames, one reference);
-`vapostproc` scales the shared frame to the viewer's size on the GPU. With `--software-encoding` the
-compositor renders into linear dmabufs instead, the pipeline maps them as plain raw video
-(`videoconvertscale` on the CPU) and encodes with vp8enc, x264enc (or openh264enc), vp9enc, x265enc or
-svtav1enc, whichever are installed; the compositor's clock runs at 30 Hz in that mode, so every rendered
-frame reaches the encoders at a rate they can take. The two modes never mix. Frames are sent to each viewer in
-order; while a socket is busy, `appsrc` drops raw frames before the encoder, so no delta ever refers to
-a frame the viewer missed. A decoder error on the page asks for a keyframe (`UpstreamForceKeyUnitEvent`)
-plus `Command::RequestFullFrame`, since without damage no frame would be produced. Codec choice comes
-from each browser's `VideoDecoder.isConfigSupported` probes, among the codecs this machine encodes: on
-the GPU the VA elements the driver registered for the render node (low-power variants included), best
-first (AV1, HEVC, VP9, H.264); with `--software-encoding` the CPU encoders installed, cheapest first (VP8,
-H.264, VP9, HEVC, AV1). `--codec` wins when both sides can, else the first the browser decodes in
-hardware, else any it decodes; a browser with none in common is closed. The AV1 and VP9 codec strings carry a level chosen from the picture size, not read
-from the stream. A resize, size, codec or encoding effort change tears the pipeline down and rebuilds it with a new
-stream id; the page resets its decoder when it sees a new id. Each session also has a quality: a preset's
-bitrate, the ceiling a rate controller works under. Very Low, Low, Medium, High and Max use 2, 5,
-`--bitrate` (8 by default), 12 and 25 Mbit/s. Max is the default. StreamState carries the selected
-preset, its ceiling, the configured Medium ceiling, and the current encoder target separately. Per second of frames it halves
-the bitrate when more than a third of the frames found the transport behind (a backlog in the encoder's
-channel or the data channel's queue, a channel drop, or a send over two frame times), when a ping's
-answer came back 200 ms later than the quickest (it queues behind the video the kernel still holds), or
-when the page's once-a-second report (`0x96`) says frames arrived a hundred milliseconds later than at
-their best over ten seconds or its decoder dropped some; the new rate then holds two seconds. Five clean
-seconds with frames raise it a quarter, up to the ceiling; under 3 Mbit/s the rate is capped at 30 fps.
-The steps are few and large because the VA encoders open a new GOP on any rate change, so each is a
-keyframe, and keyframes otherwise come on request, the encoders' periodic one pushed as far out as
-each allows (the VA encoders' to 1024 frames). The refine frame is encoded at four times the bitrate only by the CPU encoders. The bitrate
-changes on the running encoder where the element allows (the VA encoders, x264, x265, libvpx); the
-frame cap holds frames in the sink (`Submit::Held`), which the compositor treats like a failed frame. 150 ms after the picture settles the compositor renders it once
-more as a refine frame, which the sink encodes at four times the bitrate before restoring it. Pipeline errors reach the server through a bus
-sync handler (freed with the pipeline; a watching thread would outlive it).
+Startup trials allocate real compositor buffers and test import and conversion on the selected render
+node. Tested tiled layouts take precedence over linear fallback. Each imported descriptor owns its FD
+and compositor lease through an `AVBufferRef`. Conversion synchronizes the output VA surface before
+releasing the input, so the encoder's reference pictures do not retain compositor slots. Source
+layouts must match the dimensions, stride, offset, fourcc and actual modifier the compositor supplied.
+RGB input is full range; converted NV12 and encoded output use limited-range BT.709.
 
-Encoding effort is separate from the bitrate ceiling and its adaptation state. Fast is the default;
-Balanced and High request encoder-specific speed settings when the new pipeline starts. The sink
-continues requesting frames until the first keyframe so encoders with startup buffering also start on
-a static desktop or window. The page saves the choice and shows pending, applied or unavailable status.
-See [encoding-effort.md](encoding-effort.md) for mappings and Docker measurements.
+With `--software-encoding`, the compositor supplies memory or linear DMA-buf pixels. The worker maps
+and synchronizes DMA-buf CPU access, converts through libswscale, and uses libvpx, libx264 or
+OpenH264, libx265, or libaom/SVT-AV1. The compositor clock runs at 30 Hz in this mode. Software codec
+preference is VP8, H.264, VP9, HEVC, AV1; hardware preference is AV1, HEVC, VP9, H.264. Native capability
+probes require an actual keyframe. The browser intersects that list with its WebCodecs support;
+`--codec` wins when both sides support it. AV1 and VP9 codec levels are selected from picture size.
 
-Window streams (`/ws/window/{id}`, see [desktop-api.md](desktop-api.md)) are further `GstSink`s, one
-per streamed window, fed from per-window swapchains in the compositor.
+Submission does not wait for the worker. It replaces one pending raw picture, applies the frame cap,
+and returns `Held` while initializing or refusing input. Each pending picture includes its source
+layout. A control or resize change invalidates incompatible pending work; repeated changes coalesce
+before the worker publishes a new stream. The worker requests a complete redraw when a new encoder
+is ready, including on an idle desktop. Accepted final pictures are encoded without requiring later
+animation. The compositor also requests one refinement frame 150 ms after the picture settles; it
+uses the current target without a bitrate-change cycle.
 
-Audio: `pulsesrc` on the null sink's monitor → Opus (20 ms packets) → appsink → the WebSocket. The
-browser decodes with `AudioDecoder` and schedules the packets on an `AudioContext` a small lead ahead
-of its clock as a jitter buffer.
+The encoder-to-server channel holds two messages. The worker can wait with one encoded packet but
+releases pending raw pictures and refuses more input during that wait. Configuration and the first
+keyframe reserve their output slots together. Already encoded deltas stay in reference order;
+recovery discards obsolete worker output and begins a new stream with an independently decodable
+keyframe. The server clears older unsent RTC pictures on recovery. Bytes accepted by SCTP remain
+subject to the ordered data channel's retransmission behavior.
+Three seconds without SCTP byte acknowledgements gives video back to the WebSocket. Encoder
+restarts do not reset that deadline. A frame waiting three seconds at the application queue's front
+also triggers fallback.
+
+Video settings disable B-frames and lookahead and constrain burst size with a short buffer budget.
+VA encoders use CBR, one reference and one asynchronous operation. Software encoders use their
+low-delay rate-control settings; software GOPs are long and VA GOPs are 1024 frames. Requested recovery
+forces a keyframe with the headers needed by a fresh browser decoder. Only libx264 applies bitrate
+changes live; other encoders reopen. Capture timestamps retain the same clock origin across reopens.
+
+Each viewer chooses a bitrate ceiling independently. Very Low, Low, Medium, High and Max use 2, 5,
+`--bitrate` at 8 by default, 12 and 25 Mbit/s. Max is the default. The rate controller halves the target
+under sustained output backlog, slow sends, excess RTT or browser delay/drop reports. It holds a
+reduction for two seconds and raises the target by a quarter after five clean seconds, up to the
+ceiling. Targets below 3 Mbit/s cap delivery at 30 fps. Both read-only and controlling viewers report
+congestion. Encoder reopening preserves this adaptation state.
+
+Effort is separate from Quality. Fast, Balanced and High map to encoder-specific speed settings and
+preserve the requested preference across codec changes and reconnects. The page shows pending until
+the first keyframe, then applied or unavailable. See [encoding-effort.md](encoding-effort.md) for
+mappings and measurements. Encoder failures reach the server as `StreamMsg::Failed`; successful
+recovery clears the failure state for both desktop and window streams.
+
+Last sink drop signals stop and releases pending input. Weak control handles cannot keep the worker
+alive. Output waits observe cancellation without joining on the compositor thread. Native driver
+calls run on the worker and can still block if the driver hangs.
+
+Native PipeWire captures the private output monitor at 48 kHz stereo. FFmpeg libopus accumulates
+capture quanta into 960-sample, 20 ms packets with capture-derived timestamps. The browser decodes
+and schedules them on an AudioContext with a small jitter buffer. Microphone and broadcast audio use
+the same private graph. See [session-audio.md](session-audio.md) and [broadcasts.md](broadcasts.md).
 
 ## Server
 

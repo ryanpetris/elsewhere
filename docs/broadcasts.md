@@ -115,14 +115,14 @@ records are retained; new requests are rejected when that limit is reached.
 Connection credentials are held only during startup, streaming, and reconnect attempts. Public
 status includes labels, encoding settings, frame submissions, transmitted bytes, retry count, and
 sanitized errors. URLs and keys are never returned. Stop cancels retries, detaches frame input, and
-releases the pipeline. A fresh start requires complete settings. Closing browser or MCP connections
+releases the media worker. A fresh start requires complete settings. Closing browser or MCP connections
 does not stop a broadcast; stopping Elsewhere does. No broadcast starts automatically on startup.
 
 ## Media and limits
 
 Each output uses its own H.264 software encoder with CBR and filler data, AAC encoder, FLV muxer, and RTMP/RTMPS connection.
-The runtime image needs x264, an AAC encoder, FLV, and RTMP GStreamer plugins. Capabilities report
-missing plugins. Up to four outputs can run, with even dimensions from 64 pixels to 3840×2160,
+The runtime image needs FFmpeg with libx264, AAC, FLV, and RTMP/RTMPS support. Capabilities report
+missing components. Up to four outputs can run, with even dimensions from 64 pixels to 3840×2160,
 24/25/30/50/60 fps, and 100–50000 kbps video. These are accepted settings, not a guarantee that
 hardware or upload bandwidth can sustain every combination.
 
@@ -134,28 +134,42 @@ two-second keyframes, and scales
 with letterboxing to a fixed output size when the desktop resizes. Pointer blending affects only
 the broadcast output. The browser controls are outside the generated desktop image.
 
-Video and audio use one GStreamer pipeline clock. Desktop audio captures the private output source;
-selecting it requires that source to be available. An audio failure fails the affected broadcast
-unless the destination also fails in the same error-collection window. Coincident network failures
-retry and rebuild the pipeline; unavailable audio then fails initialization or capture once the
-destination is reachable.
+Video and audio timestamps share a monotonic connection clock. Native PipeWire captures the private
+output monitor and FFmpeg converts its stereo PCM to AAC. Selecting desktop audio requires that
+source to be available; capture failure fails that output. Reconnection starts fresh encoders and
+clears captured audio from the previous connection.
 Silence generates an AAC track independently of desktop audio. There is no separate microphone mix.
 
-Raw input holds only the latest picture. Pipeline queues are bounded. Network errors retry with
+Raw input holds only the latest picture. Converted audio holds at most 100 ms, and muxing interleave
+delay is bounded. A supervised helper sends encoded FLV through FFmpeg's native RTMP I/O. Its bounded
+pipe carries no raw frames, and byte acknowledgements determine transport progress. Stop kills and
+reaps the helper even if the system DNS resolver blocks. Late input after a network stall is
+discarded. Network errors retry with
 backoff up to 32 seconds until stopped; ten seconds of healthy sending resets the delay. Connections
-use connection timeouts and a 15-second output watchdog. `sending` means
+use five-second I/O deadlines and a 15-second output watchdog. RTMPS verifies the destination
+certificate and hostname using the runtime CA trust store. `sending` means
 media transport is active; service publication also depends on its own live-event settings.
 Encoding and readback consume CPU resources, and each output adds upload bandwidth.
 
 ## Verification
 
+Build the `broadcast-source` example and run `python3 web/checks/broadcast-native.py` as root in Docker
+with a C compiler, FFmpeg, OpenSSL and the `trust`/`update-ca-trust` utilities.
+It checks idle CBR, cadence, aspect fit, color, A/V timestamps, cancellation during connection and
+write stalls, trusted RTMPS, and certificate and hostname rejection. The TLS tests temporarily
+add generated certificates to the container's CA trust store and remove them afterward.
+Set `BROADCAST_DURATION=600` for a ten-minute A/V clock and idle bitrate check.
+
 Run `web/checks/broadcasts.mjs` in the Docker desktop rig with the current binary, FFmpeg and Node.
-It checks two different outputs, idle cadence, codecs, sizes, keyframe intervals, audio timing,
+It checks four simultaneous outputs, idle cadence, codecs, sizes, keyframe intervals, audio timing,
 network reconnection, independent stop, request retries, API/MCP parity, and viewer-token rejection.
 `web/checks/url-prefix.mjs` checks browser presets across instance paths and control-token actions
 from a participant. Set `ELSEWHERE_BINARY` to a mounted or copied build for quick iteration. Run the broadcast check
 again with `BROADCAST_AUDIO=1` to verify desktop sound, resizing, cursor inclusion, idle browser
-behavior, and private-audio failure while a silent output continues.
+behavior, varying capture quanta, a brief capture pause, and private-audio failure while a silent
+output continues.
+Set `BROADCAST_DURATION=600 BROADCAST_AUDIO=1` to keep both desktop-audio outputs running for
+ten minutes before checking their A/V timestamp alignment and reconnect behavior.
 
 Live YouTube/Twitch account acceptance requires service credentials and a separately arranged
 ingest test. Local RTMP verification does not establish account publication or service health.

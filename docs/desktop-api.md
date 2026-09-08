@@ -409,18 +409,18 @@ hub under keys with the top bit set); a channel that closes, a `{"close": true}`
 drops the peer. The controller's `Mic` packets
 go to `Config::mic`, the channel `elsewhere-stream`'s `audio_sink` plays into the microphone sink (`elsewhere`
 creates the sink and the remapped source next to the audio sink), and its `Cam` frames to `Config::cam`,
-which `video_sink` decodes (VP8) and scales to 720p YUY2 for the `--webcam` loopback device (which keeps
+which `video_sink` decodes (VP8) and scales to 720p YUYV for the `--webcam` loopback device (which keeps
 the first format it is given); a session whose frame didn't fit the channel sends nothing more until a
-keyframe (a VP8 frame tag's low bit is clear), and a pipeline that dies (its bus says so; the feeder
-logs it and ends) withdraws the feature and tells the controller; the `Role` message's second byte tells
+keyframe (a VP8 frame tag's low bit is clear). A failed media worker closes its input receiver,
+which withdraws the feature and tells the controller; the `Role` message's second byte tells
 sessions which of the two exist.
 
 The controller's `Resize` becomes `Command::Resize` and re-fits everyone else (`retarget`); another
 session's `Resize` only sets its own encoder's size (`fit`: the output's aspect within its window, never
-enlarged, even-sized). `set_size` on a `GstSink` puts a caps filter after `vapostproc`, which scales on
-the GPU on the way to NV12, and the stream's `scale` becomes `output scale × target / output width`, so
+enlarged, even-sized). `set_size` on a `FfmpegSink` changes the worker's conversion target, scaling on
+the GPU to NV12 or on the CPU to YUV420P. The stream's `scale` becomes `output scale × target / output width`, so
 the page's logical mapping still holds; the controller's encoder has no target and takes the output as
-it is, so a resize rebuilds its pipeline once, through the compositor. `TakeControl` from a control-token session, or the controller
+it is, so a resize reopens its encoder once, through the compositor. `TakeControl` from a control-token session, or the controller
 leaving (the oldest remaining control-token session inherits), goes through `set_controller`: release
 all input and the pointer lock, re-fit, resize the output to the new controller's size, tell both
 sessions their `Role`. An encoder that fails is rebuilt by the next full frame; one that fails again
@@ -431,21 +431,21 @@ session's senders, which ends them with `4001`.
 
 `window_stream.rs`. `Command::WindowStream { key, window, sink }` starts (or, with no sink, stops) one
 stream: a `WindowStream` holds the window, a dmabuf swapchain and damage tracker of its own, and the
-encoder sink the server made for it (`SinkFactory` in `elsewhere-server`, a `GstSink` per stream). After every
+encoder sink the server made for it (`SinkFactory` in `elsewhere-server`, a `FfmpegSink` per stream). After every
 output frame, `render_window_streams` renders each streamed window's elements (popups too, within the
 geometry) with the geometry's corner at the origin, at the output's scale, into its swapchain, and
 submits the frame only if its damage tracker saw a change, so an idle window costs nothing; a size
 change, once it has held for 150 ms (an interactive resize commits one per frame), resizes the swapchain
-and tells the sink, which rebuilds its pipeline with a new stream id. Sizes under 16 px (an unmapped
+and tells the sink, which reopens its encoder with a new stream id. Sizes under 16 px (an unmapped
 window) are skipped. A frame that found no
 free buffer or that the sink refused marks the stream `pending`, which keeps the loop ticking and
 redraws it whole. Streams of windows no longer on the desktop are dropped, which drops their sinks and
-so their pipelines; the server session sees its channel close and ends with `4003`.
+stops their workers; the server session sees its channel close and ends with `4003`.
 
 Server: `ws::window_session` authenticates, takes `Hello` for the codec, builds the sink, and forwards
-frames straight from its own channel to the socket, in order (the pipeline drops raw frames upstream
-of the encoder while the socket is busy, so nothing is lost between encoder and page and there is no
-keyframe dance). Events go to window sessions as well as the viewer, by `try_send`. Pointer positions
+frames from its two-message channel to the socket in order. While output is blocked, the worker
+releases pending raw frames and refuses new input until delivery resumes. Encoded deltas remain in
+reference order. Events go to window sessions as well as the viewer, by `try_send`. Pointer positions
 are forwarded as window-relative `Input` moves, resolved on the compositor thread; a `Resize` becomes a
 `resize` control for the window. Page: `?window=ID` (see `docs/protocol.md`); the panel's ↗ button opens a popup the window's
 size, and `sessionStorage` (the token) is copied into it by the browser.
@@ -658,9 +658,7 @@ cost an encoder and a swapchain each and are not limited: the token holder is tr
 
 - Window streams: audio, a bitrate scaled to the window's size, sharing one render between two
   viewers of the same window.
-- Viewers: showing the controller's pointer to the others; a bitrate scaled to each stream's size;
-  the shared swapchain has four slots, so a viewer whose pipeline stalls holds up to three of them for
-  the ten seconds until its session is dropped.
+- Viewers: showing the controller's pointer to the others; a bitrate scaled to each stream's size.
 - Decorations: hover highlights on the buttons, a right-click menu, borders around the client area.
 - Elements: acting on an element through AT-SPI (activate, set text) instead of clicking its rectangle;
   element states (checked, focused, disabled); Flatpak applications, whose pid on the bus is the sandbox's.

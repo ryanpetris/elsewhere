@@ -74,7 +74,8 @@ server = spawn('/src/target/release/elsewhere', ['--no-audio', '--no-rtc', '--no
     await fresh(previousPng);
     console.log('fresh thumbnail:', text);
   };
-  await fresh();
+  // Establish a complete mapped picture before measuring idle thumbnail requests.
+  await command('root ff304090');
   const initial = requests.length;
   await page.waitForTimeout(3500);
   assert.equal(requests.length, initial, 'idle visible window does not refetch');
