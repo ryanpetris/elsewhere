@@ -23,7 +23,7 @@ export function TokenForm({ viewer }) {
           <h2 className="text-base font-semibold">Connect to the desktop</h2>
         </div>
         <p className="mt-2 text-sm text-zinc-400">
-          {status === 'unauthorized' ? `${reason}. ` : ''}Paste a token from the server. Run <code>elsewhere token</code> there for control access, or <code>elsewhere token --viewer</code> for read-only access.
+          {status === 'unauthorized' ? `${reason}. ` : ''}Paste a token from the server. Run <code>elsewhere token create --admin</code> in the server’s execution environment to create an admin token.
         </p>
         <input
           autoFocus

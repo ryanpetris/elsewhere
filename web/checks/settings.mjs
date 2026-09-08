@@ -7,6 +7,7 @@ import { chromium } from 'playwright-core';
 const server = createServer(async (req, res) => {
   try {
     const path = new URL(req.url, 'http://localhost').pathname;
+    if (path === '/api/me') { res.setHeader('Content-Type', 'application/json'); return res.end(JSON.stringify({ permissions: ['desktop.view', 'desktop.control', 'apps.launch', 'commands.execute', 'server.manage', 'clipboard.read', 'clipboard.write', 'audio.listen', 'files.browse', 'broadcasts.manage'] })); }
     if (path.startsWith('/api/')) { res.setHeader('Content-Type', 'application/json'); return res.end(path === '/api/applications' ? JSON.stringify([{ id: 'local-test.desktop', name: 'Local Test', categories: ['Utility'] }]) : '[]'); }
     const data = await readFile(new URL('../dist/' + (path === '/' ? 'index.html' : path.slice(1)), import.meta.url));
     res.setHeader('Content-Type', path.endsWith('.js') ? 'text/javascript' : path.endsWith('.css') ? 'text/css' : 'text/html');
@@ -47,7 +48,7 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   const url = `http://127.0.0.1:${server.address().port}/#token=test`;
   const ready = async () => {
-    await page.waitForFunction(() => !!window.elsewhere?.store);
+    await page.waitForFunction(() => !!window.socket && !!window.elsewhere?.store);
     await page.evaluate(() => { elsewhere.store.set({ status: 'connected', role: 'controller', stream: { codec: 'vp8', width: 900, height: 600, scale: 1 } }); windowsFrame(); });
   };
   await page.goto(url.replace('#token=test', '?token=test'));
@@ -199,10 +200,10 @@ try {
   await page.evaluate(() => { window.elementStatus = 200; windowsFrame(3, 'New focused application'); });
   await page.waitForFunction(() => elsewhere.store.get().elements?.id === 3 && elsewhere.store.get().elements.status === 200);
 
-  await page.evaluate(() => elsewhere.store.set({ role: 'viewer' }));
+  await page.evaluate(() => elsewhere.store.set({ role: 'viewer', permissions: ['desktop.view'] }));
   await borders.uncheck(); await elements.uncheck();
   assert.equal(await borders.isDisabled(), false);
-  await page.getByRole('button', { name: 'Fullscreen (browser shortcuts go to the desktop)', exact: true }).click();
+  await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
   await page.waitForFunction(() => !!document.fullscreenElement);
   await panel.waitFor({ state: 'detached' });
   await page.evaluate(() => document.exitFullscreen());
@@ -215,7 +216,7 @@ try {
   await phoneContext.addInitScript(fixture);
   const phone = await phoneContext.newPage();
   await phone.goto(url);
-  await phone.waitForFunction(() => !!window.elsewhere?.store);
+  await phone.waitForFunction(() => !!window.socket && !!window.elsewhere?.store);
   await phone.evaluate(() => elsewhere.store.set({ status: 'connected', role: 'controller' }));
   await phone.getByRole('button', { name: 'Settings', exact: true }).tap();
   const phoneBorders = phone.getByRole('checkbox', { name: 'Window borders', exact: true });
@@ -225,7 +226,7 @@ try {
   await phone.screenshot({ path: '/tmp/elsewhere45-settings-narrow.png' });
   const popup = await context.newPage();
   await popup.goto(url.replace('/#', '/?window=1#'));
-  await popup.waitForFunction(() => !!window.elsewhere?.store);
+  await popup.waitForFunction(() => !!window.socket && !!window.elsewhere?.store);
   assert.equal(await popup.getByRole('button', { name: 'Settings', exact: true }).count(), 0);
   assert.equal(await popup.evaluate(() => elsewhere.store.get().elementsOn), false);
   assert.deepEqual(errors, []);

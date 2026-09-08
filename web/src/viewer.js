@@ -21,9 +21,9 @@ export function createViewer() {
     // 'no-token' | 'connecting' | 'connected' | 'retrying' | 'unauthorized' | 'gone' | 'quit' | 'closed'
     status: TOKEN ? 'connecting' : 'no-token',
     reason: '',
-    // 'controller' drives the desktop and sizes it; 'participant' (a control token) watches and may take
-    // control; 'viewer' (the viewer token) only watches
+    // The role tracks desktop input ownership; permissions govern feature access.
     role: null,
+    permissions: [],
     sessionId: null,
     stream: null, // the last Config: {streamId, codec, width, height, scale}
     renderer: '2d',
@@ -61,6 +61,7 @@ export function createViewer() {
     stats: { fps: 0, mbps: 0, latencyMs: 0, lost: 0, dropped: 0, decodeErrors: 0, keyframes: 0, sinceKey: 0, frames: 0, received: 0, connects: 0, closes: [], audio: null, queue: 0, timings: null, lockRequests: 0, lockError: '' },
   });
   const state = () => store.get();
+  const can = permission => state().permissions.includes(permission);
 
   let canvas = null, ctx = null, draw = null; // draw(frame) takes ownership of the frame and closes it
   let capturedCursor = null, cursorImage = null, pointerPosition = { x: 0, y: 0 };
@@ -162,10 +163,23 @@ export function createViewer() {
   }
 
   // --- connection -----------------------------------------------------------------
-  function connect() {
+  async function connect() {
     if (disposed) return;
     clearTimeout(reconnectTimer);
     if (!TOKEN) { store.set({ status: 'no-token' }); return; }
+    try {
+      const response = await api('/api/me', { signal: AbortSignal.timeout(5000) });
+      if (disposed) return;
+      if (response.status === 401) { forgetToken(); store.set({ status: 'unauthorized', permissions: [], reason: 'Invalid or expired token' }); return; }
+      if (!response.ok) throw Error('Could not load permissions');
+      const { permissions } = await response.json();
+      if (disposed) return;
+      store.set({ permissions });
+      if (!can('desktop.view')) { store.set({ status: 'unauthorized', reason: 'This token does not allow desktop viewing' }); return; }
+    } catch {
+      if (!disposed) { store.set({ status: 'retrying', permissions: [] }); reconnectTimer = setTimeout(connect, 1000); }
+      return;
+    }
     audioSeq = -1; // the server kept counting while we were away
     connects++;
     const socket = ws = new WebSocket(websocketUrl(`/ws${WINDOW ? '/window/' + WINDOW : ''}`));
@@ -192,7 +206,8 @@ export function createViewer() {
       closeRtc(false);
       iceServers = [];
       recovery('unavailable', 'WebSocket disconnected');
-      store.set({ sessionId: null, role: null, playback: null, audioAvailable: false, micAvailable: false, camAvailable: false, rtcAvailable: false, videoVia: 'websocket' });
+      uploadAbort?.abort();
+      store.set({ permissions: [], sessionId: null, role: null, playback: null, audioAvailable: false, micAvailable: false, camAvailable: false, rtcAvailable: false, videoVia: 'websocket' });
       if (e.code === 4001) {
         stream = null;
         forgetToken();
@@ -265,7 +280,7 @@ export function createViewer() {
   }
 
   /// A window action or spawn for the compositor, as JSON.
-  const sendControl = obj => sendText(CONTROL, JSON.stringify(obj));
+  const sendControl = obj => { if (can(({ launch: 'apps.launch', spawn: 'commands.execute', quit: 'server.manage' })[obj.op] ?? 'desktop.control')) sendText(CONTROL, JSON.stringify(obj)); };
 
   // Which codec families this browser decodes, in hardware and at all (bit0 H.264, bit1 HEVC, bit2 VP9,
   // bit3 AV1, bit4 VP8), and this viewer's codec and quality choice (codec 0 = Auto; quality uses PRESET_IDS).
@@ -823,8 +838,8 @@ export function createViewer() {
   }
 
   // --- input -----------------------------------------------------------------------------
-  // Only the controller's pointer and keyboard are the desktop's (a window popup drives with any control token).
-  const driving = () => WINDOW ? state().role !== 'viewer' : state().role === 'controller';
+  // Only the controller's pointer and keyboard are the desktop's (a window popup drives with any token with `desktop.control`).
+  const driving = () => can('desktop.control') && (WINDOW ? state().role !== 'viewer' : state().role === 'controller');
   // A pointer position in the desktop's logical px, through the canvas's on-screen rectangle (which
   // follows the touch zoom); the stream's size is the desktop's, except while a resize is in flight.
   function toDesktop(e) {
@@ -986,7 +1001,7 @@ export function createViewer() {
   function uploadFiles(list, batch) {
     const files = [...list], path = state().filesPath;
     const run = async () => {
-      if (disposed || !['controller', 'participant'].includes(state().role)) return [];
+      if (disposed || !can('files.upload')) return [];
       const saved = [], failures = [];
       uploadAbort = new AbortController();
       for (const [index, file] of files.entries()) {
@@ -1012,7 +1027,7 @@ export function createViewer() {
   let dragging = false; // 'over' while the files are over the stage, 'dropping' until the upload is done and the desktop told
   const drag = msg => sendText(DRAG, JSON.stringify(msg));
   function onDragEnter(e) {
-    if (dragging || WINDOW || !driving() || !e.dataTransfer?.types.includes('Files')) return; // a window tab's session has no desktop drag
+    if (dragging || WINDOW || !driving() || !can('dragdrop.upload') || !can('files.upload') || !e.dataTransfer?.types.includes('Files')) return; // a window tab's session has no desktop drag
     dragging = 'over';
     onPointerMove(e);
     drag({ op: 'start' });
@@ -1020,7 +1035,7 @@ export function createViewer() {
   function onDragOver(e) { if (dragging === 'over') onPointerMove(e); }
   function onDragLeave() { if (dragging === 'over') { dragging = false; drag({ op: 'cancel' }); } }
   async function onDrop(e) {
-    if (dragging !== 'over') return; // not ours (a view-only session, a window tab): the page's own drop handler answers
+    if (dragging !== 'over') { e.preventDefault(); e.stopPropagation(); return; }
     e.preventDefault();
     e.stopPropagation();
     dragging = 'dropping';
@@ -1038,8 +1053,8 @@ export function createViewer() {
   document.addEventListener('drop', e => {
     if (!e.dataTransfer?.files.length) return;
     e.preventDefault();
-    if (['controller', 'participant'].includes(state().role)) uploadFiles(e.dataTransfer.files);
-    else notice('a view-only session cannot send files');
+    if (can('files.upload')) uploadFiles(e.dataTransfer.files);
+    else notice('This token does not allow file uploads');
   });
 
   // --- clipboard ---------------------------------------------------------------------------
@@ -1061,7 +1076,7 @@ export function createViewer() {
     clipboard.changed(true);
   }
   function flushClipboard() {
-    if (pendingClipboard === null || !navigator.clipboard?.writeText) return;
+    if (!can('clipboard.read') || pendingClipboard === null || !navigator.clipboard?.writeText) return;
     const item = pendingClipboard;
     const done = () => { if (pendingClipboard === item) pendingClipboard = null; };
     if (typeof item === 'string') {
@@ -1081,10 +1096,11 @@ export function createViewer() {
   }
   document.addEventListener('paste', e => {
     if (e.target === canvas) { clearPasteTarget(); e.preventDefault(); }
-    if (isFormField(e.target) || state().role === 'viewer') return;
+    if (isFormField(e.target) || !can('clipboard.write')) return;
     e.preventDefault();
     const files = [...(e.clipboardData?.files ?? [])];
     const image = files.length === 1 && files[0].type === 'image/png' && files[0].name === 'image.png' ? files[0] : null; // a screenshot (browsers name pasted pixels so), not a copied file
+    if (files.length && !image && !can('files.upload')) { notice('File paste requires file upload permission'); return; }
     if (image || files.length) {
       // The user's chord is dropped (its modifier may go up before the upload is done); once the picture, or
       // the files, are on the desktop clipboard the same chord is pressed through the API, and not at all
@@ -1096,7 +1112,7 @@ export function createViewer() {
       const put = image
         ? api('/api/clipboard', { method: 'PUT', headers: { 'Content-Type': 'image/png' }, body: image, signal: AbortSignal.timeout(5000) })
         : uploadFiles(files, batch).then(names => (names.length === files.length ? clipboardFiles(names, batch) : { ok: false })); // a file that didn't land isn't pasted, and the notice says what did
-      put.then(r => { if (r.ok) return api('/api/input', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'key', keys: chord }) }); }).catch(() => {});
+      put.then(r => { if (r.ok && driving()) return api('/api/input', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'key', keys: chord }) }); }).catch(() => {});
       return;
     }
     sendText(SET_CLIPBOARD, e.clipboardData?.getData('text/plain') ?? ''); // an empty browser clipboard clears the desktop's
@@ -1108,7 +1124,7 @@ export function createViewer() {
   function onKey(e) {
     if (isFormField(e.target)) return;
     if (e.type === 'keydown' && !e.repeat && isPasteKey(e) && e.target === canvas
-        && ['controller', 'participant'].includes(state().role)) {
+        && can('clipboard.write')) {
       // Firefox needs an editable target for Ctrl+Shift+V. Paste never inserts into the canvas.
       canvas.setAttribute('contenteditable', 'true');
       clearTimeout(pasteTimer);
@@ -1117,7 +1133,7 @@ export function createViewer() {
     if (!driving()) return;
     const code = KEYCODES[e.code];
     if (!code || e.repeat) return; // clients repeat keys themselves (wl_keyboard.repeat_info)
-    if (e.type === 'keydown' && isPasteKey(e)) {
+    if (e.type === 'keydown' && isPasteKey(e) && can('clipboard.write')) {
       // let the browser raise its paste event (no preventDefault); forward the key after it, or soon anyway
       pendingPaste = code;
       clearTimeout(pasteTimer);
@@ -1243,6 +1259,7 @@ export function createViewer() {
 
   const viewer = {
     store,
+    can,
     resumeAudio,
     notice,
     setPlaybackEnabled(on) { playbackEnabled = on; if (!on) stopPlayback(); },
@@ -1294,7 +1311,7 @@ export function createViewer() {
     },
     // a click ('default'), an action key, or nothing to dismiss; a session that can't act only hides it for itself
     notify(id, action) {
-      if (state().role === 'viewer') store.set({ notifications: state().notifications.filter(n => n.id !== id) });
+      if (!can('desktop.control')) store.set({ notifications: state().notifications.filter(n => n.id !== id) });
       else sendText(NOTIFY, JSON.stringify({ id, action }));
     },
     clipboard,

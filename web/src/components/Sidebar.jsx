@@ -11,13 +11,14 @@ import { codecName, windowColor } from './ui.jsx';
 
 // The two panels stay mounted (hidden) so the window list keeps its thumbnails across toggles.
 export function Sidebar({ viewer, tab, onTab, hidden }) {
-  const role = useStore(viewer.store, s => s.role);
-  const acts = ['controller', 'participant'].includes(role);
-  if (!acts && tab === 'files') tab = 'windows';
+  const permissions = useStore(viewer.store, s => s.permissions);
+  const acts = permissions.includes('files.browse');
+  const broadcasts = permissions.includes('broadcasts.manage');
+  if ((!acts && tab === 'files') || (!broadcasts && tab === 'broadcasts')) tab = 'windows';
   return (
     <aside hidden={hidden} className="absolute inset-y-0 right-0 z-10 flex w-full max-w-sm shrink-0 flex-col border-l border-zinc-800 bg-zinc-900 md:static md:w-80 md:max-w-none">
       <nav className="flex shrink-0 border-b border-zinc-800 text-sm">
-        {[['windows', 'Windows'], ['files', 'Files'], ['stats', 'Statistics'], ['broadcasts', 'Broadcasts']].filter(([t]) => t !== 'files' || acts).map(([t, label]) => (
+        {[['windows', 'Windows'], ['files', 'Files'], ['stats', 'Statistics'], ['broadcasts', 'Broadcasts']].filter(([t]) => (t !== 'files' || acts) && (t !== 'broadcasts' || broadcasts)).map(([t, label]) => (
           <button
             key={t}
             type="button"
@@ -51,12 +52,14 @@ function WindowList({ viewer, active }) {
     return () => media.removeEventListener('change', change);
   }, [dpr]);
   const windows = useStore(viewer.store, s => s.windows);
-  const acts = useStore(viewer.store, s => s.role) !== 'viewer'; // the viewer token only watches
+  const permissions = useStore(viewer.store, s => s.permissions);
+  const acts = permissions.includes('desktop.control');
+  const spawn = permissions.includes('commands.execute');
   const order = windows.slice().sort((a, b) => a.minimized - b.minimized || b.z - a.z); // top-most first, minimized last
   return (
     <div className="flex flex-col">
-      {acts && <Spawn viewer={viewer} />}
-      {order.length === 0 && <div className="px-4 py-8 text-center text-sm text-zinc-600">{acts ? 'No windows yet. Run a command above.' : 'No windows.'}</div>}
+      {spawn && <Spawn viewer={viewer} />}
+      {order.length === 0 && <div className="px-4 py-8 text-center text-sm text-zinc-600">{spawn ? 'No windows yet. Run a command above.' : 'No windows.'}</div>}
       {order.map(w => <WindowRow key={w.id} viewer={viewer} w={w} acts={acts} eligible={active && visible} dpr={dpr} />)}
     </div>
   );

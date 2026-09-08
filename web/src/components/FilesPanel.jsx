@@ -9,7 +9,7 @@ const size = n => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} 
 
 export function FilesPanel({ viewer, open }) {
   const path = useStore(viewer.store, s => s.filesPath);
-  const role = useStore(viewer.store, s => s.role);
+  const permissions = useStore(viewer.store, s => s.permissions);
   const change = useStore(viewer.store, s => s.filesChange);
   const filesOpen = useStore(viewer.store, s => s.filesOpen);
   const upload = useStore(viewer.store, s => s.upload);
@@ -23,7 +23,7 @@ export function FilesPanel({ viewer, open }) {
   const current = useRef({ path, listing });
   const canonical = useRef(null);
   current.current = { path, listing };
-  const acts = ['controller', 'participant'].includes(role);
+  const acts = permissions.includes('files.browse');
   useEffect(() => { if (open) setStarted(true); }, [open]);
   useEffect(() => setDraft(path), [path]);
   useEffect(() => { if (filesOpen) setOptions(o => ({ ...o, offset: 0 })); }, [filesOpen]);
@@ -88,8 +88,8 @@ export function FilesPanel({ viewer, open }) {
         <label><input type="checkbox" checked={options.hidden} onChange={e => setOptions(o => ({ ...o, hidden: e.target.checked, offset: 0 }))} /> Hidden files</label>
       </div>
       {listing && <div className="flex gap-1">
-        <label className={`${button} cursor-pointer`}>Upload<input aria-label="Upload files" type="file" multiple className="hidden" onChange={e => { viewer.uploadFiles(e.target.files); e.target.value = ''; }} /></label>
-        <button className={button} onClick={() => { const name = prompt('New directory name'); if (name) mutate(path => manageFile({ op: 'mkdir', path, name })); }}>New folder</button>
+        {permissions.includes('files.upload') && <label className={`${button} cursor-pointer`}>Upload<input aria-label="Upload files" type="file" multiple className="hidden" onChange={e => { viewer.uploadFiles(e.target.files); e.target.value = ''; }} /></label>}
+        {permissions.includes('files.manage') && <button className={button} onClick={() => { const name = prompt('New directory name'); if (name) mutate(path => manageFile({ op: 'mkdir', path, name })); }}>New folder</button>}
       </div>}
       {upload && <div className="break-all" role="status">Uploading {upload.name} ({upload.index}/{upload.count}) to {upload.path} <button className={button} onClick={viewer.cancelUpload}>Cancel</button></div>}
       {loading && <p role="status">Loading directory…</p>}
@@ -105,9 +105,9 @@ export function FilesPanel({ viewer, open }) {
           </div>
           <div className="text-zinc-500">{!folder && `${size(entry.size)} · `}{new Date(entry.modified_ms).toLocaleString()}</div>
           <div className="mt-1 flex gap-1">
-            {downloadable && <button className={button} onClick={() => downloadFile(entry.name, listing.path).catch(e => viewer.notice(e.message))}>Download</button>}
-            <button className={button} onClick={() => { const new_name = prompt('Rename entry', entry.name); if (new_name && new_name !== entry.name) mutate(path => manageFile({ op: 'rename', path, name: entry.name, new_name })); }}>Rename</button>
-            {entry.kind !== 'directory' && <button className={button} onClick={() => { if (confirm(`Delete ${entry.name}?`)) mutate(path => deleteFile(entry.name, path)); }}>Delete</button>}
+            {permissions.includes('files.download') && downloadable && <button className={button} onClick={() => downloadFile(entry.name, listing.path).catch(e => viewer.notice(e.message))}>Download</button>}
+            {permissions.includes('files.manage') && <button className={button} onClick={() => { const new_name = prompt('Rename entry', entry.name); if (new_name && new_name !== entry.name) mutate(path => manageFile({ op: 'rename', path, name: entry.name, new_name })); }}>Rename</button>}
+            {permissions.includes('files.manage') && entry.kind !== 'directory' && <button className={button} onClick={() => { if (confirm(`Delete ${entry.name}?`)) mutate(path => deleteFile(entry.name, path)); }}>Delete</button>}
           </div>
         </div>;
       })}

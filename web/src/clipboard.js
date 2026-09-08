@@ -12,7 +12,8 @@ export function createClipboard(store, copy) {
   let session = '', pending = false;
   const current = () => store.get().clipboardState;
   const connected = () => !disposed && store.get().status === 'connected';
-  const authorized = () => connected() && ['controller', 'participant'].includes(store.get().role);
+  const authorized = () => connected() && store.get().permissions.includes('clipboard.write');
+  const readable = () => connected() && store.get().permissions.includes('clipboard.read');
   const publish = patch => store.set({ clipboardState: { ...current(), ...patch } });
   store.set({ clipboardState: initial() });
 
@@ -22,7 +23,7 @@ export function createClipboard(store, copy) {
   }
 
   function refresh(force = false) {
-    if (!connected()) return Promise.resolve();
+    if (!readable()) return Promise.resolve();
     if (flight && !force) return flight;
     if (force) invalidate();
     const epoch = generation, controller = abort = new AbortController();
@@ -100,6 +101,7 @@ export function createClipboard(store, copy) {
       if (!response.ok) throw Error('Could not change the desktop clipboard');
       const { operation } = await response.json();
       if (typeof operation !== 'string') throw Error('Clipboard confirmation is unavailable');
+      if (!readable()) return;
       const deadline = performance.now() + 5000;
       while (!signal.aborted && performance.now() < deadline) {
         if (!authorized()) throw Error('Disconnected or no longer allowed to change the clipboard');
@@ -115,7 +117,7 @@ export function createClipboard(store, copy) {
   }
 
   const unsubscribe = store.subscribe(() => {
-    const next = `${store.get().status}:${store.get().role}`;
+    const next = `${store.get().status}:${store.get().permissions.join()}`;
     if (next === session) return;
     session = next;
     copy(null);
@@ -128,7 +130,7 @@ export function createClipboard(store, copy) {
   const timer = setInterval(() => { if (connected()) refresh(); }, 2000);
   return {
     refresh, changed, write,
-    read: async () => { const r = await api('/api/clipboard'); if (!r.ok) throw Error('Clipboard preview is unavailable'); return r.text(); },
+    read: async () => { if (!readable()) throw Error('Clipboard reading is not allowed'); const r = await api('/api/clipboard'); if (!r.ok) throw Error('Clipboard preview is unavailable'); return r.text(); },
     open() { opened = true; return refresh(true); },
     close() { opened = false; invalidate(); publish({ text: null, files: [], blob: null }); },
     dispose() { disposed = true; invalidate(); writeAbort?.abort(); clearInterval(timer); unsubscribe(); },

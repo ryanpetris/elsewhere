@@ -38,9 +38,10 @@ function ImagePreview({ blob }) {
 
 export function ClipboardControl({ viewer }) {
   const state = useStore(viewer.store, s => s.clipboardState);
-  const role = useStore(viewer.store, s => s.role);
+  const permissions = useStore(viewer.store, s => s.permissions);
   const status = useStore(viewer.store, s => s.status);
-  const allowed = status === 'connected' && ['controller', 'participant'].includes(role);
+  const allowed = status === 'connected' && permissions.includes('clipboard.write');
+  const readable = permissions.includes('clipboard.read');
   const [open, setOpen] = useState(false), [position, setPosition] = useState({});
   const [draft, setDraft] = useState(null), [pending, setPending] = useState(false), [error, setError] = useState('');
   const button = useRef(null), panel = useRef(null);
@@ -61,7 +62,7 @@ export function ClipboardControl({ viewer }) {
   }, [open, viewer]);
   const conflict = draft && state.observation !== null && draft.observation !== state.observation;
   const text = state.text ?? '';
-  const editable = state.preview === 'empty' || state.mime?.startsWith('text/plain') || ['TEXT', 'STRING', 'UTF8_STRING'].includes(state.mime);
+  const editable = !readable || state.preview === 'empty' || state.mime?.startsWith('text/plain') || ['TEXT', 'STRING', 'UTF8_STRING'].includes(state.mime);
   const edit = () => { setDraft({ text, observation: state.observation }); setError(''); };
   const write = async value => {
     setPending(true); setError('');
@@ -69,11 +70,12 @@ export function ClipboardControl({ viewer }) {
     catch (error) { setError(error.name === 'AbortError' || error.name === 'TimeoutError' ? 'Clipboard change was interrupted or timed out.' : error.message); }
     finally { setPending(false); }
   };
-  const loading = state.status === 'loading' || state.status === 'ready' && state.preview === 'loading';
-  const label = loading ? 'Desktop clipboard: loading'
+  const loading = readable && (state.status === 'loading' || state.status === 'ready' && state.preview === 'loading');
+  const label = !readable ? 'Write desktop clipboard' : loading ? 'Desktop clipboard: loading'
     : state.status === 'unavailable' ? 'Desktop clipboard: unavailable'
     : state.present ? 'Desktop clipboard: has contents' : 'Desktop clipboard: empty';
   const Icon = loading ? LoaderCircle : state.status === 'unavailable' ? ClipboardX : state.present ? ClipboardCheck : Clipboard;
+  if (!readable && !allowed) return null;
   return <>
     <button ref={button} id="clipboard-toggle" type="button" title={label} aria-label={label} aria-expanded={open} aria-controls="desktop-clipboard"
       onClick={() => setOpen(!open)} className={`flex w-6 shrink-0 items-center justify-center rounded py-1 hover:bg-zinc-800 ${state.present ? 'text-indigo-300' : 'text-zinc-400'}`}>
@@ -107,20 +109,20 @@ export function ClipboardControl({ viewer }) {
             <button type="button" className={buttonClass} disabled={!allowed || pending} onClick={() => write(draft.text)}>{conflict ? 'Replace with draft' : 'Save'}</button>
           </div>
         </> : <>
-          {loading ? <p role="status">Loading clipboard…</p>
+          {!readable ? <p>This token allows writing the clipboard.</p> : loading ? <p role="status">Loading clipboard…</p>
             : state.status === 'unavailable' ? <p>Clipboard unavailable</p>
             : !state.present ? <p>Clipboard is empty</p>
             : state.preview !== 'available' ? <p>Preview unavailable</p>
             : state.mime === 'image/png' && state.blob ? <ImagePreview blob={state.blob} />
             : state.files.length ? <ul className="space-y-2">{state.files.map((name, index) => <li key={index} className="flex items-center justify-between gap-2">
-              <span className="min-w-0 break-all">{name}</span>{allowed && <button type="button" className={buttonClass} aria-label={`Download ${name}`} onClick={() => downloadClipboardFile(index, name).catch(error => setError(error.message))}><Download className="size-4" /></button>}
+              <span className="min-w-0 break-all">{name}</span>{readable && permissions.includes('files.download') && <button type="button" className={buttonClass} aria-label={`Download ${name}`} onClick={() => downloadClipboardFile(index, name).catch(error => setError(error.message))}><Download className="size-4" /></button>}
             </li>)}</ul>
             : state.text !== null ? <pre tabIndex={0} className="max-h-64 overflow-auto font-mono text-sm whitespace-pre-wrap break-words">{state.text}</pre>
             : <p role="status">Loading preview…</p>}
           {state.present && <p className="text-xs text-zinc-500">{state.mime || 'Unknown format'}{state.size != null ? ` · ${sizeLabel(state.size)}` : ''}</p>}
           {allowed && <div className="flex justify-end gap-2">
-            {editable && <button type="button" className={buttonClass} disabled={pending || state.text === null} onClick={edit}>Edit</button>}
-            <button type="button" className={buttonClass} disabled={pending || state.status !== 'ready'} onClick={() => write('')}>Clear</button>
+            {editable && <button type="button" className={buttonClass} disabled={pending || (readable && state.text === null)} onClick={edit}>{readable ? 'Edit' : 'New text'}</button>}
+            <button type="button" className={buttonClass} disabled={pending || (readable && state.status !== 'ready')} onClick={() => write('')}>Clear</button>
           </div>}
         </>}
         {pending && <p role="status">Waiting for the desktop clipboard…</p>}

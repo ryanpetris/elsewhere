@@ -21,6 +21,7 @@ const server = createServer(async (req, res) => {
   const path = new URL(req.url, 'http://localhost').pathname;
   const restricted = req.headers.authorization === 'Bearer viewer' && clipboard.mime === 'text/uri-list';
   const json = (value, code = 200) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)); };
+  if (path === '/api/me') return json({ permissions: req.headers.authorization === 'Bearer viewer' ? ['desktop.view', 'clipboard.read'] : ['desktop.view', 'desktop.control', 'clipboard.read', 'clipboard.write', 'files.upload', 'files.download'] });
   if (path === '/api/clipboard/state') return json(meta(restricted));
   if (path === '/api/clipboard' && req.method === 'PUT') {
     if (req.headers.authorization === 'Bearer viewer') return json({}, 403);
@@ -188,12 +189,10 @@ try {
   failWrite = false; await panel.getByRole('button', { name: 'Save', exact: true }).click(); await wait(() => queued.length === 1);
   await panel.getByRole('alert').filter({ hasText: /not confirmed|timed out/ }).waitFor({ timeout: 12000 }); queued = [];
   await panel.getByRole('button', { name: 'Save', exact: true }).click(); await wait(() => queued.length === 1);
-  await page.evaluate(() => socket.onclose({ code: 4003, reason: 'check' }));
-  await panel.getByRole('alert').waitFor();
-  assert.equal(await panel.getByRole('textbox').inputValue(), 'cannot save');
-  assert.match(await toggle.getAttribute('aria-label'), /unavailable/);
-  assert.equal(await toggle.locator('.lucide-clipboard-x').count(), 1, 'unavailable is visibly different from empty');
+  await page.evaluate(() => { window.previousSocket = socket; socket.onclose({ code: 1006, reason: 'check' }); });
+  await toggle.waitFor({ state: 'hidden' });
   queued = [];
+  await page.waitForFunction(() => window.socket !== window.previousSocket);
   const copiesBeforeReconnect = await page.evaluate(() => copies.length);
   set('text/plain;charset=utf-8', 'after reconnect');
   await page.evaluate(CONFIG => packet([CONFIG, ...new TextEncoder().encode(JSON.stringify({ streamId: 2, codec: 'vp8', width: 1280, height: 720, scale: 1 }))]), CONFIG);
@@ -201,7 +200,7 @@ try {
   assert.equal(await page.evaluate(() => copies.length), copiesBeforeReconnect, 'reconnect refresh does not copy to browser');
   assert.equal(await panel.getByRole('textbox').inputValue(), 'cannot save', 'reconnect preserves draft');
   await page.evaluate(ROLE => packet([ROLE, 0, 0]), ROLE);
-  assert.equal(await panel.getByRole('button', { name: 'Replace with draft' }).isDisabled(), true);
+  assert.equal(await panel.getByRole('button', { name: 'Replace with draft' }).isDisabled(), false, 'clipboard grant does not depend on input role');
   await page.evaluate(ROLE => packet([ROLE, 2, 0]), ROLE);
   await page.waitForFunction(() => elsewhere.store.get().clipboardState.text === 'after reconnect');
   await panel.getByRole('button', { name: 'Cancel', exact: true }).click();

@@ -24,6 +24,7 @@ function usePref(key, fallback) {
 export function App({ viewer }) {
   const status = useStore(viewer.store, s => s.status);
   const role = useStore(viewer.store, s => s.role);
+  const permissions = useStore(viewer.store, s => s.permissions);
   const [sidebar, setSidebar] = usePref('sidebar', matchMedia('(min-width: 48rem)').matches); // a phone starts with the stage alone
   const [audioPanel, setAudioPanel] = useState(false);
   const [mixerPanel, setMixerPanel] = useState(false);
@@ -81,7 +82,7 @@ export function App({ viewer }) {
         {!windowMode && !PIP && <Sidebar viewer={viewer} tab={tab} onTab={setTab} hidden={!sidebar || fullscreen} />}
       </div>
       {keyboard && <Keyboard viewer={viewer} onClose={() => setKeyboard(false)} />}
-      {terminal && role !== 'viewer' && !PIP && (TerminalPanel
+      {terminal && permissions.includes('commands.execute') && !PIP && (TerminalPanel
         ? <TerminalPanel viewer={viewer} onClose={closeTerminal} />
         : <div className="flex items-center gap-3 p-3 text-sm"><span role="status">{terminalError || 'Opening terminal…'}</span><button type="button" onClick={closeTerminal}>Close terminal</button></div>)}
       {audioPanel && !windowMode && <AudioPanel viewer={viewer} hidden={fullscreen} onClose={() => setAudioPanel(false)} />}

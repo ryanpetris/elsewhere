@@ -63,6 +63,7 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
   const cam = useStore(viewer.store, st => st.cam);
   const camAvailable = useStore(viewer.store, st => st.camAvailable);
   const role = useStore(viewer.store, st => st.role);
+  const permissions = useStore(viewer.store, st => st.permissions);
   const transport = useStore(viewer.store, st => st.transport);
   const videoVia = useStore(viewer.store, st => st.videoVia);
   const status = useStore(viewer.store, st => st.status);
@@ -87,8 +88,8 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
       </span>
       <span className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-x-4 gap-y-1">
         <ClipboardControl viewer={viewer} />
-        {onMixer && <button id="session-mixer-toggle" type="button" aria-label="Session audio mixer" aria-expanded={mixerPanel} onClick={onMixer} className="text-indigo-300 hover:text-indigo-200">Mixer</button>}
-        {onAudioPanel && <button type="button" aria-label="Audio visualiser" aria-expanded={audioPanel} onClick={onAudioPanel} className="text-indigo-300 hover:text-indigo-200">Visualiser</button>}
+        {permissions.includes('audio.listen') && onMixer && <button id="session-mixer-toggle" type="button" aria-label="Session audio mixer" aria-expanded={mixerPanel} onClick={onMixer} className="text-indigo-300 hover:text-indigo-200">Mixer</button>}
+        {permissions.includes('audio.listen') && onAudioPanel && <button type="button" aria-label="Audio visualiser" aria-expanded={audioPanel} onClick={onAudioPanel} className="text-indigo-300 hover:text-indigo-200">Visualiser</button>}
         <span className="flex items-center gap-1" title={s.audio ? `audio ${s.audio.state}` : 'no audio yet'}>
           {s.audio?.state === 'running' ? <Volume2 className="size-3 text-emerald-400" /> : <VolumeX className="size-3" />}
         </span>

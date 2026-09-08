@@ -43,7 +43,7 @@ try {
   });
   await page.goto(process.env.ELSEWHERE_TEST_URL || `http://127.0.0.1:${server.address().port}`);
   await page.waitForFunction(() => !!window.elsewhere?.store);
-  await page.evaluate(() => window.elsewhere.store.set({ status: 'connected', role: 'viewer', audioAvailable: true, micAvailable: false }));
+  await page.evaluate(() => window.elsewhere.store.set({ status: 'connected', role: 'viewer', permissions: ['desktop.view', 'audio.listen'], audioAvailable: true, micAvailable: false }));
   assert.equal(chunks.length, 0, 'renderer must not load until opened');
   const aboutButton = page.getByRole('button', { name: 'About', exact: true });
   await aboutButton.click();
@@ -218,7 +218,7 @@ try {
     const context = new AudioContext(); await context.resume();
     const source = context.createAnalyser(); source.connect(context.destination);
     window.testPlayback = { context, source };
-    elsewhere.store.set({ status: 'connected', role: 'viewer', audioAvailable: true, micAvailable: false, playback: { context, source } });
+    elsewhere.store.set({ status: 'connected', role: 'viewer', permissions: ['desktop.view', 'audio.listen'], audioAvailable: true, micAvailable: false, playback: { context, source } });
   });
   await page.getByRole('button', { name: 'Audio visualiser', exact: true }).click();
   await page.getByRole('alert').filter({ hasText: 'Visualiser unavailable' }).waitFor();

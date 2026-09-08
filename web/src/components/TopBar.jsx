@@ -22,7 +22,8 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, m
   const locked = useStore(viewer.store, s => s.locked);
   const touchMouse = useStore(viewer.store, s => s.touchMouse);
   const [dot, text] = STATUS[status];
-  const acts = !windowMode && role && role !== 'viewer' && status === 'connected'; // the menus act on the desktop
+  const permissions = useStore(viewer.store, s => s.permissions);
+  const acts = permission => !windowMode && status === 'connected' && permissions.includes(permission);
   if (PIP) return (
     <header className="flex h-9 shrink-0 items-center gap-2 border-b border-zinc-800 bg-zinc-900 px-2 text-xs">
       <span className="min-w-0 flex-1 truncate">{windowMode ? windowTitle || `Window ${WINDOW}` : 'Remote desktop'}</span>
@@ -40,8 +41,8 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, m
         <Logo />
         <span className="hidden truncate sm:inline">{windowMode ? windowTitle || `Window ${WINDOW}` : 'Elsewhere'}</span>
       </div>
-      {acts && <IconButton data-menu-trigger id="apps-toggle" icon={LayoutGrid} label="Applications" active={menu === 'apps'} onClick={() => onMenu('apps')} />}
-      {acts && <IconButton id="terminal-toggle" icon={Terminal} label="Terminal" active={terminal} onClick={onTerminal} />}
+      {acts('apps.launch') && <IconButton data-menu-trigger id="apps-toggle" icon={LayoutGrid} label="Applications" active={menu === 'apps'} onClick={() => onMenu('apps')} />}
+      {acts('commands.execute') && <IconButton id="terminal-toggle" icon={Terminal} label="Terminal" active={terminal} onClick={onTerminal} />}
       <div className="flex min-w-0 shrink-0 items-center gap-2 text-xs text-zinc-400">
         <span className={`size-2 shrink-0 rounded-full ${dot}`} title={text} />
         <span className="hidden truncate sm:inline">{text}</span>
@@ -58,7 +59,7 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, m
           </button>
         )}
         {role === 'viewer' && (
-          <span className="mr-1 inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-400" title="The viewer token watches; it can't act"><Eye className="size-3.5" /> <span className="hidden sm:inline">view only</span></span>
+          <span className="mr-1 inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-400" title="This token does not allow desktop control"><Eye className="size-3.5" /> <span className="hidden sm:inline">watching</span></span>
         )}
         {!windowMode && role === 'controller' && <span className="mr-1 hidden text-xs text-emerald-400/80 sm:inline" title="Your pointer, keyboard and window size are the desktop's">controlling</span>}
         {!windowMode && viewer.touch && role === 'controller' && <IconButton icon={Keyboard} label="On-screen keyboard" active={keyboard} onClick={onKeyboard} />}
@@ -73,7 +74,7 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, m
         <IconButton data-menu-trigger id="about-toggle" icon={Info} label="About" active={menu === 'about'} aria-haspopup="dialog" aria-expanded={menu === 'about'} aria-controls="viewer-about" onClick={() => onMenu('about')} />
         {viewer.pip.supported && <IconButton icon={PictureInPicture2} label="Picture-in-picture" onClick={() => viewer.pip.open()} />}
         <IconButton icon={Expand} label="Fullscreen" onClick={onFullscreen} />
-        {acts && <IconButton data-menu-trigger id="power-toggle" icon={Power} label="Quit Elsewhere" active={menu === 'power'} onClick={() => onMenu('power')} className="hover:text-rose-300" />}
+        {acts('server.manage') && <IconButton data-menu-trigger id="power-toggle" icon={Power} label="Quit Elsewhere" active={menu === 'power'} onClick={() => onMenu('power')} className="hover:text-rose-300" />}
       </div>
     </header>
   );

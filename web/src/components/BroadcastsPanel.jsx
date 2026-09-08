@@ -8,8 +8,8 @@ const buttonClass = 'rounded border border-zinc-600 px-2 py-1 text-sm disabled:o
 const terminal = state => ['stopped', 'failed'].includes(state);
 
 export function BroadcastsPanel({ viewer, open }) {
-  const role = useStore(viewer.store, s => s.role);
-  const acts = ['controller', 'participant'].includes(role);
+  const permissions = useStore(viewer.store, s => s.permissions);
+  const acts = permissions.includes('broadcasts.manage');
   const [presets, setPresets] = useState([]), [streams, setStreams] = useState([]);
   const [caps, setCaps] = useState(null), [edit, setEdit] = useState(null);
   const [error, setError] = useState(''), [busy, setBusy] = useState(false);
@@ -24,7 +24,7 @@ export function BroadcastsPanel({ viewer, open }) {
     return () => window.removeEventListener('storage', changed);
   }, []);
   useEffect(() => {
-    if (!open) return;
+    if (!open || !acts) return;
     let active = true, timer;
     const update = async () => {
       const current = generation.current;
@@ -34,7 +34,7 @@ export function BroadcastsPanel({ viewer, open }) {
     };
     update();
     return () => { active = false; clearTimeout(timer); };
-  }, [open]);
+  }, [open, acts]);
   const action = async fn => {
     if (busy) return;
     setBusy(true); setError(''); generation.current++;
@@ -63,14 +63,14 @@ export function BroadcastsPanel({ viewer, open }) {
     {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
     {pollError && <p role="alert" className="text-sm text-red-300">{pollError}</p>}
     {caps && !caps.available && <p className="text-sm text-amber-300">{caps.error}</p>}
-    {!acts && <p className="text-sm text-zinc-400">A control token is required to start or stop broadcasts.</p>}
+    {!acts && <p className="text-sm text-zinc-400">Broadcast management permission is required.</p>}
     <div className="flex items-center justify-between"><h3 className="text-sm font-medium">Saved presets</h3><button className={buttonClass} onClick={() => setEdit(defaults())}>Add preset</button></div>
     {presets.map(p => <div key={p.preset_id} className="rounded border border-zinc-700 p-2">
       <div className="truncate text-sm font-medium">{p.label}</div>
       <div className="mb-2 text-xs text-zinc-400">{p.width}×{p.height} · {p.fps} fps · {p.bitrate_kbps} kbps</div>
       {p.audio === 'desktop' && caps && !caps.desktop_audio && <p className="mb-2 text-xs text-amber-300">Desktop audio is unavailable on this host.</p>}
       <div className="flex gap-2">
-        <button className={buttonClass} disabled={!acts || busy || !caps?.available || (p.audio === 'desktop' && !caps.desktop_audio)} onClick={() => start(p)}>Start</button>
+        <button className={buttonClass} disabled={!acts || !permissions.includes('desktop.view') || (p.audio === 'desktop' && !permissions.includes('audio.listen')) || busy || !caps?.available || (p.audio === 'desktop' && !caps.desktop_audio)} onClick={() => start(p)}>Start</button>
         <button className={buttonClass} onClick={() => setEdit({ ...p })}>Edit</button>
         <button className={buttonClass} onClick={() => { try { removePreset(p.preset_id); refreshPresets(); } catch { setError('Could not remove the preset.'); } }}>Remove</button>
       </div>
