@@ -1,7 +1,7 @@
 // Run in the Docker image with ELSEWHERE_TEST_WEBCAM pointing to an idle, passed-through v4l2loopback device.
 // Build the release binary first; the image must include its guvcview launcher.
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, open, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawn, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { chromium } from 'playwright-core';
@@ -14,9 +14,12 @@ assert(idle.includes('v4l2 loopback') && !idle.includes('Video Capture'), 'requi
 const root = await mkdtemp(tmpdir() + '/elsewhere-webcam-');
 await mkdir(root + '/runtime', { mode: 0o700 });
 const log = await open(root + '/server.log', 'w');
+const errorLibrary = root + '/device-errors.so';
+execFileSync('cc', ['-shared', '-fPIC', new URL('./webcam-errors.c', import.meta.url).pathname, '-ldl', '-o', errorLibrary]);
 const origin = 'http://127.0.0.1:8093';
 const server = spawn('/src/target/release/elsewhere', ['--webcam', device, '--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--listen', '127.0.0.1:8093', '--socket-name', 'wayland-webcam'], {
-  env: { ...process.env, HOME: root, XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime', RUST_LOG: 'elsewhere_server::api=debug' }, stdio: ['ignore', log.fd, log.fd],
+  env: { ...process.env, HOME: root, XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime', RUST_LOG: 'elsewhere_server::api=debug',
+    LD_PRELOAD: errorLibrary, ELSEWHERE_WEBCAM_TEST_DEVICE: device, ELSEWHERE_WEBCAM_TEST_FAILURE: 'ENODEV', ELSEWHERE_WEBCAM_TEST_ARM: root + '/device-loss' }, stdio: ['ignore', log.fd, log.fd],
 });
 const wait = async fn => {
   for (let i = 0; i < 200; i++) { if (await fn()) return; await new Promise(r => setTimeout(r, 100)); }
@@ -48,7 +51,18 @@ try {
   assert(command.includes('--device=' + device), 'menu passes the configured loopback');
   assert(!(await readFile(root + '/server.log', 'utf8')).includes('no video device'), 'guvcview opens the configured camera');
   console.log(JSON.stringify({ captureBytes: frames.length, width: 1280, height: 720, frames: 3, menuDeviceMatched: true }));
-  for (const win of await page.evaluate(() => elsewhere.store.get().windows)) await page.evaluate(id => elsewhere.control({ id, op: 'close' }), win.id);
+  // The real camera has delivered frames; inject the device-loss errno without changing the device.
+  await writeFile(root + '/device-loss', 'armed');
+  await page.waitForFunction(() => elsewhere.store.get().notice?.text.includes('webcam device stopped taking frames'));
+  assert((await readFile(root + '/server.log', 'utf8')).includes('No such device'), 'the native webcam write returned ENODEV');
+  const painted = await page.evaluate(() => elsewhere.store.get().stats.frames);
+  await page.setViewportSize({ width: 960, height: 720 });
+  await page.waitForFunction(painted => elsewhere.store.get().stats.frames > painted && elsewhere.store.get().role === 'controller', painted);
+  const fresh = await browser.newPage();
+  await fresh.goto(origin + '/#token=' + token);
+  await fresh.waitForFunction(() => elsewhere.store.get().role !== null && elsewhere.store.get().stats.frames > 0);
+  assert.equal(await fresh.evaluate(() => elsewhere.store.get().camAvailable), false, 'new sessions see the failed webcam as unavailable');
+  console.log('injected ENODEV after real webcam frames notifies the controller, disables new camera sessions and preserves desktop playback');
 } finally {
   await browser?.close(); server.kill('SIGTERM');
   await new Promise(resolve => server.exitCode != null ? resolve() : server.once('exit', resolve));

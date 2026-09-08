@@ -15,33 +15,7 @@ frame_bytes = 1280 * 720 * 2
 
 with tempfile.TemporaryDirectory(prefix="elsewhere-webcam-check-") as directory:
     root = Path(directory)
-    source = root / "device-errors.c"
-    source.write_text(r'''
-#define _GNU_SOURCE
-#include <dlfcn.h>
-#include <errno.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
-ssize_t write(int fd, const void *data, size_t size) {
-    static unsigned calls;
-    ssize_t (*real_write)(int, const void *, size_t) = dlsym(RTLD_NEXT, "write");
-    char path[64], target[512];
-    snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
-    ssize_t length = readlink(path, target, sizeof(target) - 1);
-    if (length >= 0) {
-        target[length] = 0;
-        const char *device = getenv("ELSEWHERE_WEBCAM_TEST_DEVICE");
-        if (device && !strcmp(target, device)) {
-            calls++;
-            if (getenv("ELSEWHERE_WEBCAM_TEST_FAILURE") && calls > 20) { errno = EIO; return -1; }
-            if (!getenv("ELSEWHERE_WEBCAM_TEST_FAILURE") && calls % 3 != 0) { errno = EAGAIN; return -1; }
-        }
-    }
-    return real_write(fd, data, size);
-}
-''')
+    source = Path(__file__).with_name("webcam-errors.c")
     library = root / "device-errors.so"
     subprocess.run(["cc", "-shared", "-fPIC", str(source), "-ldl", "-o", str(library)], check=True)
     for pressure in [False, True]:
@@ -73,7 +47,10 @@ ssize_t write(int fd, const void *data, size_t size) {
             if writer.poll() is None:
                 writer.kill()
                 writer.wait()
-    failure = subprocess.run([binary, device], env=dict(os.environ, LD_PRELOAD=str(library),
-        ELSEWHERE_WEBCAM_TEST_DEVICE=device, ELSEWHERE_WEBCAM_TEST_FAILURE="1"), capture_output=True, timeout=4)
-    assert failure.returncode != 0 and b"write webcam frame" in failure.stderr, failure.stderr
-    print("permanent device write failure stopped the webcam worker", flush=True)
+    for error in ["EIO", "ENODEV"]:
+        failure = subprocess.run([binary, device], env=dict(os.environ, LD_PRELOAD=str(library),
+            ELSEWHERE_WEBCAM_TEST_DEVICE=device, ELSEWHERE_WEBCAM_TEST_FAILURE=error), capture_output=True, timeout=4)
+        assert failure.returncode != 0 and b"write webcam frame" in failure.stderr, failure.stderr
+        if error == "ENODEV":
+            assert b"No such device" in failure.stderr, failure.stderr
+        print(f"injected {error} after real webcam startup stopped the worker", flush=True)
