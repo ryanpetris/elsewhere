@@ -13,7 +13,7 @@ of a window, and a small desktop UI in the viewer built on the same data. Wire f
 | Window identity | `u64` from a counter, stored in the `Window` user data on first sight. Stable, never reused. |
 | Where the page talks | The existing WebSocket: `Windows` (server → client) and `Control` (client → server) JSON messages. |
 | Where scripts talk | `/api/...` on the same axum router, bearer token. |
-| Two tokens | The control token acts; the viewer token (`viewer-token`, retrieved with `elsewhere token --viewer`) reads: window list, elements, snapshots, the clipboard (text, image, copied files), the video. Acting routes answer `403`, acting MCP tools a tool error. |
+| Two tokens | The control token acts; the viewer token (`viewer-token`, retrieved with `elsewhere token --viewer`) reads: window list, elements, snapshots, clipboard text and images, and video. Copied file lists and downloads require the control token. Acting routes answer `403`, acting MCP tools a tool error. |
 | Several viewers | Each session has its own encoder (codec and size of its own); one controller at a time drives input and sizes the output, the first control-token session or whoever took control last; the rest watch letterboxed. |
 | "Focused" | The compositor's intent: the window `focus_window` last activated (or that was just mapped), not the client-acknowledged xdg state, which lags a round trip and is wrong for a hung client. |
 | Update timestamps | Whole-second resolution. It is part of the diffed list, so finer resolution would turn a 60 fps client into sixty lists a second. |
@@ -351,14 +351,14 @@ locally).
 ## Clipboard
 
 `clipboard.rs`. When a client takes the clipboard offering `text/uri-list`, a text mime type or `image/png`
-(`new_selection`, or the Xwayland path in `xwayland.rs`), the compositor asks the owner for it (text
-first) through a pipe on the next loop idle (the request is deferred out of the selection handler and
+(`new_selection`, or the Xwayland path in `xwayland.rs`), the compositor asks the owner for it, preferring
+a file list, then text, then PNG, through a pipe on the next loop idle (the request is deferred out of the selection handler and
 any read still in progress is dropped), reads it on the event loop (calloop `Generic` on the
-non-blocking read end; 1 MiB cap for text, 16 MiB for a PNG) and sends `Event::Clipboard { mime, data }`;
-the server keeps the last one for `GET /api/clipboard`, whose Content-Type says which it is, and tells
+non-blocking read end; 1 MiB cap for text, 16 MiB for a PNG) and sends `Event::Clipboard`;
+the server keeps the observed contents for `GET /api/clipboard`, whose Content-Type says which it is, and tells
 the viewers with the `Clipboard` message (the text itself) or `ClipboardData` (the mime only; the page
 fetches the bytes). Neither is replayed to a connecting viewer, whose browser clipboard may be newer.
-`Command::SetClipboard { mime, data }` makes a compositor-owned selection whose user data carries the
+`Command::SetClipboard` makes a compositor-owned selection whose user data carries the
 bytes (text is offered under every text mime, a PNG as `image/png`); `send_selection` writes them from a
 calloop source on the non-blocking pipe, so a slow reader never blocks the compositor, and X11 clients
 are offered it too. The selection user data distinguishes relayed X11 selections from our own. Setting
@@ -368,9 +368,32 @@ bridged; other image formats aren't read (GTK, Qt, Firefox and Chromium all offe
 client's PNG isn't either: Smithay's Xwayland selection code resolves only text targets. Our PNG is
 offered to X11 clients.
 
+Every new owner invalidates the previous read and preview, including empty and unsupported offers.
+The protocol dispatcher tracks the accepted Wayland selection source so destroying that source also
+clears the cached contents. Read failures, size limits and timeouts leave occupied but unavailable
+metadata rather than retaining the previous owner's bytes.
+
+`GET /api/clipboard/state` returns `observation`, `operation`, `present`, `mime`, `size` and `preview`.
+The observation is an opaque identifier scoped to this server process. Preview states are `empty`,
+`loading`, `available`, `unavailable` and `restricted`; an unknown size is `null`. No owner and zero-byte
+text are empty; whitespace is occupied. View-only sessions receive restricted metadata for file lists.
+A raw read with `If-Match: "<observation>"` returns `412` if the observation changed, `409` if its bytes
+are unavailable, or `204` if there is no selection. Successful reads include an `ETag`.
+
+`PUT /api/clipboard` returns `202` with an opaque `operation` identifier when queued. The compositor
+reports that operation after installing the selection. The viewer polls metadata for the matching
+operation before reporting success; a timeout, replacement or disconnect leaves an explicit error.
+
+The fixed-width status bar icon shows only state. Its popover loads permitted text, image or file
+previews on demand without synchronizing the browser clipboard. Text drafts stay in memory across
+panel closes and external copies. A changed observation requires loading the current text or explicitly
+replacing it with the draft. Text entry, selection, copy and paste stay local to the panel. Image
+previews require a PNG within the 16 MiB byte and 16 megapixel limits; closing or replacing a preview
+releases its object URL. Metadata refreshes on connection, reconnect, panel open and periodically.
+
 Files: a file manager's copy offers `text/uri-list` and `x-special/gnome-copied-files` (the same list
 with a `copy` first line) besides the paths as text; the compositor reads the URI list then, the page
-shows "N files copied" with a download button, and `GET /api/clipboard/files/{index}` streams the
+shows file names and download buttons inside the clipboard popover, and `GET /api/clipboard/files/{index}` streams the
 `index`th file of the list currently on the clipboard (only that list: the route can't read anything
 else). The other way, files pasted into the page are staged first (`PUT /api/drop/{batch}/{name}`), then
 `POST /api/clipboard/files` with that `"batch"` makes them the desktop clipboard as a URI list offered under both mimes (the

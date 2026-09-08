@@ -460,11 +460,15 @@ try {
       (await rpc('tools/call', {name : 'clipboard_read', arguments : {}}))
           .result.isError,
       true);
-  assert.equal(await ro.evaluate(() => elsewhere.store.get().clipboardFiles.length),
+  assert.equal(await ro.evaluate(() => elsewhere.store.get().clipboardState.files.length),
                0);
+  await ro.locator('#clipboard-toggle').click();
+  const clipboardPanel = ro.getByRole('dialog', {name : 'Desktop clipboard', exact : true});
+  await clipboardPanel.getByText('Preview unavailable', {exact : true}).waitFor();
   assert.equal(
-      await ro.locator('button[title^="Download the copied files"]').count(),
+      await clipboardPanel.getByRole('button', {name : /^Download /}).count(),
       0);
+  await clipboardPanel.getByRole('button', {name : 'Close clipboard'}).click();
   await p.locator('canvas.stage').evaluate(el => {
     const data = new DataTransfer();
     data.items.add(new File([ 'hidden' ], '.rejected'));

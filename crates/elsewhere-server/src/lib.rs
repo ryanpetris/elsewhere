@@ -162,14 +162,41 @@ pub(crate) struct Viewers {
     /// Last WINDOWS message, replayed to a new viewer, and the list it encodes (the API's view).
     windows: Option<Bytes>,
     window_list: Vec<WindowInfo>,
-    /// The last clipboard contents (mime, bytes), from an application, the browser or the API (served on the API; not replayed to a viewer).
-    clipboard: Option<(String, Bytes)>,
+    /// The current clipboard observation, served on the API without replaying a browser copy event.
+    clipboard: Clipboard,
+    clipboard_scope: String,
+    next_clipboard_write: u64,
     next_id: u64,
 }
 
 impl Default for Viewers {
     fn default() -> Self {
-        Viewers { sessions: HashMap::new(), controller: None, control_epoch: 0, output: elsewhere_core::INITIAL_OUTPUT, cursor: None, locked: false, windows: None, window_list: Vec::new(), clipboard: None, next_id: 1 }
+        Viewers { sessions: HashMap::new(), controller: None, control_epoch: 0, output: elsewhere_core::INITIAL_OUTPUT, cursor: None, locked: false, windows: None, window_list: Vec::new(), clipboard: Clipboard::default(), clipboard_scope: random_hex(16), next_clipboard_write: 1, next_id: 1 }
+    }
+}
+
+#[derive(Clone, Default)]
+struct Clipboard {
+    mime: Option<String>,
+    data: Option<Bytes>,
+    loading: bool,
+    observation: u64,
+    operation: Option<u64>,
+}
+
+impl Clipboard {
+    fn present(&self) -> bool {
+        self.mime.is_some() && !(self.mime.as_deref().is_some_and(api::text_mime) && self.data.as_ref().is_some_and(Bytes::is_empty))
+    }
+
+    fn metadata(&self, key: Key, scope: &str) -> serde_json::Value {
+        let restricted = self.mime.as_deref() == Some(api::URI_LIST) && key != Key::Control;
+        serde_json::json!({
+            "observation": format!("{scope}:{}", self.observation), "operation": self.operation.map(|id| format!("{scope}:{id}")),
+            "present": self.present(), "mime": self.mime, "size": self.data.as_ref().filter(|_| !restricted).map(Bytes::len),
+            "preview": if !self.present() { "empty" } else if restricted { "restricted" } else if self.loading { "loading" }
+                else if self.data.is_some() { "available" } else { "unavailable" },
+        })
     }
 }
 
@@ -280,6 +307,7 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
                 .route("/api/notifications/{id}/icon", get(api_notification_icon))
                 .route("/api/token/rotate", post(api_token_rotate))
                 .route("/api/clipboard", get(api_clipboard).put(api_set_clipboard))
+                .route("/api/clipboard/state", get(api_clipboard_state))
                 .route("/api/clipboard/files", post(api_clipboard_files))
                 .route("/api/clipboard/files/{index}", get(api_clipboard_file))
                 .nest("/mcp", Router::new().fallback_service(mcp_service(app.clone())).layer(middleware::from_fn(mcp::validate_capture_body)))
@@ -552,12 +580,23 @@ async fn api_token_rotate(headers: HeaderMap, State(app): State<Arc<App>>) -> Re
     }
 }
 
-/// What a desktop application last copied: text, a PNG or a file list (its Content-Type says which), or 204 if nothing yet.
-async fn api_clipboard(Extension(key): Extension<Key>, State(app): State<Arc<App>>) -> Response {
-    match app.clipboard() {
-        Some((mime, _)) if mime == api::URI_LIST && key != Key::Control => ApiError::Forbidden.into_response(),
-        Some((mime, data)) => (NO_STORE, [(header::CONTENT_TYPE, match mime.as_str() { api::PNG | api::URI_LIST => mime.clone(), _ => "text/plain; charset=utf-8".into() })], data).into_response(),
-        None => (StatusCode::NO_CONTENT, NO_STORE).into_response(),
+async fn api_clipboard_state(Extension(key): Extension<Key>, State(app): State<Arc<App>>) -> Response {
+    let viewers = app.viewers.lock().unwrap();
+    (NO_STORE, Json(viewers.clipboard.metadata(key, &viewers.clipboard_scope))).into_response()
+}
+
+/// Current clipboard bytes. If-Match binds a preview read to its metadata observation.
+async fn api_clipboard(Extension(key): Extension<Key>, State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    let (clipboard, scope) = { let viewers = app.viewers.lock().unwrap(); (viewers.clipboard.clone(), viewers.clipboard_scope.clone()) };
+    let etag = format!("\"{scope}:{}\"", clipboard.observation);
+    if headers.get(header::IF_MATCH).is_some_and(|value| value != etag.as_str()) {
+        return (StatusCode::PRECONDITION_FAILED, NO_STORE).into_response();
+    }
+    match (clipboard.mime, clipboard.data) {
+        (Some(mime), _) if mime == api::URI_LIST && key != Key::Control => ApiError::Forbidden.into_response(),
+        (Some(mime), Some(data)) => (NO_STORE, [(header::CONTENT_TYPE, match mime.as_str() { api::PNG | api::URI_LIST => mime, _ => "text/plain; charset=utf-8".into() }), (header::ETAG, etag)], data).into_response(),
+        (None, _) => (StatusCode::NO_CONTENT, NO_STORE).into_response(),
+        _ => (StatusCode::CONFLICT, NO_STORE).into_response(),
     }
 }
 
@@ -572,8 +611,11 @@ async fn api_set_clipboard(Extension(key): Extension<Key>, State(app): State<Arc
     let mime = if content_type.starts_with(api::PNG) { api::PNG } else if content_type.starts_with(api::URI_LIST) { api::URI_LIST } else { api::TEXT };
     let Ok(body) = axum::body::to_bytes(req.into_body(), api::clipboard_limit(mime)).await else { return ApiError::TooLarge.into_response() };
     let body = if mime == api::PNG { body } else { Bytes::from(String::from_utf8_lossy(&body).into_owned()) };
-    match app.set_clipboard(mime, body) {
-        Ok(()) => StatusCode::ACCEPTED.into_response(),
+    match app.queue_clipboard(mime, body) {
+        Ok(operation) => {
+            let scope = &app.viewers.lock().unwrap().clipboard_scope;
+            (StatusCode::ACCEPTED, NO_STORE, Json(serde_json::json!({ "operation": format!("{scope}:{operation}") }))).into_response()
+        }
         Err(e) => e.into_response(),
     }
 }

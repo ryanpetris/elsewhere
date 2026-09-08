@@ -113,7 +113,7 @@ impl State {
                 self.key(evdev, pressed);
             }
             Command::Input(msg) => self.input(msg),
-            Command::SetClipboard { mime, data } => self.set_clipboard(mime, data),
+            Command::SetClipboard { mime, data, operation } => self.set_clipboard(mime, data, operation),
             Command::Drag(drag) => self.drag(drag),
             Command::Touch { kind, slot, x, y } => self.touch(kind, slot, (x, y).into()),
             Command::ReleaseAllInput => self.release_all(),

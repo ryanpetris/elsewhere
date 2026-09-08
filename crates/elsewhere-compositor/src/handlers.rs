@@ -660,10 +660,8 @@ impl SelectionHandler for State {
         {
             tracing::warn!("xwayland selection: {e:?}");
         }
-        if ty == SelectionTarget::Clipboard
-            && let Some(mime) = mimes.as_deref().and_then(crate::clipboard::pick_mime)
-        {
-            self.read_clipboard(mime, false);
+        if ty == SelectionTarget::Clipboard {
+            self.clipboard_offer(mimes, false);
         }
     }
 
@@ -850,5 +848,3 @@ impl smithay::wayland::xdg_toplevel_icon::XdgToplevelIconHandler for State {}
 
 // Frame pacing: barriers and timers are released from the frame clock (State::release_barriers);
 // the content type is read with the window list.
-
-smithay::delegate_dispatch2!(State);

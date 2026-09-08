@@ -21,6 +21,7 @@ use smithay::{
     reexports::{
         calloop::{Interest, Mode, PostAction, RegistrationToken, generic::Generic, ping::Ping, timer::{TimeoutAction, Timer}},
         rustix,
+        wayland_server::protocol::wl_data_source::WlDataSource,
     },
     utils::{IsAlive, SERIAL_COUNTER},
     wayland::selection::{
@@ -125,21 +126,30 @@ pub fn pick_mime(mimes: &[String]) -> Option<String> {
 #[derive(Default)]
 pub struct Reading {
     token: Option<RegistrationToken>,
-    generation: u64,
+    pub(crate) generation: u64,
+    pub(crate) owner: Option<WlDataSource>,
 }
 
 impl State {
-    /// Read the current clipboard (a URI list, text or a PNG, whichever `pick_mime` chose) through a pipe and report it when the owner is done writing.
-    /// `x11` says the owner is an X11 client (the request goes through Xwayland). Deferred to the next
-    /// loop turn so the selection this is called about is installed by then; a previous read still in
-    /// flight is dropped.
-    pub fn read_clipboard(&mut self, mime: String, x11: bool) {
+    /// Invalidate the old owner immediately, then read a supported offer on the next loop turn,
+    /// once the new selection is installed. Unsupported offers still occupy the clipboard.
+    pub fn clipboard_offer(&mut self, mimes: Option<Vec<String>>, x11: bool) {
         let generation = self.cancel_clipboard_read();
-        self.handle.insert_idle(move |state| state.start_clipboard_read(mime, x11, generation));
+        let readable = mimes.as_deref().and_then(pick_mime);
+        let mime = readable.clone().or_else(|| mimes.map(|mimes| mimes.into_iter().next().unwrap_or_else(|| "application/octet-stream".into())));
+        let _ = self.events.send(Event::ClipboardOffer { mime, loading: readable.is_some() });
+        if let Some(mime) = readable {
+            self.handle.insert_idle(move |state| state.start_clipboard_read(mime, x11, generation));
+        }
+    }
+
+    fn clipboard_unavailable(&self, mime: String) {
+        let _ = self.events.send(Event::ClipboardOffer { mime: Some(mime), loading: false });
     }
 
     /// Drop the read in flight; whatever it still delivers is ignored. Returns the new generation.
     fn cancel_clipboard_read(&mut self) -> u64 {
+        self.reading.owner = None;
         if let Some(token) = self.reading.token.take() {
             self.handle.remove(token);
         }
@@ -159,7 +169,10 @@ impl State {
         if generation != self.reading.generation {
             return; // superseded before it started
         }
-        let Ok((read, write)) = rustix::pipe::pipe_with(rustix::pipe::PipeFlags::CLOEXEC) else { return };
+        let Ok((read, write)) = rustix::pipe::pipe_with(rustix::pipe::PipeFlags::CLOEXEC) else {
+            self.clipboard_unavailable(mime);
+            return;
+        };
         let _ = rustix::fs::fcntl_setfl(&read, rustix::fs::OFlags::NONBLOCK);
         let requested = if x11 {
             self.xwm.as_mut().map(|xwm| xwm.send_selection(SelectionTarget::Clipboard, mime.clone(), write).map_err(|e| format!("{e:?}"))).unwrap_or(Err("no xwm".into()))
@@ -168,10 +181,12 @@ impl State {
         };
         if let Err(e) = requested {
             tracing::debug!("clipboard read: {e}");
+            self.clipboard_unavailable(mime);
             return;
         }
         let (mut data, limit) = (Vec::new(), limit(&mime));
         let source = Generic::new(read, Interest::READ, Mode::Level);
+        let failed_mime = mime.clone();
         let token = self.handle.insert_source(source, move |_, fd, state| {
             if generation != state.reading.generation {
                 return Ok(PostAction::Remove); // a newer selection took over
@@ -181,7 +196,7 @@ impl State {
                 match rustix::io::read(&*fd, &mut chunk) {
                     Ok(0) => {
                         state.reading.token = None;
-                        let _ = state.events.send(Event::Clipboard { mime: mime.clone(), data: std::mem::take(&mut data).into() });
+                        let _ = state.events.send(Event::Clipboard { mime: mime.clone(), data: std::mem::take(&mut data).into(), operation: None });
                         return Ok(PostAction::Remove);
                     }
                     Ok(n) => {
@@ -189,12 +204,14 @@ impl State {
                         if data.len() > limit {
                             tracing::debug!("clipboard read: over {limit} bytes, dropped");
                             state.reading.token = None;
+                            state.clipboard_unavailable(mime.clone());
                             return Ok(PostAction::Remove);
                         }
                     }
                     Err(rustix::io::Errno::AGAIN) => return Ok(PostAction::Continue),
                     Err(_) => {
                         state.reading.token = None;
+                        state.clipboard_unavailable(mime.clone());
                         return Ok(PostAction::Remove);
                     }
                 }
@@ -202,26 +219,37 @@ impl State {
         });
         if let Ok(token) = token {
             self.reading.token = Some(token);
-            self.expire(token);
+            let _ = self.handle.insert_source(Timer::from_duration(DEADLINE), move |_, _, state| {
+                if generation == state.reading.generation
+                    && let Some(token) = state.reading.token.take()
+                {
+                    state.handle.remove(token);
+                    state.clipboard_unavailable(failed_mime.clone());
+                }
+                TimeoutAction::Drop
+            });
+        } else {
+            self.clipboard_unavailable(failed_mime);
         }
     }
 
     /// Text, a PNG or a file list (`text/uri-list`) from the browser or the API becomes the clipboard, offered
     /// to Wayland and X11 clients.
-    pub fn set_clipboard(&mut self, mime: String, data: Vec<u8>) {
+    pub fn set_clipboard(&mut self, mime: String, data: Vec<u8>, operation: Option<u64>) {
         self.cancel_clipboard_read(); // an application's older clipboard must not land after this one
         let mimes: Vec<String> = match mime.as_str() {
             PNG => vec![mime.clone()],
             URI_LIST => vec![URI_LIST.into(), GNOME_FILES.into()],
             _ => TEXT_MIMES.iter().map(|m| m.to_string()).collect(),
         };
-        let _ = self.events.send(Event::Clipboard { mime: mime.clone(), data: data.clone().into() }); // the server learns of every change in order
+        let observed = data.clone().into();
         set_data_device_selection(&self.dh, &self.seat, mimes.clone(), Selection::Ours(Arc::new(data)));
         if let Some(xwm) = self.xwm.as_mut()
             && let Err(e) = xwm.new_selection(SelectionTarget::Clipboard, Some(mimes))
         {
             tracing::warn!("xwayland selection: {e:?}");
         }
+        let _ = self.events.send(Event::Clipboard { mime, data: observed, operation });
     }
 
     /// The browser drags local files over the desktop. `Start` presses the left button over nothing (so no

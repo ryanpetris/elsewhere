@@ -65,7 +65,7 @@ export const deleteFile = async (name, path) => fileResult(await api(fileUrl(nam
 export const manageFile = async action => fileResult(await api('/api/files', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(action) }));
 // Saved under the name the server serves it as (a clipboard file may have changed since its name was shown).
 const download = async (path, name) => {
-  const r = ok(await api(path));
+  const r = await ok(await api(path));
   const served = /filename\*=UTF-8''([^;]+)/.exec(r.headers.get('content-disposition') ?? '');
   const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(await r.blob()), download: served ? decodeURIComponent(served[1]) : name });
   a.click();

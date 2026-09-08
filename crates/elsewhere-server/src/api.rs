@@ -17,6 +17,10 @@ pub const PNG: &str = "image/png";
 /// A list of `file://` URIs, one per line: files copied in a file manager, or files the browser pasted.
 pub const URI_LIST: &str = "text/uri-list";
 
+pub fn text_mime(mime: &str) -> bool {
+    matches!(mime, "text/plain;charset=utf-8" | "text/plain" | "UTF8_STRING" | "TEXT" | "STRING")
+}
+
 pub fn clipboard_limit(mime: &str) -> usize {
     if mime == PNG { 16 << 20 } else { 1 << 20 }
 }
@@ -161,16 +165,26 @@ impl App {
 
     /// What was last put on the clipboard, by an application, the browser or the API: its mime and bytes.
     pub fn clipboard(&self) -> Option<(String, Bytes)> {
-        self.viewers.lock().unwrap().clipboard.clone()
+        let clipboard = &self.viewers.lock().unwrap().clipboard;
+        clipboard.mime.clone().zip(clipboard.data.clone())
     }
 
     /// Text (`TEXT`), a PNG or a file list becomes the desktop clipboard; fire-and-forget like control. The compositor
     /// reports it back like any clipboard change, which is what `clipboard()` and the viewers then see.
     pub fn set_clipboard(&self, mime: &str, data: Bytes) -> Result<(), ApiError> {
+        self.queue_clipboard(mime, data).map(|_| ())
+    }
+
+    /// The operation is echoed only after the compositor has installed this selection.
+    pub fn queue_clipboard(&self, mime: &str, data: Bytes) -> Result<u64, ApiError> {
         if data.len() > clipboard_limit(mime) {
             return Err(ApiError::TooLarge);
         }
-        self.send(Command::SetClipboard { mime: mime.to_string(), data: data.to_vec() })
+        let mut viewers = self.viewers.lock().unwrap();
+        let operation = viewers.next_clipboard_write;
+        viewers.next_clipboard_write += 1;
+        self.send(Command::SetClipboard { mime: mime.to_string(), data: data.to_vec(), operation: Some(operation) })?;
+        Ok(operation)
     }
 
     /// A window action, spawn, launch or quit. Fire-and-forget: the compositor ignores unknown ids and

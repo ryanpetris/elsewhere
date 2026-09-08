@@ -368,6 +368,12 @@ application last copied, text or a PNG, and sets what it will paste; the viewer 
 clipboard to the browser's (copy text or an image in an application, paste locally; Ctrl+V in the page
 pastes the browser's clipboard, screenshots included).
 
+The status bar's clipboard button opens a preview of the desktop clipboard. Text can be selected,
+edited or cleared; images have a bounded preview, and copied files have download buttons. An unfinished
+text draft survives closing the panel. If another application copies while you edit, the panel lets
+you load that content or replace it with your draft. Opening the panel does not change the browser's
+clipboard. View-only sessions can inspect permitted content but cannot edit it or download copied files.
+
 ## Agents: MCP and skill
 
 The same operations are MCP tools at `/mcp` (Streamable HTTP, same bearer token), so a coding agent can

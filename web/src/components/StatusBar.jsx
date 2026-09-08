@@ -1,9 +1,9 @@
 // Viewer statistics, media controls, and this viewer's codec, quality and effort choices.
-import { Activity, Camera, CameraOff, ClipboardCheck, Download, Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
+import { Activity, Camera, CameraOff, Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
 import { useStore } from '../store.js';
 import { EFFORTS, PRESETS, TRANSPORTS } from '../protocol.js';
 import { codecName } from './ui.jsx';
-import { downloadClipboardFile } from '../api.js';
+import { ClipboardControl } from './Clipboard.jsx';
 
 const PRESET_LABEL = { 'very-low': 'Very Low', low: 'Low', medium: 'Medium', high: 'High', max: 'Max' };
 const EFFORT_LABEL = { fast: 'Fast', balanced: 'Balanced', high: 'High' };
@@ -57,8 +57,6 @@ function Choice({ viewer }) {
 
 export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixer }) {
   const s = useStore(viewer.store, st => st.stats);
-  const clipboardText = useStore(viewer.store, st => st.clipboardText);
-  const clipboardFiles = useStore(viewer.store, st => st.clipboardFiles);
   const renderer = useStore(viewer.store, st => st.renderer);
   const mic = useStore(viewer.store, st => st.mic);
   const micAvailable = useStore(viewer.store, st => st.micAvailable);
@@ -88,11 +86,7 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
         <button type="button" onClick={() => viewer.retryRtc()} disabled={recovery.state !== 'waiting'} className={`shrink-0 text-indigo-300 hover:text-indigo-200 ${recovery.state === 'waiting' ? '' : 'invisible'}`}>Retry now</button>
       </span>
       <span className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-x-4 gap-y-1">
-        {clipboardFiles.length > 0 && ['controller', 'participant'].includes(role) ? (
-          <button type="button" onClick={async () => { for (const [i, n] of clipboardFiles.entries()) await downloadClipboardFile(i, n).catch(() => {}); }} title={`Download the copied files: ${clipboardFiles.join(', ')}`} className="flex max-w-48 items-center gap-1 truncate text-indigo-300 hover:text-indigo-200">
-            <Download className="size-3 shrink-0" /><span className="truncate">{clipboardText} copied</span>
-          </button>
-        ) : clipboardText && <span className="flex max-w-48 items-center gap-1 truncate" title={`Clipboard: ${clipboardText}`}><ClipboardCheck className="size-3 shrink-0" /><span className="truncate">{clipboardText}</span></span>}
+        <ClipboardControl viewer={viewer} />
         {onMixer && <button id="session-mixer-toggle" type="button" aria-label="Session audio mixer" aria-expanded={mixerPanel} onClick={onMixer} className="text-indigo-300 hover:text-indigo-200">Mixer</button>}
         {onAudioPanel && <button type="button" aria-label="Audio visualiser" aria-expanded={audioPanel} onClick={onAudioPanel} className="text-indigo-300 hover:text-indigo-200">Visualiser</button>}
         <span className="flex items-center gap-1" title={s.audio ? `audio ${s.audio.state}` : 'no audio yet'}>

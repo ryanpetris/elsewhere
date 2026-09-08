@@ -5,6 +5,7 @@ mod clipboard;
 mod cursor;
 mod decor;
 mod desktop;
+mod dispatch;
 mod foreign_toplevel;
 mod gpu;
 mod grabs;

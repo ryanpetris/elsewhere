@@ -45,12 +45,15 @@ pub async fn distribute_audio(app: Arc<App>, mut rx: mpsc::Receiver<StreamMsg>) 
 
 /// Compositor events (cursor, pointer lock, window list, clipboard) to every viewer and window session.
 pub async fn forward_events(app: Arc<App>, mut rx: mpsc::UnboundedReceiver<Event>) {
-    while let Some(mut ev) = rx.recv().await {
+    let mut pending = None;
+    loop {
+        let Some(mut ev) = (match pending.take() { Some(ev) => Some(ev), None => rx.recv().await }) else { break };
         // Window lists supersede each other: a slow viewer gets the newest one, not the whole history.
         while let Event::Windows(_) = ev {
             match rx.try_recv() {
                 Ok(next @ Event::Windows(_)) => ev = next,
-                _ => break,
+                Ok(next) => { pending = Some(next); break; }
+                Err(_) => break,
             }
         }
         let mut v = app.viewers.lock().unwrap();
@@ -70,14 +73,19 @@ pub async fn forward_events(app: Arc<App>, mut rx: mpsc::UnboundedReceiver<Event
                 v.window_list = list;
                 msg
             }
-            Event::Clipboard { mime, data } => {
+            Event::Clipboard { mime, data, operation } => {
                 let (msg, data) = if mime == api::PNG || mime == api::URI_LIST {
                     (protocol::clipboard_data(&mime), data)
                 } else {
                     let text = String::from_utf8_lossy(&data).into_owned(); // a legacy STRING owner may hand us Latin-1
                     (protocol::clipboard(&text), Bytes::from(text))
                 };
-                v.clipboard = Some((mime, data));
+                v.clipboard = crate::Clipboard { mime: Some(mime), data: Some(data), loading: false, observation: v.clipboard.observation + 1, operation };
+                msg
+            }
+            Event::ClipboardOffer { mime, loading } => {
+                let msg = protocol::clipboard_data(mime.as_deref().unwrap_or_default());
+                v.clipboard = crate::Clipboard { mime, loading, observation: v.clipboard.observation + 1, ..Default::default() };
                 msg
             }
             Event::DragEnded { taken, target, batch } => {
@@ -519,7 +527,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                         // window-relative, resolved against the live geometry on the compositor thread
                         Some(ClientMsg::MotionAbs { x, y }) => Some(Command::Input(InputMsg::Move { x: x as f64, y: y as f64, window: Some(id) })),
                         Some(ClientMsg::Resize { css_w, css_h, .. }) => Some(Command::Control(ControlMsg { id, op: ControlOp::Resize { w: css_w as i32, h: css_h as i32 } })),
-                        Some(ClientMsg::SetClipboard(text)) => Some(Command::SetClipboard { mime: api::TEXT.into(), data: text.into() }),
+                        Some(ClientMsg::SetClipboard(text)) => Some(Command::SetClipboard { mime: api::TEXT.into(), data: text.into(), operation: None }),
                         Some(ClientMsg::Notify(n)) => {
                             app.spawn_notification_action(n);
                             None
@@ -723,7 +731,7 @@ impl App {
                 Some(Command::RequestFullFrame)
             }
             ClientMsg::Control(m) if key == Key::Control => self.command_for(m).ok(),
-            ClientMsg::SetClipboard(text) if key == Key::Control => Some(Command::SetClipboard { mime: api::TEXT.into(), data: text.into() }),
+            ClientMsg::SetClipboard(text) if key == Key::Control => Some(Command::SetClipboard { mime: api::TEXT.into(), data: text.into(), operation: None }),
             ClientMsg::Drag(d) if controls => Some(self.drag_command(d, &v)),
             ClientMsg::Input(m) if controls => Some(Command::Input(m)),
             ClientMsg::Mixer(command) => { self.mixer_message(&mut v, id, command); None },

@@ -235,11 +235,8 @@ impl XwmHandler for State {
     fn new_selection(&mut self, _xwm: XwmId, selection: SelectionTarget, mime_types: Vec<String>) {
         match selection {
             SelectionTarget::Clipboard => {
-                let readable = crate::clipboard::pick_mime(&mime_types);
+                self.clipboard_offer(Some(mime_types.clone()), true);
                 set_data_device_selection(&self.dh, &self.seat, mime_types, crate::clipboard::Selection::X11);
-                if let Some(mime) = readable {
-                    self.read_clipboard(mime, true);
-                }
             }
             SelectionTarget::Primary => set_primary_selection(&self.dh, &self.seat, mime_types, crate::clipboard::Selection::X11),
         }
@@ -250,6 +247,7 @@ impl XwmHandler for State {
             SelectionTarget::Clipboard => {
                 if current_data_device_selection_userdata(&self.seat).is_some() {
                     clear_data_device_selection(&self.dh, &self.seat);
+                    self.clipboard_offer(None, true);
                 }
             }
             SelectionTarget::Primary => {

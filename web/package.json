@@ -8,6 +8,7 @@
     "check:visualiser": "node checks/visualiser.mjs",
     "check:structured-input": "node checks/structured-input.mjs",
     "check:clipboard-firefox": "node checks/clipboard-firefox.mjs",
+    "check:clipboard-panel": "node checks/clipboard-panel.mjs",
     "check:url-prefix": "node checks/url-prefix.mjs",
     "check:terminal": "node checks/terminal.mjs",
     "check:encoding-effort": "node checks/encoding-effort.mjs",

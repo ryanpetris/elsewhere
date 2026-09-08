@@ -3,6 +3,7 @@ import { websocketUrl, storageKey } from './urls.js';
 // React only draws the chrome around it (App.jsx) and reads what it publishes on `store`.
 // Wire format mirrors crates/elsewhere-server/src/protocol.rs.
 import { createPip } from './pip.js';
+import { createClipboard } from './clipboard.js';
 import { KEYCODES } from './keycodes.js';
 import { TOKEN, WINDOW, PIP, api, elementsOf, snapshot, control, uploadFile, clipboardFiles, pref, codecs as serverCodecs } from './api.js';
 import { createStore } from './store.js';
@@ -28,8 +29,6 @@ export function createViewer() {
     renderer: '2d',
     windows: [],
     windowTitle: '', // window mode: the streamed window's title
-    clipboardText: '',
-    clipboardFiles: [], // names of the files a desktop application copied (downloadable by index)
     notice: null, // { text, kind: 'warning' | 'success' }: a word about our last action, shown for a few seconds
     notifications: [], // open desktop notifications, oldest first
     upload: null, // { name, index, count } while files dropped on the page go up
@@ -763,6 +762,7 @@ export function createViewer() {
   function dispose() {
     if (disposed) return;
     viewer.pip?.dispose();
+    clipboard.dispose();
     disposed = true;
     releaseKeyboard();
     unsubscribeKeyboard();
@@ -1039,34 +1039,17 @@ export function createViewer() {
   // write, otherwise on the next gesture. Browser -> desktop: Ctrl+V (or Shift+Insert) is held back until
   // the browser's paste event delivers the text or image, which goes to the desktop first, so the
   // application pastes what the browser had.
-  let pendingClipboard = null, pendingPaste = null, pasteTimer, clipboardGen = 0, swallowKeyup = null;
+  let pendingClipboard = null, pendingPaste = null, pasteTimer, swallowKeyup = null;
+  const clipboard = createClipboard(store, item => { pendingClipboard = item; flushClipboard(); });
   const clearPasteTarget = () => canvas?.removeAttribute('contenteditable');
   function onClipboard(text) {
-    clipboardGen++;
-    pendingClipboard = null;
-    store.set({ clipboardText: text, clipboardFiles: [] });
+    clipboard.changed();
     pendingClipboard = text; // empty text clears the browser's clipboard too
     flushClipboard();
   }
-  // the bytes are fetched once, now, so the write can happen inside a gesture (WebKit insists on that);
-  // a file list can't go on the browser's clipboard: the page offers the files for download instead
-  function onClipboardData(mime) {
-    const gen = ++clipboardGen;
+  function onClipboardData() {
     pendingClipboard = null;
-    if (mime === 'text/uri-list') {
-      if (!['controller', 'participant'].includes(state().role)) { store.set({ clipboardText: '', clipboardFiles: [] }); return; }
-      store.set({ clipboardText: 'files', clipboardFiles: [] }); // the old buttons go now, in case the list can't be fetched
-      const name = s => { try { return decodeURIComponent(s); } catch { return s; } }; // a name that isn't UTF-8 stays escaped
-      api('/api/clipboard').then(r => r.text()).then(list => {
-        if (gen !== clipboardGen) return;
-        const names = list.split(/\r?\n/).filter(l => l.startsWith('file://')).map(l => name(l.trim().split('/').pop()));
-        if (names.length) store.set({ clipboardFiles: names, clipboardText: `${names.length} file${names.length === 1 ? '' : 's'}` });
-        else onClipboard(list.trim()); // links, not files: plain text to the browser
-      }).catch(() => {});
-      return;
-    }
-    store.set({ clipboardText: '[image]', clipboardFiles: [] });
-    api('/api/clipboard').then(r => r.blob()).then(blob => { if (gen === clipboardGen) { pendingClipboard = { mime, blob }; flushClipboard(); } }).catch(() => {});
+    clipboard.changed(true);
   }
   function flushClipboard() {
     if (pendingClipboard === null || !navigator.clipboard?.writeText) return;
@@ -1305,13 +1288,13 @@ export function createViewer() {
       if (state().role === 'viewer') store.set({ notifications: state().notifications.filter(n => n.id !== id) });
       else sendText(NOTIFY, JSON.stringify({ id, action }));
     },
-    clipboard: { read: () => api('/api/clipboard').then(r => r.text()), write: text => api('/api/clipboard', { method: 'PUT', body: text }) },
+    clipboard,
     windows: () => state().windows,
     dropNext: () => { dropNext = true; },
   };
   viewer.pip = createPip(viewer);
   // Console helpers, as documented: elsewhere() for the numbers, elsewhere.windows() and friends for the desktop.
-  window.elsewhere = () => ({ ...state().stats, stream, renderer: state().renderer, awaitingKey, locked: !!document.pointerLockElement, decoder: decoder?.state, clipboardText: state().clipboardText, videoSeq, audioSeq });
+  window.elsewhere = () => ({ ...state().stats, stream, renderer: state().renderer, awaitingKey, locked: !!document.pointerLockElement, decoder: decoder?.state, clipboard: state().clipboardState, videoSeq, audioSeq });
   Object.assign(window.elsewhere, viewer);
   return viewer;
 }
