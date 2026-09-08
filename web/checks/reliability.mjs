@@ -221,18 +221,27 @@ try {
         await page.evaluate(() => elsewhere.setStatsOn(true));
         for (let index = 1; index < viewerCount; index++) {
           const viewer = await page.context().newPage(); extraViewers.push(viewer);
+          await viewer.setViewportSize({ width: Math.max(1600, width + 320), height: Math.max(1200, height + 240) });
           viewer.on('pageerror', error => errors.push(error.message));
-          await viewer.addInitScript(() => {
+          await viewer.addInitScript(({ width, height }) => {
             window.viewerPaints = null;
             const draw = CanvasRenderingContext2D.prototype.drawImage;
             CanvasRenderingContext2D.prototype.drawImage = function(source, ...args) {
               const result = draw.call(this, source, ...args);
-              if (source instanceof VideoFrame && viewerPaints) viewerPaints.push({ at: performance.now(), age: Date.now() - readMarker(this).timestamp });
+              if (source instanceof VideoFrame && viewerPaints && this.canvas.matches('canvas.stage')) {
+                if (this.canvas.width !== width || this.canvas.height !== height) {
+                  viewerPaints.push({ at: performance.now(), age: -1, width: this.canvas.width, height: this.canvas.height });
+                } else viewerPaints.push({ at: performance.now(), age: Date.now() - readMarker(this).timestamp });
+              }
               return result;
             };
-          });
+          }, { width, height });
           await viewer.goto(`${origin}/#token=${token}`);
-          await viewer.waitForFunction(codec => elsewhere.store.get().streamState?.codec === codec && elsewhere.store.get().stats.frames > 5 && elsewhere.store.get().videoVia === 'webrtc', codec);
+          await viewer.waitForFunction(({ codec, width, height }) => {
+            const state = elsewhere.store.get();
+            return state.streamState?.codec === codec && state.stats.frames > 5 && state.videoVia === 'webrtc' && state.stream?.width === width && state.stream?.height === height;
+          }, { codec, width, height });
+          assert.equal(await viewer.evaluate(() => elsewhere.store.get().renderer), '2d', 'secondary clock observation requires the 2D viewer renderer');
           await viewer.evaluate(() => elsewhere.setStatsOn(true));
         }
         const consumerFiles = [];
@@ -344,6 +353,7 @@ try {
           decode_errors: after.state.stats.decodeErrors - before.state.stats.decodeErrors, key_requests: after.m.keyRequests,
           rtc_fraction: ticks.filter(tick => tick.via === 'webrtc').length / ticks.length,
           other_viewers: otherAfter.map(({ state, paints, end, visibility }, index) => ({ delivered_fps: paints.length / duration,
+            width: state.stream.width, height: state.stream.height,
             gap_ms: distribution(paintGaps(otherBefore[index].start, paints.map(paint => paint.at), end)),
             age_ms: distribution(paints.filter(paint => paint.age >= 0 && paint.age < 30000).map(paint => paint.age)),
             invalid_markers: paints.filter(paint => paint.age < 0 || paint.age >= 30000).length, visibility, start_visibility: otherBefore[index].visibility,
@@ -402,7 +412,7 @@ try {
             repeated_closures: consumerEvents.every(events => events.filter(event => event.phase === 'replaced' && event.at >= before.at && event.at <= after.at && event.server_closed).length >= 2),
             repeated_blocks: consumerEvents.every(events => events.filter(event => event.phase === 'blocked').length >= 3),
             all_observed_replacements_closed: consumerEvents.every(events => events.filter(event => event.phase === 'replaced').every(event => event.server_closed)) } : null,
-          other_viewers: row.other_viewers.every(viewer => viewer.delivered_fps > 0 && viewer.decode_errors === 0 && viewer.invalid_markers === 0 && viewer.gap_ms.max < 1000),
+          other_viewers: row.other_viewers.every(viewer => viewer.width === width && viewer.height === height && viewer.delivered_fps > 0 && viewer.decode_errors === 0 && viewer.invalid_markers === 0 && viewer.gap_ms.max < 1000),
           primary_isolation_progress: profile === 'clean' && (blockedCount || viewerCount > 1) ? row.gap_ms.max < 1000 : null,
           fallback: profile === 'fallback' ? {
             reached_socket_while_blocked: !!fallback && fallback.at < udpRestore?.at,
