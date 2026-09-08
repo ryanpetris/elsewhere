@@ -79,8 +79,10 @@ from raw submission to packet as `submit_to_packet_us`. These are elapsed times,
 The 30 Hz frame budget is 33.3 ms. The benchmark retains JSON results,
 traces, decoded screenshots and reference images in its printed temporary directory. Screenshot RGB
 PSNR excludes the clock stripe and compares against the scene drawn at the decoded timestamp. It is
-a single-frame measure, including color conversion. Both effort settings capture the same phase of
-the repeating animation, but this still cannot establish a general quality ranking.
+a single-frame measure, including color conversion. Each sample captures the first decoded frame at
+or after its next phase-30 target in the repeating animation and records the actual phase and any
+skipped source frames. Fast and High can therefore capture different phases; their screenshot scores
+cannot establish a general quality ranking.
 
 ## Software measurements
 

@@ -61,7 +61,9 @@ try {
         if (age >= 0 && age < 10000) {
           measurement.latency.push(age);
           measurement.sequences.push(marker.sequence);
-          if (!window.captured && marker.sequence % 60 === 30) {
+          // Capture the first decoded frame at or after the next target phase; source frames may be skipped.
+          measurement.captureAfter ??= marker.sequence + (30 - marker.sequence % 60 + 60) % 60;
+          if (!window.captured && marker.sequence >= measurement.captureAfter) {
             window.captured = document.createElement('canvas');
             captured.width = width; captured.height = height;
             captured.getContext('2d').drawImage(this.canvas, 0, 0);
@@ -124,7 +126,7 @@ try {
     const after = await page.evaluate(() => {
       const result = { at: Date.now(), measurement, stats: elsewhere.store.get().stats, state: elsewhere.store.get().streamState };
       window.measurement = null;
-      if (!window.captured) throw new Error('matched scene phase was not decoded');
+      if (!window.captured) throw new Error('no scene frame reached the screenshot phase');
       result.marker = readMarker(captured.getContext('2d'));
       result.png = captured.toDataURL();
       return result;
@@ -166,7 +168,10 @@ try {
       source_sequence_gaps: span - unique.size, repeated_source_frames: sequences.length - unique.size,
       sequence_regressions: sequences.filter((value, index) => index && value < sequences[index - 1]).length,
       lost: after.stats.lost - before.stats.lost, dropped: after.stats.dropped - before.stats.dropped,
-      decode_errors: after.stats.decodeErrors - before.stats.decodeErrors, psnr_db: psnr, seconds, setting: after.state.effort.setting };
+      decode_errors: after.stats.decodeErrors - before.stats.decodeErrors, psnr_db: psnr,
+      capture_sequence: after.marker.sequence, capture_phase: after.marker.sequence % 60,
+      capture_phase_skip: after.marker.sequence - after.measurement.captureAfter,
+      seconds, setting: after.state.effort.setting };
     results.push(row);
     const name = `${codec}-${scene}-${effort}`;
     await writeFile(root + '/' + name + '.png', Buffer.from(after.png.split(',')[1], 'base64'));
