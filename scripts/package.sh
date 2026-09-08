@@ -25,7 +25,7 @@ case "$kind" in
         stage=$(mktemp -d dist/.tar-XXXXXX)
         trap 'rm -rf "$stage"' EXIT
         mkdir "$stage/$name"
-        cp "$build_dir/release/elsewhere" README.md LICENSE docs/audio-visualiser.md docs/session-audio.md docs/native-dependencies.md web/dist/THIRD_PARTY.txt "$stage/$name/"
+        cp "$build_dir/release/elsewhere" README.md LICENSE ACKNOWLEDGEMENTS.md docs/audio-visualiser.md docs/session-audio.md docs/native-dependencies.md "$stage/$name/"
         strip "$stage/$name/elsewhere"
         tar -C "$stage" -czf "dist/$name.tar.gz" "$name"
         ;;

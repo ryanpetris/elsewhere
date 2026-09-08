@@ -16,27 +16,6 @@ hiding the page or entering stage fullscreen, disabling animation and reduced mo
 pause drawing and disconnect the analysis input. Playback retains its context and
 speaker connection. Animation is capped at 30 fps.
 
-## Licences and source
-
-Original Elsewhere code remains MIT licensed. audioMotion-analyzer 4.5.4 is
-AGPL-3.0-or-later; the viewer includes that dependency and must meet
-its applicable licence requirements. Debian and tarball distributions include THIRD_PARTY.txt
-with the full applicable notice; Docker and Arch install it under the package's
-licence directory. Package metadata for our original Rust code remains MIT.
-
-The About dialog links to the license notices and the GitHub repository. See
-[Source code](../README.md#source-code) for obtaining the matching revision and
-building it.
-
-The Vite build applies one marked modification to audioMotion: the viewer owns
-context resumption, so the library's persistent click listener is omitted.
-`npm ci` retrieves the pinned dependency source; `web/vite.config.js` contains the
-build transform. MIT integration code does not copy the library implementation.
-
-Distributors must retain required notices and provide the corresponding source
-for their distributed version, including their changes. Modified distributions
-must update the source link when their source is hosted elsewhere.
-
 ## Verification
 
 In the Docker image, install Node, npm and Chromium, then run `npm ci` in `web`.
@@ -44,7 +23,7 @@ In the Docker image, install Node, npm and Chromium, then run `npm ci` in `web`.
 Chromium.
 The checks cover graph ownership, repeated disposal and click listener counts,
 style changes, HiDPI, fullscreen, reduced motion, animation off, delayed audio
-initialization, source replacement and license asset delivery.
+initialization and source replacement.
 The signal/silence comparison waits for coloured Classic bars on the current
 canvas, then for a painted background pixel and no coloured pixels after the oscillator
 stops. Twelve consecutive Docker runs passed, including animation-disabled and

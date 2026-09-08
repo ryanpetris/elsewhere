@@ -433,7 +433,7 @@ Escape releases capture through the browser.
 Certificate and tokens live in `$XDG_CONFIG_HOME/elsewhere/`; delete them to regenerate.
 
 The [session audio visualiser](docs/audio-visualiser.md) loads when opened.
-The About dialog links to license notices and the source repository.
+The About dialog links to [acknowledgements](ACKNOWLEDGEMENTS.md) and the source repository.
 
 ## Source code
 
@@ -446,10 +446,5 @@ changes supplied by its distributor; the current default branch may differ.
 Install the build dependencies listed under [Install](#install) and
 [Requirements](#requirements), then run
 `make`. This installs the locked npm dependencies, builds the viewer, and builds
-the release binary. The audioMotion source comes from the version pinned in
-`web/package-lock.json`; the viewer's modification is in `web/vite.config.js`.
-The lockfile records the dependency download URL and integrity hash.
-
-Distributors must keep the matching source and required dependency sources
-available. A fork with additional changes must link to its own corresponding
-source rather than this repository.
+the release binary. `web/package-lock.json` pins viewer dependencies and records
+their download URLs and integrity hashes.

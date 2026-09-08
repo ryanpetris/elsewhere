@@ -33,7 +33,6 @@ WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY web/ /src/web/
-COPY LICENSE /src/LICENSE
 RUN npm run build
 
 FROM archlinux:latest AS build
@@ -54,7 +53,7 @@ RUN pacman -Sy --noconfirm archlinux-keyring \
         ttf-dejavu \
     && rm -rf /var/cache/pacman/pkg/*
 COPY --from=build /src/target/release/elsewhere /usr/local/bin/
-COPY --from=web /src/web/dist/THIRD_PARTY.txt /usr/share/licenses/elsewhere/THIRD_PARTY.txt
+COPY LICENSE ACKNOWLEDGEMENTS.md /usr/share/licenses/elsewhere/
 COPY docs/native-dependencies.md /usr/share/licenses/elsewhere/native-dependencies.md
 
 FROM media-runtime AS desktop

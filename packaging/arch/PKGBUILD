@@ -30,7 +30,7 @@ build() {
 package() {
     cd "$startdir/../.."
     install -Dm755 target/release/elsewhere "$pkgdir/usr/bin/elsewhere"
-    install -Dm644 web/dist/THIRD_PARTY.txt "$pkgdir/usr/share/licenses/$pkgname/THIRD_PARTY.txt"
+    install -Dm644 ACKNOWLEDGEMENTS.md "$pkgdir/usr/share/licenses/$pkgname/ACKNOWLEDGEMENTS.md"
     install -Dm644 docs/native-dependencies.md "$pkgdir/usr/share/licenses/$pkgname/native-dependencies.md"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
     install -Dm644 docs/audio-visualiser.md "$pkgdir/usr/share/doc/$pkgname/audio-visualiser.md"

@@ -1,11 +1,10 @@
 // Run in the Docker image with Chromium and Node installed, after npm run build.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
 
 const dist = new URL('../dist/', import.meta.url);
-const files = await readdir(dist, { recursive: true });
 const server = createServer(async (req, res) => {
   try {
     const path = new URL(req.url, 'http://localhost').pathname;
@@ -46,16 +45,14 @@ try {
   await page.waitForFunction(() => !!window.elsewhere?.store);
   await page.evaluate(() => window.elsewhere.store.set({ status: 'connected', role: 'viewer', audioAvailable: true, micAvailable: false }));
   assert.equal(chunks.length, 0, 'renderer must not load until opened');
-  const aboutButton = page.getByRole('button', { name: 'About / Licenses & source', exact: true });
+  const aboutButton = page.getByRole('button', { name: 'About', exact: true });
   await aboutButton.click();
   const about = page.getByRole('dialog', { name: 'About Elsewhere' });
   await about.waitFor();
-  assert.equal(await about.locator('a').count(), 2, 'About offers licenses and the source repository');
-  assert(!files.some(f => /viewer-source|audiomotion-source|audiomotion-LICENSE/.test(f)), 'source downloads are not embedded');
-  for (const link of await about.locator('a[href^="/"]').all()) {
-    const response = await context.request.get(new URL(await link.getAttribute('href'), page.url()).href);
-    assert.equal(response.status(), 200, 'About download is served');
-  }
+  assert.equal(await about.getByRole('link', { name: 'Acknowledgements', exact: true }).getAttribute('href'),
+    'https://github.com/ryanpetris/elsewhere/blob/master/ACKNOWLEDGEMENTS.md');
+  assert.equal(await about.getByRole('link', { name: 'GitHub repository', exact: true }).getAttribute('href'),
+    'https://github.com/ryanpetris/elsewhere');
   await about.focus();
   await page.keyboard.press('Shift+Tab');
   assert(await about.locator('a').last().evaluate(node => node === document.activeElement), 'About keeps keyboard focus inside');
@@ -125,7 +122,7 @@ try {
   await checkEdges(2);
   await panel.getByRole('button', { name: 'Exit fullscreen', exact: true }).click();
   await page.waitForFunction(() => !document.fullscreenElement);
-  await page.getByRole('button', { name: 'Fullscreen (browser shortcuts go to the desktop)', exact: true }).click();
+  await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
   await page.waitForFunction(() => !!document.fullscreenElement);
   await page.waitForTimeout(100);
   await checkEdges(1);

@@ -22,7 +22,7 @@ depends = "$auto, libegl1, libegl-mesa0, libgl1-mesa-dri, ca-certificates"
 recommends = "xwayland, pipewire (>= 1.4.2), pipewire-pulse (>= 1.4.2), wireplumber (>= 0.5.6), pulseaudio-utils, va-driver-all, fonts-dejavu-core"
 assets = [
     ["target/release/elsewhere", "usr/bin/", "755"],
-    ["../../web/dist/THIRD_PARTY.txt", "usr/share/doc/elsewhere/", "644"],
+    ["../../ACKNOWLEDGEMENTS.md", "usr/share/doc/elsewhere/", "644"],
     ["../../docs/native-dependencies.md", "usr/share/doc/elsewhere/", "644"],
     ["../../docs/audio-visualiser.md", "usr/share/doc/elsewhere/", "644"],
     ["../../docs/session-audio.md", "usr/share/doc/elsewhere/", "644"],

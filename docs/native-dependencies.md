@@ -16,4 +16,5 @@ consult the installed FFmpeg package's license and copyright files for that buil
 Device access uses [PipeWire](https://gitlab.freedesktop.org/pipewire/pipewire),
 [libva](https://github.com/intel/libva), [Mesa](https://docs.mesa3d.org/license.html) and
 [libxkbcommon](https://github.com/xkbcommon/libxkbcommon). Their upstream source and distribution
-packages contain the applicable notices. Viewer dependency notices are in `THIRD_PARTY.txt`.
+packages contain the applicable notices. Rust and viewer dependency credits are in
+[ACKNOWLEDGEMENTS.md](https://github.com/ryanpetris/elsewhere/blob/master/ACKNOWLEDGEMENTS.md).

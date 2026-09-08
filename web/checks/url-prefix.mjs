@@ -128,7 +128,6 @@ try {
     assert.equal((await context.request.put(filePath, { headers: auth, data: body })).status(), 201);
     assert.equal(await (await context.request.get(filePath, { headers: auth })).text(), body);
     assert.equal((await context.request.delete(filePath, { headers: auth })).status(), 204);
-    assert.ok((await context.request.get(base + '/assets/license-notices.txt')).ok());
     assert.ok((await context.request.get(base + '/skill/SKILL.md')).ok());
     const initialize = await context.request.post(base + '/mcp', { headers: { ...auth, Accept: 'application/json, text/event-stream' },
       data: { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'prefix-check', version: '1' } } } });
