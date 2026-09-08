@@ -31,6 +31,9 @@ workflow uses these same targets on their native distributions. Tarball filename
 The Arch `PKGBUILD` in `packaging/arch` also derives the version when used directly.
 Package targets always derive their version from Git. `make check-version` runs the version fixtures
 with Python 3 and Git; run it in the Docker rig.
+After installing a native package in a disposable Docker container, run
+`python3 scripts/check-package-tls.py` from a checkout as root, with Python and OpenSSL installed,
+to check the broadcast helper's trusted, untrusted and wrong-host TLS connections.
 
 ## Requirements
 
@@ -40,6 +43,8 @@ with Python 3 and Git; run it in the Docker rig.
   libvpx, x264 or OpenH264, x265, and libaom, according to the installed FFmpeg build.
   Software encoding runs the desktop at 30 Hz. Standard distribution FFmpeg packages supply these
   libraries; codec availability is checked by opening an encoder and producing a keyframe.
+- `ca-certificates` supplies the system trust store for verified RTMPS broadcasts. Native packages
+  require it; install it separately when using a tarball.
 - `xorg-xwayland` for X11 clients. Audio requires PipeWire 1.4.2+, its Pulse compatibility service,
   WirePlumber 0.5.6+ and `pactl`. See [session audio](docs/session-audio.md)
   for packages and host-service compatibility. `--no-audio` needs no audio services; the native PipeWire client library remains a runtime dependency.

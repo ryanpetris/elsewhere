@@ -18,7 +18,7 @@ extended-description = """\
 A headless Wayland compositor whose output is hardware-encoded (VA-API) and shown in a browser tab \
 over a WebSocket with WebCodecs; mouse, keyboard and audio travel the same way. Runs Wayland and \
 X11 clients, layer-shell panels and taskbars, and exposes a window-management HTTP API."""
-depends = "$auto, libegl1, libegl-mesa0, libgl1-mesa-dri"
+depends = "$auto, libegl1, libegl-mesa0, libgl1-mesa-dri, ca-certificates"
 recommends = "xwayland, pipewire (>= 1.4.2), pipewire-pulse (>= 1.4.2), wireplumber (>= 0.5.6), pulseaudio-utils, va-driver-all, fonts-dejavu-core"
 assets = [
     ["target/release/elsewhere", "usr/bin/", "755"],

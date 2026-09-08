@@ -10,7 +10,7 @@ pkgdesc="Headless Wayland compositor whose screen is a browser tab"
 arch=('x86_64')
 url="https://github.com/ryanpetris/elsewhere"
 license=('MIT' 'AGPL-3.0-or-later')
-depends=('ffmpeg' 'libva' 'mesa' 'libxkbcommon' 'libpipewire')
+depends=('ffmpeg' 'libva' 'mesa' 'libxkbcommon' 'libpipewire' 'ca-certificates')
 makedepends=('cargo' 'nodejs' 'npm' 'clang' 'git' 'make')
 optdepends=('xorg-xwayland: X11 clients'
             'ttf-dejavu: titles on the window decorations the compositor draws'
