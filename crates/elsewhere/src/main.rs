@@ -64,7 +64,7 @@ struct Cli {
     #[arg(long)]
     no_rtc: bool,
     /// Local and advertised UDP port for WebRTC. If unset, bind the listen port and advertise the page's port.
-    #[arg(long)]
+    #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
     rtc_port: Option<u16>,
     /// Advertise this WebRTC IP and --rtc-port instead of the page's hostname and port.
     /// Use when UDP is reached at a different endpoint from HTTPS; forward the UDP port to this server.
