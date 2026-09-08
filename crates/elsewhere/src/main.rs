@@ -127,6 +127,19 @@ fn main() -> Result<()> {
         tracing_subscriber::fmt().with_writer(std::io::stderr).init();
         return audio::worker();
     }
+    // Reuse freed codec allocations across viewer workers instead of retaining an arena per worker.
+    // Explicit glibc settings take precedence. This runs before application worker threads start.
+    #[cfg(target_env = "gnu")]
+    {
+        let configured = std::env::var_os("MALLOC_ARENA_MAX").is_some_and(|value| !value.is_empty())
+            || std::env::var_os("GLIBC_TUNABLES").is_some_and(|value| {
+                value.as_encoded_bytes().split(|byte| *byte == b':')
+                    .any(|setting| setting.strip_prefix(b"glibc.malloc.arena_max=").is_some_and(|value| !value.is_empty()))
+            });
+        if !configured && unsafe { libc::mallopt(libc::M_ARENA_MAX, 2) } == 0 {
+            eprintln!("warning: allocation arena limit unavailable");
+        }
+    }
     let stopping = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     signal_hook::flag::register(signal_hook::consts::SIGINT, stopping.clone())?;
     signal_hook::flag::register(signal_hook::consts::SIGTERM, stopping.clone())?;

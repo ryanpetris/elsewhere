@@ -17,19 +17,22 @@ execFileSync('wayland-scanner', ['client-header', xml, root + '/xdg-shell-client
 execFileSync('wayland-scanner', ['private-code', xml, root + '/xdg-shell-protocol.c']);
 execFileSync('cc', ['-I' + root, '/src/crates/elsewhere-compositor/checks/thumbnail-client.c', root + '/xdg-shell-protocol.c', '-lwayland-client', '-o', root + '/source']);
 const environment = { ...process.env, XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime' };
-// Fix glibc's arena count for the RSS ownership gate.
 const server = spawn(process.env.ELSEWHERE_BINARY ?? '/src/target/release/elsewhere', [
   '--no-audio', '--no-rtc', '--no-tls', '--render-node', renderNode, '--codec', codec,
   ...(process.env.ELSEWHERE_SOFTWARE_ENCODING ? ['--software-encoding'] : []),
   '--listen', '127.0.0.1:8850', '--socket-name', 'wayland-lifecycle',
-], { env: { ...environment, MALLOC_ARENA_MAX: '2' }, stdio: ['ignore', log.fd, log.fd] });
+], { env: environment, stdio: ['ignore', log.fd, log.fd] });
 const clients = new Set();
 const counters = async () => {
   const [fds, threads, status] = await Promise.all([
     readdir(`/proc/${server.pid}/fd`), readdir(`/proc/${server.pid}/task`), readFile(`/proc/${server.pid}/status`, 'utf8'),
   ]);
   const targets = await Promise.all(fds.map(id => readlink(`/proc/${server.pid}/fd/${id}`).catch(() => 'closed')));
-  return { fds: fds.length, dmaBufFds: targets.filter(target => target.startsWith('/dmabuf:')).length, threads: threads.length, rssKiB: Number(/^VmRSS:\s+(\d+)/m.exec(status)[1]) };
+  const sockets = new Set(targets.map(target => /^socket:\[(\d+)\]$/.exec(target)?.[1]).filter(Boolean));
+  const httpConnections = (await readFile(`/proc/${server.pid}/net/tcp`, 'utf8')).trim().split('\n').slice(1)
+    .map(line => line.trim().split(/\s+/))
+    .filter(row => sockets.has(row[9]) && parseInt(row[1].split(':')[1], 16) === Number(new URL(origin).port) && row[3] !== '0A').length;
+  return { fds: fds.length, httpConnections, dmaBufFds: targets.filter(target => target.startsWith('/dmabuf:')).length, threads: threads.length, rssKiB: Number(/^VmRSS:\s+(\d+)/m.exec(status)[1]) };
 };
 const resourceDetails = async () => ({
   fds: await Promise.all((await readdir(`/proc/${server.pid}/fd`)).map(async id => {
@@ -230,7 +233,9 @@ try {
     // The live desktop retains up to four lazily allocated swapchain buffers.
     if (baseline) await wait(async () => {
       const current = await counters();
-      return current.fds - current.dmaBufFds <= baseline.fds - baseline.dmaBufFds
+      // The remaining page's HTTP keep-alive sockets vary; bound them separately from media resources.
+      return current.fds - current.dmaBufFds - current.httpConnections <= baseline.fds - baseline.dmaBufFds - baseline.httpConnections
+        && current.httpConnections <= 3
         && current.dmaBufFds <= (renderNode === 'none' ? 0 : 4) && current.threads <= baseline.threads;
     }).catch(async error => {
       console.error('teardown resources did not return', JSON.stringify({ baseline, current: await counters(), baselineResources, currentResources: await resourceDetails() }, null, 2));

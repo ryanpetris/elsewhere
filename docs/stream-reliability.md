@@ -269,3 +269,61 @@ encoded picture was 266 kB. Peak encoded rates were 23.24 Mbit/s in a fixed 100 
 8.40 Mbit/s in a one-second bin. Browser arrival callbacks reached 51.62 Mbit/s in a 100 ms bin
 during recovery; callback batches are not instantaneous link-throughput measurements. The maximum
 paint gaps and displayed ages above retain the visible cost of that recovery.
+
+## Allocator reuse across viewer sessions
+
+On glibc builds, the desktop server defaults to two allocation arenas before starting its worker
+threads. Workers can reuse freed codec allocations across sessions without retaining a separate
+arena for each worker. A nonempty `MALLOC_ARENA_MAX` or `glibc.malloc.arena_max` entry in
+`GLIBC_TUNABLES` takes precedence, including an explicit zero for glibc's automatic limit.
+Empty values use the application default. If glibc rejects the tuning call, startup continues with
+a warning. Other allocator tunables keep their glibc defaults unless set
+by the operator. The audio and broadcast helper processes do not apply this default.
+GNU libc documents the arena limit in its [allocation tunables](https://sourceware.org/glibc/manual/latest/html_node/Memory-Allocation-Tunables.html)
+and the startup API in its [malloc tuning parameters](https://sourceware.org/glibc/manual/latest/html_node/Malloc-Tunable-Parameters.html).
+
+This limits arena proliferation, not total process memory. Active allocations still depend on
+viewer count, resolution and codec. Fewer arenas can increase allocation contention at higher
+concurrency; deployments with different workloads can select their own limit.
+
+A targeted Docker comparison used glibc 2.44, FFmpeg 9.0.1 and Chromium 152. Each software cycle
+opened three animated window viewers plus a read-only observer, resized the windows, changed
+encoding effort, checked the final static pictures and closed the window viewers. A desktop viewer
+remained connected. Initial browser viewports were 800×600; resize requests ranged from 640×480 to
+960×640. Software rendering and VP8 encoding used the same workload for each policy.
+
+| Allocator policy | Idle RSS across four cycles, MiB | Mean painted frames/s | Median per-window p95 paint interval, ms | Median final-picture response, ms |
+|---|---|---:|---:|---:|
+| glibc default | 244, 314, 376, 450 | 24.0 | 51.0 | 25.1 |
+| Two arenas | 195, 204, 180, 191 | 24.1 | 50.0 | 31.5 |
+| Fixed 512 KiB mmap threshold | 180, 190, 197, 208 | 22.5 | 56.8 | 32.3 |
+
+Matched idle live allocations stayed near 25–26 MB. In the first three default-policy samples,
+free arena space grew from 118 to 267 MB. With two arenas, free arena space was 60 MB after the
+first cycle and 54 MB after the fourth. The fourth default-policy allocation sample preceded
+teardown and is excluded from this comparison. The allocation probe samples every 100 ms;
+RSS, descriptors and threads were read directly after teardown, so the fourth RSS value is retained.
+No default-policy plateau was observed within these four cycles.
+Allocation quantities use decimal MB; RSS uses MiB.
+A fixed 128 KiB mmap threshold also reduced retention, but delivered about 22.5 frames/s in its
+three completed cycles. That run's fourth cycle failed the original file-descriptor gate because
+an additional HTTP connection remained open.
+
+The two-arena policy retained the default workload's throughput. Its final-picture response median
+was about 6 ms higher across 12 observations per policy; the means were 30.8 and 33.4 ms, with
+both policies' maximum near 66 ms. One two-arena window sample had a 76 ms p95 paint interval;
+the other eleven were between 47.8 and 52.4 ms. These short synthetic comparisons
+do not establish game performance or identical latency under every load. A separate two-cycle
+VAAPI H.264 comparison passed resize, effort, final-picture and teardown checks; final idle RSS
+was 248 MiB with the glibc default and 203 MiB with the application default.
+
+Run `npm run check:viewer-lifecycle` in the Docker rig to exercise the application default. A
+five-cycle software run kept idle RSS between 204 and 228 MiB with bounded descriptors and threads.
+The descriptor gate accounts for up to three remaining HTTP or WebSocket connections separately
+from other descriptors and permits the live desktop's bounded DMA buffer pool on GPU runs.
+Run `python3 scripts/check-allocator.py` in a glibc Docker image to verify the actual startup
+`mallopt` call and explicit allocator overrides against the selected `ELSEWHERE_BINARY`.
+Native release builds and this startup check passed on Arch with glibc 2.44, Debian 13 with glibc
+2.41, Ubuntu 24.04 with glibc 2.39 and Ubuntu 26.04 with glibc 2.43. The allocator comparison and
+viewer timing checks above ran on Arch; the other distributions have startup coverage, not repeated
+viewer performance measurements. Builds using another C library do not apply the glibc policy.

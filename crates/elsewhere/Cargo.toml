@@ -43,6 +43,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "si
 serde_json = "1"
 tempfile = "3"
 signal-hook = "0.3"
+libc = "0.2"
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive"] }

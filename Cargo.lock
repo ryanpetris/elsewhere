@@ -916,6 +916,7 @@ dependencies = [
  "elsewhere-core",
  "elsewhere-server",
  "elsewhere-stream",
+ "libc",
  "pipewire",
  "serde_json",
  "signal-hook",
