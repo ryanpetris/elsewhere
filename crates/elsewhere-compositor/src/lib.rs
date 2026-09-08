@@ -6,6 +6,7 @@ mod cursor;
 mod decor;
 mod desktop;
 mod dispatch;
+mod focus;
 mod foreign_toplevel;
 mod gpu;
 mod grabs;

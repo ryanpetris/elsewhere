@@ -262,7 +262,8 @@ impl State {
     /// offer (Thunar reads the list during the drag to decide, once per offer, and refuses without it;
     /// Nautilus preloads it and keeps what it read), and the button is released
     /// once it has accepted a mime and chosen an action, with a motion every 100 ms to make it look again,
-    /// or after 1.5 s regardless. `Cancel` lets go over nothing; `release_all` cancels too, so a viewer
+    /// or after 1.5 s regardless. X11 offers use that timeout: XWM supplies acceptance at release but
+    /// does not call our MIME-acceptance callback. `Cancel` lets go over nothing; `release_all` cancels too, so a viewer
     /// that goes away or loses control mid-drag lets go.
     pub fn drag(&mut self, drag: Drag) {
         let pointer = self.seat.get_pointer().unwrap();

@@ -20,12 +20,12 @@ use smithay::{
     wayland::{compositor::with_states, seat::WaylandFocus, shell::xdg::SurfaceCachedState},
 };
 
-use crate::State;
+use crate::{State, focus::PointerFocus};
 
 /// Everything a grab forwards unchanged.
 macro_rules! forward {
     () => {
-        fn relative_motion(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>, focus: Option<(WlSurface, Point<f64, Logical>)>, event: &RelativeMotionEvent) {
+        fn relative_motion(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>, focus: Option<(PointerFocus, Point<f64, Logical>)>, event: &RelativeMotionEvent) {
             handle.relative_motion(data, focus, event);
         }
         fn axis(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>, details: AxisFrame) {
@@ -86,7 +86,7 @@ impl MoveGrab {
 }
 
 impl PointerGrab<State> for MoveGrab {
-    fn motion(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>, _focus: Option<(WlSurface, Point<f64, Logical>)>, event: &MotionEvent) {
+    fn motion(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>, _focus: Option<(PointerFocus, Point<f64, Logical>)>, event: &MotionEvent) {
         handle.motion(data, None, event); // no focus while dragging
         self.drag(data, event.location);
     }
@@ -182,7 +182,7 @@ impl ResizeGrab {
 }
 
 impl PointerGrab<State> for ResizeGrab {
-    fn motion(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>, _focus: Option<(WlSurface, Point<f64, Logical>)>, event: &MotionEvent) {
+    fn motion(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>, _focus: Option<(PointerFocus, Point<f64, Logical>)>, event: &MotionEvent) {
         handle.motion(data, None, event);
         self.drag(data, event.location);
     }
@@ -205,8 +205,8 @@ macro_rules! touch_grab {
             pub grab: $grab,
         }
         impl TouchGrab<State> for $name {
-            fn down(&mut self, _data: &mut State, _handle: &mut TouchInnerHandle<'_, State>, _focus: Option<(WlSurface, Point<f64, Logical>)>, _event: &DownEvent) {}
-            fn motion(&mut self, data: &mut State, _handle: &mut TouchInnerHandle<'_, State>, _focus: Option<(WlSurface, Point<f64, Logical>)>, event: &TouchMotionEvent) {
+            fn down(&mut self, _data: &mut State, _handle: &mut TouchInnerHandle<'_, State>, _focus: Option<(PointerFocus, Point<f64, Logical>)>, _event: &DownEvent) {}
+            fn motion(&mut self, data: &mut State, _handle: &mut TouchInnerHandle<'_, State>, _focus: Option<(PointerFocus, Point<f64, Logical>)>, event: &TouchMotionEvent) {
                 if event.slot == self.start_data.slot {
                     self.grab.drag(data, event.location);
                 }
@@ -290,16 +290,16 @@ pub struct PopupTouchGrab {
 }
 
 impl TouchGrab<State> for PopupTouchGrab {
-    fn down(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, focus: Option<(WlSurface, Point<f64, Logical>)>, event: &DownEvent) {
+    fn down(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, focus: Option<(PointerFocus, Point<f64, Logical>)>, event: &DownEvent) {
         let popup_client = self.grab.current_grab().and_then(|k| WlSurface::try_from(k).ok()).map(|s| s.id());
-        let outside = focus.as_ref().map(|(s, _)| s.id()).zip(popup_client).is_none_or(|(a, b)| !a.same_client_as(&b));
+        let outside = focus.as_ref().zip(popup_client).is_none_or(|((s, _), id)| !s.same_client_as(&id));
         if self.grab.has_ended() || outside {
             self.grab.ungrab(PopupUngrabStrategy::All);
             handle.unset_grab(self, data);
         }
         handle.down(data, focus, event);
     }
-    fn motion(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, focus: Option<(WlSurface, Point<f64, Logical>)>, event: &TouchMotionEvent) {
+    fn motion(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, focus: Option<(PointerFocus, Point<f64, Logical>)>, event: &TouchMotionEvent) {
         handle.motion(data, focus, event);
     }
     fn up(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, event: &UpEvent) {

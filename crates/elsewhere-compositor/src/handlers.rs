@@ -69,7 +69,7 @@ use smithay::{
 
 use smithay::xwayland::{X11Surface, XWaylandClientData};
 
-use crate::{ClientState, State, grabs};
+use crate::{ClientState, State, grabs, focus::PointerFocus};
 
 /// What the keyboard focuses. An X11 window is focused as itself rather than as its surface: Smithay's
 /// target for it also sets the X input focus, without which X11 clients see no FocusIn and Chromium,
@@ -187,7 +187,7 @@ impl State {
     /// The grab this request belongs to (the pointer's or a finger's), if the requesting client owns the
     /// surface it began on.
     fn grab_start(&self, seat: &Seat<State>, surface: &WlSurface, serial: Serial) -> Option<grabs::Start> {
-        let same = |focus: &WlSurface| focus.id().same_client_as(&surface.id());
+        let same = |focus: &PointerFocus| focus.same_client_as(&surface.id());
         if let Some(start) = seat.get_pointer().filter(|p| p.has_grab(serial)).and_then(|p| p.grab_start_data())
             && start.focus.as_ref().is_some_and(|(f, _)| same(f))
         {
@@ -620,8 +620,8 @@ impl XdgDecorationHandler for State {
 
 impl SeatHandler for State {
     type KeyboardFocus = KeyboardFocus;
-    type PointerFocus = WlSurface;
-    type TouchFocus = WlSurface;
+    type PointerFocus = PointerFocus;
+    type TouchFocus = PointerFocus;
 
     fn seat_state(&mut self) -> &mut SeatState<State> {
         &mut self.seat_state
@@ -722,10 +722,12 @@ impl DndGrabHandler for State {
         self.dnd_icon = None;
         self.dirty = true;
         if self.drag_active {
-            // validated alone is true over a client with no data device (an X11 window): the offer it got was empty
-            self.drag_taken = validated && self.drag_shared.ready();
-            self.drag_target = target.map(DndTarget::into_inner).and_then(|s| {
-                let mut root = s.clone();
+            let target = target.map(DndTarget::into_inner);
+            // XWM validates XDND acceptance itself; it does not call Source::accepted.
+            // Wayland clients without a data device still need our source's readiness guard.
+            self.drag_taken = validated && (matches!(target, Some(PointerFocus::X11(_))) || self.drag_shared.ready());
+            self.drag_target = target.and_then(|f| f.wl_surface()).and_then(|s| {
+                let mut root = s.into_owned();
                 while let Some(parent) = get_parent(&root) {
                     root = parent;
                 }
@@ -783,7 +785,7 @@ impl FractionalScaleHandler for State {
 impl PointerConstraintsHandler for State {
     fn new_constraint(&mut self, surface: &WlSurface, pointer: &PointerHandle<Self>) {
         // Activate right away if the pointer is already inside; otherwise on entering it.
-        if !self.lock_suppressed && pointer.current_focus().as_ref() == Some(surface) {
+        if !self.lock_suppressed && pointer.current_focus().is_some_and(|f| f.wl_surface().as_deref() == Some(surface)) {
             if let Some((_, origin)) = self.surface_under(self.pointer_location) {
                 crate::input::activate_lock(surface, pointer, self.pointer_location - origin);
             }

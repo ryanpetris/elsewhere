@@ -169,8 +169,10 @@ to the top-most one left. The pointer is not clamped to the output: a window tha
 (a popped-out one sized by its own tab) takes clicks there, except an X11 one, whose Xwayland screen is
 the output; the server tells the popup and the API caller when a click aims at such a spot. The frame
 that moves the pointer onto a new surface carries no
-relative-pointer delta: Xwayland warps its device to the entry point and would apply the delta on top,
-which put a synthesized click far from its target.
+relative-pointer delta: Xwayland warps its device to the entry point and would apply the delta on top.
+Pointer and touch focus retain either a Wayland surface or an X11 window through `PointerFocus` in
+`focus.rs`. Its drag handlers delegate to Smithay's matching offer type, so X11-to-X11 drags unmap the
+XDND proxy and cross-backend drags use the bridge. Refused X11 offers receive no drop event.
 
 **Panels and taskbars.** wlr-layer-shell and a hand-written wlr-foreign-toplevel-management (v2)
 make waybar and xfce4-panel work as ordinary clients. Details in [panels.md](panels.md).

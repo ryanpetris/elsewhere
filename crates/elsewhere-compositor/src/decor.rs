@@ -53,7 +53,7 @@ pub enum Hit {
 
 /// What a window walk found under the pointer.
 pub enum Under {
-    Surface(WlSurface, Point<f64, Logical>),
+    Surface(crate::focus::PointerFocus, Point<f64, Logical>),
     Decoration(Window, Hit),
 }
 
@@ -170,7 +170,11 @@ impl State {
             // which sits a shadow margin up and left of it for client-side decorated windows
             let origin = loc - window.geometry().loc;
             if let Some((surface, p)) = window.surface_under(pos - origin.to_f64(), WindowSurfaceType::ALL) {
-                return Some(Under::Surface(surface, (p + origin).to_f64()));
+                let focus = match window.x11_surface() {
+                    Some(x) => crate::focus::PointerFocus::X11(x.clone()),
+                    None => surface.into(),
+                };
+                return Some(Under::Surface(focus, (p + origin).to_f64()));
             }
             if let Some(hit) = self.decoration_hit(window, pos) {
                 return Some(Under::Decoration(window.clone(), hit));

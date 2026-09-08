@@ -270,7 +270,7 @@ impl State {
         if window.is_override_redirect() || window.is_maximized() || window.is_fullscreen() {
             return None;
         }
-        let on_window = |focus: &Option<(smithay::reexports::wayland_server::protocol::wl_surface::WlSurface, _)>| focus.as_ref().map(|(s, _)| s.clone()) == window.wl_surface();
+        let on_window = |focus: &Option<(crate::focus::PointerFocus, _)>| matches!(focus, Some((crate::focus::PointerFocus::X11(x), _)) if x == window);
         if let Some(start) = self.seat.get_pointer()?.grab_start_data()
             && start.button == 0x110
             && on_window(&start.focus)

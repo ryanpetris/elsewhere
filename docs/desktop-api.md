@@ -295,7 +295,7 @@ current directory. Stale responses are cancelled. Every queued upload batch capt
 before any asynchronous work and reports final saved names, destination and partial failures.
 
 Desktop drops and pastes retain `PUT /api/drop/{batch}/{name}` cache staging, carried through the drag
-or clipboard operation by a client-generated batch ID. The Wayland recipient chooses its destination.
+or clipboard operation by a client-generated batch ID. The receiving application chooses its destination.
 Unclaimed drops and cancelled partial batches link validated regular files to the transfer folder,
 copying through a temporary file across filesystems. Publication is collision-safe. `FILE_RESULT` reports saved paths and failures to control-token
 sessions; only the client remembering that batch displays the result and offers Open folder. This
@@ -311,7 +311,7 @@ in `clipboard.rs`; the source is `FileSource` there, the outcome comes to `DndGr
 leaves for the folder shown; Nautilus copies, as GTK 4 prefers when both are offered, and so does an
 application that only copies, leaving the staged file to the sweep), from a synthetic left-button press made
 over nothing so no client sees a press without its release; `dragover` is ordinary pointer motion, which
-the drag grab turns into `wl_data_device` enter/motion for the application under the pointer; `dragleave`
+the drag grab turns into Wayland data-device or X11 XDND events for the application under the pointer; `dragleave`
 lets go over nothing (`cancel`). The browser gives file contents only on `drop`, so the files are
 uploaded then, staged (the drag holds still; the page shows the upload), and `drop` names them: the compositor
 leaves and re-enters the target with a fresh offer whose list it can read now (Thunar reads it during
@@ -320,13 +320,23 @@ a request before the drop gets EOF at once, because GTK 3 never asks again if th
 read is pending), then releases the button once the target has accepted a mime and chosen an action,
 sending a motion every 100 ms so it looks again, or after 1.5 s regardless. The release happens on the
 next loop turn: the accept and action callbacks run inside the offer's request handler, which holds the
-lock the drop takes. The page is told whether the application took the files (`Notice`); a refused drop
-sends them to the transfer folder. A blur, disconnect or handover mid-drag cancels it (`release_all`),
-and a drop whose upload outlived the grab is answered as not taken. X11 applications get no drop
-(Smithay's XWM bridges XDND on master, but our pointer focus is the Wayland surface, and drops on X11
-windows are not verified). A drag an application starts itself (a file out of Thunar) comes to
-`WaylandDndGrabHandler::dnd_requested`, which puts Smithay's `DnDGrab` on the pointer or the touch: its icon surface is drawn at the pointer, offset by its
+lock the drop takes. X11 targets use the 1.5-second timeout because Smithay's XWM does not call the
+source's MIME-acceptance callback. At release, XWM's offer validation supplies their acceptance and
+action; a refused offer gets a leave without an XDND drop. The page reports acceptance at release
+through `Notice`, which does not confirm that the recipient finished reading the files. A refused
+drop sends them to the transfer folder. A blur, disconnect or handover mid-drag cancels it (`release_all`),
+and a drop whose upload outlived the grab is answered as not taken. Drag-and-drop works between
+Wayland and X11 applications in both directions, between two X11 applications, and from the browser
+to either backend. Pointer and touch targets preserve the X11 window identity through `PointerFocus`
+in `focus.rs`, allowing Smithay to unmap its XDND proxy for native X11 drags. A drag a Wayland application
+starts itself comes to `WaylandDndGrabHandler::dnd_requested`, which puts Smithay's `DnDGrab` on the pointer or the touch: its icon surface is drawn at the pointer, offset by its
 buffer offsets, while the drag lasts (`dnd_icon`), and pointer motion renders a frame so it moves.
+Smithay's XWM starts grabs for X11 sources.
+
+Run `node web/checks/drag-drop.mjs` in the Docker rig with the release binary, GTK 3, Python GObject
+bindings and Chromium. The check compares received URI lists and file contents, checks browser
+acceptance/refusal/cancellation, and exercises pointer/touch input, move/resize, popups and pointer locks.
+`ELSEWHERE_BINARY` selects a build to test.
 
 ## Notifications
 

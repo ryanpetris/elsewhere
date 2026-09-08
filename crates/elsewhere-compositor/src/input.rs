@@ -19,6 +19,7 @@ use smithay::{
     utils::{Logical, Point, SERIAL_COUNTER, Serial},
     wayland::{
         pointer_constraints::{PointerConstraint, with_pointer_constraint},
+        seat::WaylandFocus,
         shell::wlr_layer::Layer,
     },
 };
@@ -27,6 +28,7 @@ use crate::{
     State,
     decor::{Hit, Under, maximized, resize_cursor},
     desktop::window_id,
+    focus::PointerFocus,
     handlers::KeyboardFocus,
 };
 
@@ -375,7 +377,9 @@ impl State {
             }
         }
         // entering a surface with a pending lock activates it (unless the browser just bailed out of one)
-        if let (false, Some((surface, origin))) = (self.lock_suppressed, under) {
+        if let (false, Some((focus, origin))) = (self.lock_suppressed, under)
+            && let Some(surface) = focus.wl_surface()
+        {
             activate_lock(&surface, &pointer, location - origin);
         }
         self.sync_pointer_lock(&pointer);
@@ -384,7 +388,9 @@ impl State {
     /// The browser lost its pointer lock: release the client's, and stay unlocked until the next click or browser capture.
     fn release_pointer_lock(&mut self) {
         let pointer = self.seat.get_pointer().unwrap();
-        if let Some(surface) = pointer.current_focus() {
+        if let Some(focus) = pointer.current_focus()
+            && let Some(surface) = focus.wl_surface()
+        {
             with_pointer_constraint(&surface, &pointer, |c| {
                 if let Some(c) = c.filter(|c| c.is_active()) {
                     c.deactivate();
@@ -396,11 +402,11 @@ impl State {
     }
 
     fn locked(&self, pointer: &PointerHandle<State>) -> bool {
-        pointer.current_focus().is_some_and(|surface| {
+        pointer.current_focus().is_some_and(|focus| focus.wl_surface().is_some_and(|surface| {
             with_pointer_constraint(&surface, pointer, |c| {
                 c.is_some_and(|c| c.is_active() && matches!(*c, PointerConstraint::Locked(_)))
             })
-        })
+        }))
     }
 
     /// Tell the browser when a lock starts or ends so it can mirror it with the Pointer Lock API.
@@ -553,14 +559,14 @@ impl State {
         })
     }
 
-    pub fn surface_under(&self, pos: Point<f64, Logical>) -> Option<(WlSurface, Point<f64, Logical>)> {
+    pub fn surface_under(&self, pos: Point<f64, Logical>) -> Option<(PointerFocus, Point<f64, Logical>)> {
         if let Some((_, surface, loc)) = self.layer_under(pos, true) {
-            return Some((surface, loc));
+            return Some((surface.into(), loc));
         }
         match self.window_under(pos) {
             Some(Under::Surface(surface, p)) => Some((surface, p)),
             Some(Under::Decoration(..)) => None, // our chrome: nothing of the clients' is under the pointer
-            None => self.layer_under(pos, false).map(|(_, s, p)| (s, p)),
+            None => self.layer_under(pos, false).map(|(_, s, p)| (s.into(), p)),
         }
     }
 
