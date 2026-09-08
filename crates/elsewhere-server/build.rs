@@ -20,7 +20,7 @@ fn collect(dir: &Path, root: &Path, entries: &mut String) {
 }
 
 fn main() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/dist");
+    let root = Path::new(&env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../../web/dist");
     if !["index.html", "app.js", "app.css"].iter().all(|name| root.join(name).is_file()) {
         eprintln!("web/dist is missing: run make web with Node 24, or make to build the viewer and binary");
         std::process::exit(1);
