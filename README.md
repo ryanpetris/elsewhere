@@ -86,7 +86,7 @@ and that browser can do ("Auto (HEVC)" shows the pick). All five quality levels 
 selected ceiling: Very Low (2 Mbit/s), Low (5), Medium (`--bitrate`, 8 by default), High (12), and
 Max (25). Max is the default. The stream starts at its ceiling; under pressure the server halves the
 bitrate and holds it, then climbs back a quarter at a time. Targets below 3 Mbit/s have a 30 fps cap.
-The status bar shows the selected ceiling and current encoder target separately from measured video
+The status bar shows the selected ceiling and current stream target separately from measured video
 throughput. A custom Medium ceiling is displayed as configured, even if it exceeds another level.
 Effort defaults to Fast. Balanced and High spend more encoding time for possible picture improvements
 at the same bitrate. Changes restart the viewer's stream immediately and are remembered on reconnect;
@@ -212,7 +212,7 @@ reliable) with the Transport select in the status bar. The page offers and the s
 candidates for the page's hostname and port, with `--rtc-port` overriding the port and `--rtc-addr` overriding the address. The frames move to the channel once it opens; input, audio, events and the signalling
 stay on the WebSocket either way, so the socket is needed whatever carries the video.
 
-The server paces data-channel fragments according to each viewer's encoder target to limit bursts.
+The server paces data-channel fragments according to each viewer's stream target to limit bursts.
 The channel remains ordered and reliable: missing packets can hold up later video until SCTP
 retransmits them. Lost frames or arrival gaps over half a second caused by the link in three of ten
 seconds trigger fallback to the socket. Pending video with no byte acknowledgements for three

@@ -148,8 +148,8 @@ impl FrameSink for FfmpegSink {
 enum Converter { Software(SoftwareConverter), Hardware(crate::gpu::Converter) }
 struct Active { encoder: VideoEncoder, converter: Converter, settings: Settings, epoch: u64, info: Option<StreamInfo>, stream_id: u32 }
 
-/// Encoders can exceed their target even at their largest quantizer. Admit fresh input only after
-/// the delivered payload's budget is paid, without retaining a compositor buffer during the wait.
+/// Accumulate delivered bytes with one codec-buffer period of burst allowance. Excess waits for
+/// its budget without retaining a compositor buffer; variable packet sizes can share the allowance.
 struct Admission { due: Instant, kbps: u32 }
 impl Admission {
     fn new(kbps: u32) -> Self { Self { due: Instant::now(), kbps: kbps.max(1) } }
@@ -161,11 +161,14 @@ impl Admission {
             self.kbps = kbps;
         }
     }
-    fn delay(&self, now: Instant) -> Duration { self.due.saturating_duration_since(now) }
-    fn delivered(&mut self, bytes: usize, encoding: Duration, now: Instant) {
+    fn delay(&self, now: Instant) -> Duration {
+        self.due.saturating_duration_since(now + Duration::from_millis(crate::encoder::BUFFER_MS.into()))
+    }
+    fn delivered(&mut self, bytes: usize, started: Instant, encoding: Duration, now: Instant) {
         let cost = Duration::from_secs_f64(bytes as f64 * 8.0 / (f64::from(self.kbps) * 1000.0));
-        // Encoding contributes to the interval; time blocked on output does not buy another burst.
-        self.due = now + cost.saturating_sub(encoding);
+        let unpaid = self.due.saturating_duration_since(started);
+        // Preserve existing debt. Encoding pays it down; blocked output does not earn new credit.
+        self.due = now + (unpaid + cost).saturating_sub(encoding);
     }
 }
 
@@ -284,7 +287,7 @@ fn run(shared: &Shared, encoders: &Encoders, tx: &mpsc::Sender<StreamMsg>, redra
                 let bytes = messages.iter().map(|m| match m { StreamMsg::Frame(f) => f.data.len(), _ => 0 }).sum();
                 let encoding = started.elapsed();
                 if deliver(shared, tx, messages, epoch, key, redraw, runtime)? {
-                    admission.delivered(bytes, encoding, Instant::now());
+                    admission.delivered(bytes, started, encoding, Instant::now());
                 }
             }
             Err(error) => {
@@ -389,18 +392,39 @@ mod tests {
         let now = Instant::now();
         let mut budget = Admission { due: now, kbps: 8000 };
         // A 100 KB packet needs 100 ms; 20 ms of conversion/encoding already elapsed.
-        budget.delivered(100_000, Duration::from_millis(20), now);
-        assert_eq!(budget.delay(now), Duration::from_millis(80));
-        budget.set_rate(4000, now + Duration::from_millis(20));
-        assert_eq!(budget.delay(now + Duration::from_millis(20)), Duration::from_millis(120));
-        budget.set_rate(8000, now + Duration::from_millis(40));
-        assert_eq!(budget.delay(now + Duration::from_millis(40)), Duration::from_millis(50));
-        // An idle period or a long blocked delivery buys no credit for the next packet.
-        let later = now + Duration::from_secs(10);
-        budget.delivered(100_000, Duration::from_millis(20), later);
-        assert_eq!(budget.delay(later), Duration::from_millis(80));
-        budget.delivered(1000, Duration::from_millis(20), later + Duration::from_secs(1));
-        assert!(budget.delay(later + Duration::from_secs(1)).is_zero());
+        budget.delivered(100_000, now, Duration::from_millis(20), now + Duration::from_millis(20));
+        assert!(budget.delay(now + Duration::from_millis(20)).is_zero());
+        budget.set_rate(4000, now + Duration::from_millis(40));
+        assert_eq!(budget.delay(now + Duration::from_millis(40)), Duration::from_millis(20));
+        budget.set_rate(8000, now + Duration::from_millis(60));
+        assert_eq!(budget.due.duration_since(now + Duration::from_millis(60)), Duration::from_millis(50));
+        // Existing debt survives a blocked delivery; only the ten milliseconds of encoding pays it.
+        let delivered = now + Duration::from_secs(10);
+        budget.delivered(100_000, now + Duration::from_millis(70), Duration::from_millis(10), delivered);
+        assert_eq!(budget.delay(delivered), Duration::from_millis(30));
+        // Idle time cannot accumulate more than the fixed allowance.
+        let later = delivered + Duration::from_secs(10);
+        budget.delivered(200_000, later, Duration::from_millis(20), later + Duration::from_millis(20));
+        assert_eq!(budget.delay(later + Duration::from_millis(20)), Duration::from_millis(80));
+    }
+
+    #[test]
+    fn admission_smooths_variable_frames_but_bounds_sustained_excess() {
+        let now = Instant::now();
+        let mut budget = Admission { due: now, kbps: 8000 };
+        for frame in 0..300 {
+            let started = now + Duration::from_millis(frame * 33);
+            assert!(budget.delay(started).is_zero(), "ordinary packet variation skipped frame {frame}");
+            let bytes = if frame % 2 == 0 { 10_000 } else { 50_000 };
+            budget.delivered(bytes, started, Duration::from_millis(5), started + Duration::from_millis(5));
+        }
+        let mut budget = Admission { due: now, kbps: 8000 };
+        for frame in 0..10 {
+            let started = now + Duration::from_millis(frame * 33);
+            if !budget.delay(started).is_zero() { return; }
+            budget.delivered(60_000, started, Duration::from_millis(5), started + Duration::from_millis(5));
+        }
+        panic!("sustained excess must exhaust the burst allowance");
     }
 
     #[test]
@@ -520,7 +544,8 @@ mod tests {
             while let Ok(message) = rx.try_recv() {
                 match message {
                     StreamMsg::Info(value) => *info = Some(value),
-                    StreamMsg::Frame(frame) => { result = Some(frame); return true; }
+                    StreamMsg::Frame(frame) if frame.pts_us == seq * 33_333 => { result = Some(frame); return true; }
+                    StreamMsg::Frame(_) => {} // Already queued pictures remain in reference order.
                     StreamMsg::Failed => panic!("video encoder failed"),
                     _ => panic!("unexpected audio on video channel"),
                 }
@@ -589,7 +614,7 @@ mod tests {
             wait(|| sink.owner.shared.state.lock().unwrap().ready);
             submit(&mut sink, 5);
             let resized = receive(&mut rx, &mut info, &mut sink, 5, &redraws, &mut seen);
-            assert!(resized.keyframe);
+            assert!(resized.keyframe, "{codec:?}: resized pts={} stream={}, expected pts={}", resized.pts_us, resized.stream_id, 5 * 33_333);
             assert_eq!((info.as_ref().unwrap().width, info.as_ref().unwrap().height), (160, 90));
             decode(codec, &resized, (160, 90));
             assert!(!control.effort().pending);

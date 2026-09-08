@@ -5,7 +5,7 @@ use elsewhere_core::{Codec, EffortState, EncodingEffort, Frame, FrameBuffer, Qua
 use ffmpeg_next::{self as ffmpeg, ffi as av, format::Pixel};
 
 const TIME_BASE: (i32, i32) = (1, 1_000_000);
-const BUFFER_MS: u32 = 100;
+pub(crate) const BUFFER_MS: u32 = 100;
 
 #[derive(Clone, Debug)]
 pub(crate) struct Choice { pub codec: Codec, pub name: &'static str, pub low_power: bool }
@@ -137,12 +137,18 @@ impl VideoEncoder {
                         state.setting = Some(format!("preset={preset}"));
                     }
                     "libvpx" | "libvpx-vp9" => {
-                        let speed = if choice.codec == Codec::Vp8 { ["8", "4", "2"][index] } else { ["8", "6", "4"][index] };
+                        // VP9 speeds 5 and above enable native realtime CBR overshoot handling.
+                        let speed = if choice.codec == Codec::Vp8 { ["8", "4", "2"][index] } else { ["8", "6", "5"][index] };
                         options.set("deadline", "realtime");
                         options.set("lag-in-frames", "0");
                         options.set("auto-alt-ref", "0");
                         options.set("cpu-used", speed);
-                        if choice.codec == Codec::Vp9 { options.set("row-mt", "1"); }
+                        if choice.codec == Codec::Vp9 {
+                            options.set("row-mt", "1");
+                            // Keep buffer compensation below the delivery budget and repay deficits promptly.
+                            options.set("overshoot-pct", "0");
+                            options.set("undershoot-pct", "100");
+                        }
                         state.setting = Some(format!("cpu-used={speed}"));
                     }
                     "libaom-av1" => {
@@ -192,12 +198,14 @@ impl VideoEncoder {
 
 fn rate(context: &mut av::AVCodecContext, kbps: u32) -> Result<()> {
     ensure!(kbps > 0 && kbps <= 4_294_967, "video bitrate is out of range");
-    let bps = i64::from(kbps) * 1000;
+    // Reserve 10% of the delivery budget for variation in native rate control.
+    let bps = i64::from(kbps) * 900;
     context.bit_rate = bps;
     context.rc_min_rate = bps;
     context.rc_max_rate = bps;
     context.rc_buffer_size = i32::try_from(bps * i64::from(BUFFER_MS) / 1000).context("video rate buffer is too large")?;
     context.rc_initial_buffer_occupancy = context.rc_buffer_size * 3 / 4;
+    tracing::debug!(stream_target_kbps = kbps, encoder_target_bps = bps, buffer_bits = context.rc_buffer_size, "ffmpeg video rate");
     Ok(())
 }
 

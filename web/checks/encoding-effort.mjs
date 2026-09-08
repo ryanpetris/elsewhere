@@ -54,7 +54,7 @@ try {
   const id = await main.evaluate(() => elsewhere.store.get().windows.find(window => window.app_id === 'effort-check').id);
   const settings = {
     libvpx: ['cpu-used=8', 'cpu-used=4', 'cpu-used=2'],
-    'libvpx-vp9': ['cpu-used=8', 'cpu-used=6', 'cpu-used=4'],
+    'libvpx-vp9': ['cpu-used=8', 'cpu-used=6', 'cpu-used=5'],
     libx264: ['preset=superfast', 'preset=fast', 'preset=medium'],
     libx265: ['preset=ultrafast', 'preset=superfast', 'preset=fast'],
     'libaom-av1': ['cpu-used=8', 'cpu-used=6', 'cpu-used=4'],

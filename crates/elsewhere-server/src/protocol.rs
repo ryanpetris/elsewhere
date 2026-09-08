@@ -268,7 +268,7 @@ impl Preset {
     }
 }
 
-/// The selected ceiling and current encoder target, separate from measured throughput.
+/// The selected ceiling and current stream target, separate from measured throughput.
 pub fn stream_state(codec: Codec, auto_codec: bool, quality: Quality, preset: Preset, medium_kbps: u32, effort: EffortState) -> Bytes {
     let json = serde_json::json!({ "codec": codec_name(codec), "auto_codec": auto_codec,
         "preset": preset.name(), "ceiling_kbps": preset.quality(medium_kbps).bitrate_kbps, "medium_kbps": medium_kbps,

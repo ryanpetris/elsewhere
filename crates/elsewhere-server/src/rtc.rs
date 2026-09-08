@@ -7,12 +7,13 @@
 //! candidates, so a socket per address knows it). Signalling goes over the session's WebSocket (`RTC`
 //! messages: the browser's offer, our answer); the frame path in `ws.rs` hands frames to the hub while
 //! the session's channel is open and to the socket otherwise. A frame goes as numbered fragments the page
-//! reassembles, admitted one fragment at a time at a rate derived from the encoder target. The SCTP
+//! reassembles, admitted one fragment at a time at a rate derived from the stream target. The SCTP
 //! send buffer (128 kB, freed by the browser's acknowledgements) must also have room. A refused write
 //! is congestion to the session's rate controller; waiting for the pacing timer is not. A keyframe replaces whatever waits (the page needs it
 //! whatever else it gets, and a keyframe behind a queue on a lossy link is a stall of seconds; what was
 //! written of the frame in flight still has to go out), and a frame arriving at a full queue is dropped
-//! rather than waiting longer; either is a seq gap the page answers with a keyframe request. Configuration
+//! rather than waiting longer; either can leave a sequence gap. A delta after a gap makes the page
+//! request a keyframe. Configuration
 //! precedes each key on the same ordered channel, so accepted older video cannot cross a decoder change. A fragment
 //! on its way is retransmitted if it is lost, so what the page misses is what was dropped here, never
 //! what the network ate.
@@ -216,7 +217,7 @@ impl Pacer {
     fn new(now: Instant) -> Self { Self { next: now, bitrate_kbps: 1 } }
     fn ready(&self, now: Instant) -> bool { now >= self.next }
     fn sent(&mut self, bytes: usize, now: Instant) {
-        // Allow 25% above the encoder target, charging 10% for wire overhead: 1.10 / 1.25 = 22/25.
+        // Allow 25% above the stream target, charging 10% for wire overhead: 1.10 / 1.25 = 22/25.
         // One fragment is the entire burst allowance; idle time never accumulates credit.
         let nanos = (bytes as u64 * 8 * 1_000_000 * 22).div_ceil(u64::from(self.bitrate_kbps.max(1)) * 25);
         self.next = now + Duration::from_nanos(nanos);

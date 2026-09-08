@@ -404,7 +404,7 @@ WebRTC data channel instead while one is open (`rtc.rs`: the page's offer arrive
 the page includes its hostname and port in the offer, which the server resolves for the answer
 unless `--rtc-addr` sets the advertised endpoint. The hub answers as an ICE-lite str0m peer. The hub drives every
 session's peer connection over one UDP socket per local address, and paces frame-data fragments of
-up to 16 KiB plus a nine-byte header using each viewer's encoder target; `Hub::pressure` reports active channels and
+up to 16 KiB plus a nine-byte header using each viewer's stream target; `Hub::pressure` reports active channels and
 their drops or native send-buffer blockage; window sessions use the same
 hub under keys with the top bit set); a channel that closes, a `{"close": true}`, or the session's end
 drops the peer. The controller's `Mic` packets

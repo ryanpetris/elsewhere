@@ -202,11 +202,15 @@ animation. The compositor also requests one refinement frame 150 ms after the pi
 uses the current target without a bitrate-change cycle.
 
 The worker also budgets input from the bytes it delivers. An encoder can exceed its target bitrate
-even at the largest quantizer. Before encoding another picture, the worker waits for that packet's
-byte budget, crediting conversion and encoding time. It releases raw input during the wait and
-requests a fresh complete picture when the budget is available. Idle time and blocked output do not
-accumulate burst credit. Rate changes rescale the unpaid budget; key requests and encoder reopens
-preserve it. Difficult pictures can therefore lower frame rate without accumulating old encoded video.
+even at the largest quantizer. The worker accumulates those bytes with a 100 ms burst allowance,
+so variable frame sizes can share budget across render ticks. It waits when the unpaid budget exceeds
+that allowance, releases raw input and requests a fresh complete picture when input can resume.
+Conversion and encoding time pay down the budget; blocked output does not. Idle time cannot grow
+the allowance. Rate changes rescale unpaid bytes; key requests and encoder reopens preserve them.
+One encoded packet can exceed the allowance because its size is known only after encoding.
+The native encoder targets 90% of the stream's current bitrate budget, leaving room for rate-control
+variation. The byte budget and congestion controller use the full stream
+target. Native bitrate and buffer settings appear in the `ffmpeg video rate` debug trace.
 
 The encoder-to-server channel holds two messages. The worker can wait with one encoded packet but
 releases pending raw pictures and refuses more input during that wait. Configuration and the first
@@ -218,7 +222,7 @@ configurations for the same stream on that connection leave the browser decoder 
 WebSocket video while RTC is active; a new WebSocket configuration closes that RTC attempt before
 changing the decoder. Bytes accepted by SCTP remain subject to the ordered data channel's
 retransmission behavior.
-Each peer admits one 16 KiB fragment at a time, with spacing derived from its current encoder target.
+Each peer admits one 16 KiB fragment at a time, with spacing derived from its current stream target.
 The rate allows 25% headroom and charges 10% for wire overhead. Idle time accumulates no send credit;
 keyframes, encoder restarts and target changes preserve the next fragment's existing deadline.
 Native SCTP write refusal feeds congestion control; waiting for the pacing deadline does not.

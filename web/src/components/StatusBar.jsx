@@ -9,7 +9,7 @@ const PRESET_LABEL = { 'very-low': 'Very Low', low: 'Low', medium: 'Medium', hig
 const EFFORT_LABEL = { fast: 'Fast', balanced: 'Balanced', high: 'High' };
 const mbit = (kbps, digits = 3) => `${Number((kbps / 1000).toFixed(digits))} Mbit/s`;
 
-// The selected ceiling and current encoder target are separate from network throughput.
+// The selected ceiling and current stream target are separate from network throughput.
 function Choice({ viewer }) {
   const st = useStore(viewer.store, s => s.streamState);
   const choice = useStore(viewer.store, s => s.choice);
@@ -33,7 +33,7 @@ function Choice({ viewer }) {
       <select value={choice.quality} onChange={e => viewer.setChoice({ quality: e.target.value })} className={cls} title="Quality">
         {PRESETS.map(p => <option key={p} value={p}>{PRESET_LABEL[p]} ({ceilings[p] === undefined ? 'server ceiling' : `up to ${mbit(ceilings[p])}`})</option>)}
       </select>
-      <span className="inline-block w-[30ch] shrink-0 whitespace-nowrap" title="Current encoder target; actual network throughput depends on scene activity">
+      <span className="inline-block w-[30ch] shrink-0 whitespace-nowrap" title="Current stream target; actual network throughput depends on scene activity">
         {st?.preset === choice.quality ? `Target ${mbit(st.bitrate_kbps, 1)}${st.max_fps ? `, ${st.max_fps} fps cap` : ''}` : 'Applying quality…'}
       </span>
       <label title="Higher effort can improve the picture at the same bitrate, but uses more encoding time and can reduce responsiveness. Changes restart this stream immediately." className="inline-flex items-center gap-2">
