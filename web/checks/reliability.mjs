@@ -203,9 +203,10 @@ try {
       for (const codec of codecs) for (const selectedScene of scenes) for (let repeat = 1; repeat <= repeats; repeat++) {
         assert.ok(available.includes(codec), `browser must decode ${codec}`);
         await scene.evaluate(selectedScene => { window.scene = selectedScene; window.sequence = 0; }, selectedScene);
-        await page.evaluate(codec => { elsewhere.setChoice({ codec, quality: 'medium', effort: 'fast' }); elsewhere.setTransport('webrtc'); elsewhere.setStatsOn(true); }, codec);
+        await page.evaluate(codec => { elsewhere.setChoice({ codec, quality: 'medium', effort: 'fast' }); elsewhere.setTransport('webrtc'); }, codec);
         await page.reload();
         await page.waitForFunction(codec => elsewhere.store.get().videoVia === 'webrtc' && elsewhere.store.get().streamState?.codec === codec && elsewhere.store.get().stats.frames > 5, codec);
+        await page.evaluate(() => elsewhere.setStatsOn(true));
         for (let index = 1; index < viewerCount; index++) {
           const viewer = await page.context().newPage(); extraViewers.push(viewer);
           viewer.on('pageerror', error => errors.push(error.message));
@@ -346,7 +347,7 @@ try {
             const image = document.createElement('canvas'); image.width = width; image.height = height;
             drawScene(image.getContext('2d'), marker.timestamp, marker.sequence, scene === 'cuts-first' ? 'cuts' : scene); return image.toDataURL();
           }, { width, height, ...capture });
-          row.quality[capture.scene] = await page.evaluate(async ({ reference, kind, width, height }) => {
+          row.quality[capture.scene] = { source_sequence: capture.marker.sequence, ...await page.evaluate(async ({ reference, kind, width, height }) => {
             const image = new Image(); image.src = reference; await image.decode();
             const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
             canvas.getContext('2d').drawImage(image, 0, 0);
@@ -356,7 +357,7 @@ try {
             for (let i = 0; i < wanted.length; i += 4) for (let channel = 0; channel < 3; channel++) { const error = wanted[i + channel] - actual[i + channel]; squared += error ** 2; absolute += Math.abs(error); }
             const count = width * (height - 64) * 3, mse = squared / count;
             return { psnr_db: mse ? 10 * Math.log10(255 ** 2 / mse) : 100, mean_absolute_error: absolute / count };
-          }, { reference, kind: capture.scene, width, height });
+          }, { reference, kind: capture.scene, width, height }) };
           await writeFile(`${directory}/${name}-${capture.scene}.png`, Buffer.from(capture.png.split(',')[1], 'base64'));
           await writeFile(`${directory}/${name}-${capture.scene}-reference.png`, Buffer.from(reference.split(',')[1], 'base64'));
         }
