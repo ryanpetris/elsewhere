@@ -225,7 +225,8 @@ retransmission behavior.
 Each peer admits one 16 KiB fragment at a time, with spacing derived from its current stream target.
 The rate allows 25% headroom and charges 10% for wire overhead. Idle time accumulates no send credit;
 keyframes, encoder restarts and target changes preserve the next fragment's existing deadline.
-Native SCTP write refusal feeds congestion control; waiting for the pacing deadline does not.
+Native SCTP write refusal and frames rejected by full queues feed congestion control.
+Waiting for the pacing deadline and replacing unsent video with a recovery key do not.
 Pending video with no SCTP byte acknowledgements for three seconds gives video back to the WebSocket. Encoder
 restarts do not reset that deadline. A frame waiting three seconds at the application queue's front
 also triggers fallback.

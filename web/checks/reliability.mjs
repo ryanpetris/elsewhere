@@ -25,6 +25,7 @@ const consumerPresets = Array.from({ length: blockedCount }, (_, index) => index
 const port = Number(process.env.ELSEWHERE_TEST_PORT ?? 8096), debugPort = port + 1000;
 const renderNode = process.env.ELSEWHERE_RENDER_NODE ?? '/dev/dri/renderD128';
 const binary = process.env.ELSEWHERE_BINARY ?? '/src/target/release/elsewhere';
+const logFilter = process.env.RUST_LOG ?? 'elsewhere_stream=debug,elsewhere_server::rtc=trace,info';
 assert.ok(scenes.every(scene => ['cycle', 'cuts', 'scroll', 'game', 'video', 'text'].includes(scene)));
 assert.ok(Number.isInteger(viewerCount) && viewerCount > 0 && Number.isInteger(blockedCount) && blockedCount >= 0);
 assert.ok(Number.isInteger(repeats) && repeats > 0 && seconds > 0 && warmup >= 0);
@@ -94,7 +95,7 @@ try {
     .map(name => optionalCommand('dpkg-query', ['-W', '-f=${Package} ${Version}\n', name])).filter(Boolean);
   await writeFile(root + '/environment.json', JSON.stringify({ profile, binary, binary_version: command(binary, ['--version']).trim(),
     binary_sha256: createHash('sha256').update(await readFile(binary)).digest('hex'), renderNode, codecs, sizes, repeats, seconds, warmup, scenes, ceiling_kbps: ceiling, link_mbps: profile === 'clean' ? null : linkRate, viewers: viewerCount, blocked_consumers: blockedCount, blocked_consumer_presets: consumerPresets,
-    queue_limit_packets: profile === 'clean' ? null : queueLimit,
+    queue_limit_packets: profile === 'clean' ? null : queueLimit, rust_log: logFilter,
     link: JSON.parse(command('ip', ['-j', 'link', 'show', 'lo'])), offloads: command('ethtool', ['-k', 'lo']), qdisc: qdiscs(),
     ffmpeg: command('ffmpeg', ['-version']).trim(), chromium: command('chromium', ['--version']).trim(), kernel: command('uname', ['-sr']).trim(),
     cpu: { model: /^(?:model name|Hardware)\s*:\s*(.+)$/m.exec(cpuInfo)?.[1] ?? null, logical_processors: (cpuInfo.match(/^processor\s*:/gm) ?? []).length },
@@ -111,7 +112,7 @@ try {
     const server = spawn(binary, ['--no-audio', '--no-tls', '--render-node', renderNode, '--codec', codecs[0], '--bitrate', String(ceiling),
       '--screen-size', `${width}x${height}`, '--kiosk', '--listen', `127.0.0.1:${port}`],
     { cwd: directory, env: { ...process.env, HOME: directory, XDG_CONFIG_HOME: directory + '/config', XDG_RUNTIME_DIR: directory + '/runtime',
-      RUST_LOG: 'elsewhere_stream=debug,elsewhere_server::rtc=trace,info', NO_COLOR: '1' }, stdio: ['ignore', log.fd, log.fd] });
+      RUST_LOG: logFilter, NO_COLOR: '1' }, stdio: ['ignore', log.fd, log.fd] });
     let browser, remote; const consumers = [], consumerLogs = [], extraViewers = [];
     try {
       await wait(async () => { try { return (await fetch(origin)).ok; } catch { return false; } });
@@ -426,6 +427,8 @@ try {
           measurement: after.m, rates, encodedRates, qdiscBefore, qdiscAfter }, null, 2));
         await writeFile(`${directory}/${name}.log`, text);
         console.log(JSON.stringify(row));
+        assert.ok(encodedEvents.length > 0, 'native encoding observations are present');
+        assert.ok(queueSessions.some(queue => queue.session === primarySession && queue.bytes_by_quarter.some(quarter => Number.isFinite(quarter.max))), 'primary RTC queue observations are present');
         assert.ok(valid.length > 10, 'decoded source clock markers');
         assert.equal(after.m.invalid, 0, 'all source clock markers decode');
         assert.equal(row.decode_errors, 0, 'fresh stream and recovery packets decode');

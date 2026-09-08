@@ -98,7 +98,7 @@ impl Hub {
         Ok(hub)
     }
 
-    /// Frames dropped since the last call and whether the native send buffer refused a write.
+    /// Frames rejected by full queues since the last call and whether the native send buffer refused a write.
     pub fn pressure(&self, session: u64) -> Option<(u32, bool)> {
         self.open.lock().unwrap().get_mut(&session).filter(|c| c.active).map(|c| (std::mem::take(&mut c.dropped), c.blocked))
     }
@@ -430,24 +430,23 @@ fn notify_closed(reply: mpsc::Sender<Bytes>, g: u64, reason: &'static str) -> to
 /// Configuration and video share the channel's order. Every new configuration and every key replaces
 /// unsent video, with its configuration first. A delta can announce a new configuration if the hub's
 /// mailbox dropped its first key; the browser then requests another key from the correct stream.
+/// Only rejection by a full queue reports congestion. Replacing video with a recovery key does not.
 fn enqueue(peer: &mut Peer, config: Bytes, data: Bytes) -> u32 {
     let boundary = peer.config.as_ref() != Some(&config) || data.get(1).is_some_and(|flags| flags & 1 != 0);
-    let discarded = if boundary {
-        let discarded = peer.queue.iter().filter(|message| message.first() == Some(&protocol::VIDEO)).count() as u32;
+    if boundary {
         peer.queue.clear();
         peer.sent = 0;
         peer.frame_id = peer.frame_id.wrapping_add(1);
         peer.front_since = Instant::now();
         peer.queue.push_back(config.clone());
         peer.config = Some(config);
-        discarded
-    } else { 0 };
+    }
     if peer.queue.iter().filter(|message| message.first() == Some(&protocol::VIDEO)).count() >= QUEUE {
-        return discarded + 1;
+        return 1;
     }
     if peer.queue.is_empty() { peer.front_since = Instant::now(); }
     peer.queue.push_back(data);
-    discarded
+    0
 }
 
 /// The queue's frames, front first, as fragments `[FRAGMENT][u32 id][u16 index][u16 count]` then the bytes,
@@ -544,8 +543,11 @@ mod endpoint_tests {
         // A full hub mailbox can lose the first key; the next admitted delta still announces its configuration.
         let (tx, mut rx) = mpsc::channel(1);
         let hub = Hub { tx, open: Default::default(), ice_servers: Default::default(), page_endpoint: true, page_port: None };
+        hub.open.lock().unwrap().insert(1, Claim { g: 1, active: true, dropped: 0, blocked: false });
         assert!(hub.tx.try_send(Msg::Close { session: 1, g: None, reply: None }).is_ok());
         hub.frame(1, config.clone(), key.clone(), 8000);
+        assert_eq!(hub.pressure(1), Some((1, false)));
+        assert_eq!(hub.pressure(1), Some((0, false)));
         rx.try_recv().unwrap();
         hub.frame(1, config.clone(), delta.clone(), 8000);
         let Msg::Frame { config: delivered, data, .. } = rx.try_recv().unwrap() else { panic!("frame expected") };
@@ -553,15 +555,22 @@ mod endpoint_tests {
         assert_eq!(peer.queue, VecDeque::from([config.clone(), delta.clone()]));
         for _ in 1..QUEUE { assert_eq!(enqueue(&mut peer, config.clone(), delta.clone()), 0); }
         assert_eq!(peer.queue.len(), QUEUE + 1);
-        assert_eq!(enqueue(&mut peer, config.clone(), delta), 1);
+        dropped(&hub.open, 1, enqueue(&mut peer, config.clone(), delta));
+        hub.open.lock().unwrap().get_mut(&1).unwrap().blocked = true;
 
-        assert_eq!(enqueue(&mut peer, config.clone(), key.clone()), QUEUE as u32);
+        assert_eq!(enqueue(&mut peer, config.clone(), key.clone()), 0);
         assert_eq!(peer.queue, VecDeque::from([config.clone(), key.clone()]));
         // A repeated key carries configuration even after the previous copy entered SCTP.
         peer.queue.pop_front();
         peer.sent = 1;
-        assert_eq!(enqueue(&mut peer, config.clone(), key.clone()), 1);
-        assert_eq!(peer.queue, VecDeque::from([config, key]));
+        assert_eq!(enqueue(&mut peer, config.clone(), key.clone()), 0);
+        assert_eq!(peer.queue, VecDeque::from([config, key.clone()]));
+        let next_config = Bytes::from_static(b"\x01next config");
+        assert_eq!(enqueue(&mut peer, next_config.clone(), key.clone()), 0);
+        assert_eq!(peer.queue, VecDeque::from([next_config, key]));
+        // Recovery preserves genuine pressure already observed by either queue or the native writer.
+        assert_eq!(hub.pressure(1), Some((1, true)));
+        assert_eq!(hub.pressure(1), Some((0, true)));
         assert_eq!(peer.sent, 0);
         assert_eq!(peer.pacer.next, now + Duration::from_secs(1));
         assert_eq!(peer.progress.since, Some(now));
