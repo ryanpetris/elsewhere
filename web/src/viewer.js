@@ -333,8 +333,11 @@ export function createViewer() {
   function newDecoder() {
     if (decoder && decoder.state !== 'closed') decoder.close();
     const d = new VideoDecoder({
-      output: f => { const rec = inflight.get(f.timestamp); if (rec) rec.output = performance.now(); (ctx ? paintNow : schedule)(f); },
-      error: e => { console.error(e); decodeErrors++; if (d === decoder) resync(); },
+      output: f => {
+        if (disposed || d !== decoder) { f.close(); return; }
+        const rec = inflight.get(f.timestamp); if (rec) rec.output = performance.now(); (ctx ? paintNow : schedule)(f);
+      },
+      error: e => { if (!disposed && d === decoder) { console.error(e); decodeErrors++; resync(); } },
     });
     d.configure({ codec: stream.codec, optimizeForLatency: true });
     decoder = d;
@@ -764,6 +767,12 @@ export function createViewer() {
     viewer.pip?.dispose();
     clipboard.dispose();
     disposed = true;
+    if (decoder && decoder.state !== 'closed') decoder.close();
+    decoder = null;
+    cancelAnimationFrame(rafId); rafId = 0;
+    pendingFrame?.close(); pendingFrame = null;
+    inflight.clear();
+    stage_.decode.length = stage_.paint.length = stage_.interval.length = 0;
     releaseKeyboard();
     unsubscribeKeyboard();
     if (document.pointerLockElement === canvas) document.exitPointerLock();
