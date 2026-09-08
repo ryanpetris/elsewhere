@@ -72,7 +72,7 @@ export function createViewer() {
   const dropBatches = new Map();
   let mixerSubscribed = false, mixerTimer = 0;
   const mixerVolumes = new Map();
-  let ws, decoder, stream = null, awaitingKey = true;
+  let ws, decoder, stream = null, configuredSocket = null, awaitingKey = true;
   let disposed = false, reconnectTimer;
   let frames = 0, received = 0, windowFrames = 0, windowBytes = 0, lastInput = 0, latencyMs = 0, lockRequests = 0, lockError = '', wantLock = false, connects = 0, closes = [], keyframes = 0, decodeErrors = 0, dropped = 0;
   let videoSeq = -1, audioSeq = -1, lost = 0, dropNext = false; // seq: last message seen per stream; lost: gaps in either
@@ -341,14 +341,19 @@ export function createViewer() {
     send(REQUEST_KEYFRAME, 0);
   }
 
-  function onMessage(buf) {
+  function onMessage(buf, via = 'websocket') {
     windowBytes += buf.byteLength;
     const dv = new DataView(buf);
     switch (dv.getUint8(0)) {
-      case CONFIG:
-        stream = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 1)));
+      case CONFIG: {
+        const next = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 1)));
+        if (configuredSocket === ws && stream?.streamId === next.streamId) break;
+        // A new socket configuration owns subsequent video; pending RTC callbacks belong to the old stream.
+        if (via === 'websocket' && state().videoVia === 'webrtc') failRtc('Video resumed over WebSocket');
+        stream = next;
+        configuredSocket = ws;
         videoSeq = -1; // a new stream counts from 0
-        delayBase = []; delaySec = Infinity; lastPts = 0; // and its timestamps from zero: the lateness baseline starts over
+        delayBase = []; delaySec = Infinity; lastPts = 0; // measure the new stream against a fresh lateness baseline
         if (pendingFrame) { pendingFrame.close(); pendingFrame = null; }
         canvas.width = stream.width;
         canvas.height = stream.height;
@@ -358,6 +363,7 @@ export function createViewer() {
         if (state().transport === 'webrtc') maybeRtc();
         fetchElements(); // the scale may have changed
         break;
+      }
       case CURSOR: {
         // The compositor doesn't draw the pointer; the browser does, with zero latency.
         const w = dv.getUint16(1, true), h = dv.getUint16(3, true);
@@ -467,6 +473,7 @@ export function createViewer() {
         break;
       }
       case VIDEO: {
+        if (via === 'websocket' && state().videoVia === 'webrtc') return;
         if (dropNext) { dropNext = false; return; } // debug: elsewhere.dropNext() simulates a lost message
         if (!decoder) return;
         received++;
@@ -686,12 +693,14 @@ export function createViewer() {
       rtc = openRtc({
         iceServers, endpoint: pageEndpoint(location), g: attempt.g,
         signal: o => { if (current()) sendText(RTC_CLIENT, JSON.stringify(o)); },
-        onMessage: buf => { if (current()) onMessage(buf); },
+        onMessage: buf => { if (current()) onMessage(buf, 'webrtc'); },
         onOpen: () => {
           if (!current()) return;
           clearTimeout(rtcTimer);
           resetPath();
           store.set({ videoVia: 'webrtc' });
+          awaitingKey = true;
+          send(REQUEST_KEYFRAME, 0); // the channel needs a key even if earlier keys are still on the socket
           recovery('active');
           qualifyHealthyRtc();
         },

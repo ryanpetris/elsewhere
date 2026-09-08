@@ -205,7 +205,7 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
     let mut mixer_state = app.mixer.as_ref().map(|m| m.state.clone());
     let mut mixer_levels = app.mixer.as_ref().map(|m| m.levels.clone());
     let mut mixer_subscribed = false;
-    let (mut info, mut seq, mut failed) = (None::<elsewhere_core::StreamInfo>, 0u16, false);
+    let (mut info, mut config, mut ws_config, mut seq, mut failed) = (None::<elsewhere_core::StreamInfo>, Bytes::new(), None, 0u16, false);
     let mut ping = tokio::time::interval(Duration::from_secs(1));
     let (mut unanswered, started) = (0, Instant::now());
     let ended = loop {
@@ -225,7 +225,7 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
                 Some(StreamMsg::Info(i)) => {
                     seq = 0;
                     failed = false;
-                    if !send(&mut socket, protocol::config(&i)).await { break None }
+                    config = protocol::config(&i);
                     info = Some(i);
                     let Some(state) = app.stream_state(id) else { break Some((UNAUTHORIZED, "token rotated")) };
                     if !send(&mut socket, state).await { break None }
@@ -237,8 +237,14 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
                         let t = Instant::now();
                         match (&app.rtc, pressure) {
                             // the data channel, while the page has one open
-                            (Some(hub), Some(_)) => hub.frame(id, protocol::video(&f, seq), auto.quality.bitrate_kbps),
-                            _ => if !send(&mut socket, protocol::video(&f, seq)).await { break None },
+                            (Some(hub), Some(_)) => hub.frame(id, config.clone(), protocol::video(&f, seq), auto.quality.bitrate_kbps),
+                            _ => {
+                                if ws_config != Some(f.stream_id) {
+                                    if !send(&mut socket, config.clone()).await { break None }
+                                    ws_config = Some(f.stream_id);
+                                }
+                                if !send(&mut socket, protocol::video(&f, seq)).await { break None }
+                            },
                         }
                         seq = seq.wrapping_add(1);
                         let (dropped, blocked) = pressure.unwrap_or((0, false));
@@ -395,7 +401,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
     }
     let _ = app.commands.send(Command::WindowStream { key: stream, window: id, sink: Some(sink) });
 
-    let (mut info, mut seq, mut failed) = (None::<elsewhere_core::StreamInfo>, 0u16, false);
+    let (mut info, mut config, mut ws_config, mut seq, mut failed) = (None::<elsewhere_core::StreamInfo>, Bytes::new(), None, 0u16, false);
     let mut pointer = None; // the last window-relative position, for the edge notice
     let mut ping = tokio::time::interval(Duration::from_secs(1));
     let (mut unanswered, started) = (0, Instant::now());
@@ -405,7 +411,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                 Some(StreamMsg::Info(i)) => {
                     seq = 0;
                     failed = false;
-                    if !send(&mut socket, protocol::config(&i)).await { break None }
+                    config = protocol::config(&i);
                     info = Some(i);
                     if !send(&mut socket, state(codec, quality, want_codec, preset)).await { break None }
                 }
@@ -414,8 +420,14 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                         let (backlog, pressure) = (rx.len(), app.rtc.as_ref().and_then(|hub| hub.pressure(rtc_key)));
                         let t = Instant::now();
                         match (&app.rtc, pressure) {
-                            (Some(hub), Some(_)) => hub.frame(rtc_key, protocol::video(&f, seq), quality.bitrate_kbps),
-                            _ => if !send(&mut socket, protocol::video(&f, seq)).await { break None },
+                            (Some(hub), Some(_)) => hub.frame(rtc_key, config.clone(), protocol::video(&f, seq), quality.bitrate_kbps),
+                            _ => {
+                                if ws_config != Some(f.stream_id) {
+                                    if !send(&mut socket, config.clone()).await { break None }
+                                    ws_config = Some(f.stream_id);
+                                }
+                                if !send(&mut socket, protocol::video(&f, seq)).await { break None }
+                            },
                         }
                         seq = seq.wrapping_add(1);
                         let (dropped, blocked) = pressure.unwrap_or((0, false));

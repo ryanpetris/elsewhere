@@ -17,7 +17,7 @@ await mkdir(root + '/home'); await mkdir(root + '/runtime', { mode: 0o700 });
 const log = await open(root + '/desktop.log', 'w');
 const origin = 'http://127.0.0.1:8089';
 const desktop = spawn('/src/target/release/elsewhere', ['--no-audio', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--bitrate', String(medium), '--listen', '127.0.0.1:8089', '--socket-name', 'wayland-rtc-check'], {
-  env: { ...process.env, HOME: root + '/home', XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime' },
+  env: { ...process.env, HOME: root + '/home', XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime', RUST_LOG: 'info,elsewhere_stream::viewer=debug' },
   stdio: ['ignore', log.fd, log.fd],
 });
 const waitFor = async predicate => {
@@ -51,7 +51,10 @@ try {
         createDataChannel(...args) {
           const channel = super.createDataChannel(...args); rtcTest.channel = channel;
           channel.addEventListener('open', e => { if (rtcTest.hideOpen) e.stopImmediatePropagation(); });
-          channel.addEventListener('message', e => { rtcTest.rtcFrames++; if (rtcTest.hideOpen) e.stopImmediatePropagation(); });
+          channel.addEventListener('message', e => {
+            if (new DataView(e.data).getUint16(5, true) === 0 && new Uint8Array(e.data)[9] === 2) rtcTest.rtcFrames++;
+            if (rtcTest.hideOpen) e.stopImmediatePropagation();
+          });
           return channel;
         }
       };
@@ -245,6 +248,13 @@ try {
   await selected(main);
   console.log('real UDP block preserved socket video and automatic recovery after unblocking passed');
 
+  await popup.evaluate(() => { rtcTest.holdOffers = true; elsewhere.setTransport('webrtc'); });
+  await popup.waitForFunction(() => elsewhere.store.get().rtcRecovery.state === 'connecting');
+  await popup.evaluate(id => elsewhere.control({ id, op: 'close' }), id);
+  await popup.waitForFunction(() => elsewhere.store.get().status === 'gone');
+  assert(await popup.evaluate(() => rtcTest.peers.every(p => p.connectionState === 'closed')));
+  await popup.context().close();
+
   await main.evaluate(() => elsewhere.spawn("foot --app-id=rtc-motion sh -c 'while :; do date +%s%N; sleep .02; done'"));
   await main.waitForFunction(() => elsewhere.store.get().windows.some(w => w.app_id === 'rtc-motion'));
   const motion = await main.evaluate(() => elsewhere.store.get().windows.find(w => w.app_id === 'rtc-motion').id);
@@ -252,17 +262,19 @@ try {
   const statesBeforeStall = await main.evaluate(() => rtcTest.states.length);
   block();
   const stallStart = Date.now();
+  const logBeforeStall = (await readFile(root + '/desktop.log')).length;
   await main.evaluate(() => {
-    rtcTest.stallStreams = new Set([elsewhere.store.get().stream.streamId]);
     rtcTest.stallTimer = setInterval(() => {
-      rtcTest.stallStreams.add(elsewhere.store.get().stream.streamId);
       elsewhere.setChoice({ effort: elsewhere.store.get().choice.effort === 'fast' ? 'balanced' : 'fast' });
     }, 400);
   });
   try {
-    await main.waitForFunction(n => rtcTest.states.slice(n).some(r => r.reason === 'Server queue stalled'), statesBeforeStall, { timeout: 4500 });
+    await main.waitForFunction(n => rtcTest.states.slice(n).some(r => ['Server queue stalled', 'Video resumed over WebSocket'].includes(r.reason)), statesBeforeStall, { timeout: 4500 });
     assert(Date.now() - stallStart < 4500, 'encoder restarts cannot postpone blocked transport fallback');
-    assert(await main.evaluate(() => rtcTest.stallStreams.size >= 3), 'multiple actual encoder streams during UDP block');
+    const stallLog = (await readFile(root + '/desktop.log')).subarray(logBeforeStall).toString().replace(/\x1b\[[0-9;]*m/g, '');
+    assert(stallLog.includes('video delivery stalled'), 'the server detects stalled video delivery');
+    const stallStreams = new Set([...stallLog.matchAll(/ffmpeg encoder open[^\n]*success=true stream_id=(\d+)/g)].map(match => match[1]));
+    assert(stallStreams.size >= 3, 'multiple actual encoder streams during UDP block');
   } finally { await main.evaluate(() => clearInterval(rtcTest.stallTimer)); }
   const socketBeforeFallback = await main.evaluate(() => ({ received: rtcTest.socketFrames, painted: elsewhere.store.get().stats.frames }));
   await main.waitForFunction(({ received, painted }) => rtcTest.socketFrames > received
@@ -330,11 +342,6 @@ try {
   assert.equal(await bounded.evaluate(() => rtcTest.peers.length), 9);
   assert.equal(await bounded.evaluate(() => localStorage.getItem('elsewhere.transport')), 'webrtc');
   await bounded.context().close();
-  await popup.evaluate(() => { rtcTest.holdOffers = true; elsewhere.setTransport('webrtc'); });
-  await popup.waitForFunction(() => elsewhere.store.get().rtcRecovery.state === 'connecting');
-  await popup.evaluate(id => elsewhere.control({ id, op: 'close' }), id);
-  await popup.waitForFunction(() => elsewhere.store.get().status === 'gone');
-  assert(await popup.evaluate(() => rtcTest.peers.every(p => p.connectionState === 'closed')));
   const revoked = await connect();
   await revoked.evaluate(() => { rtcTest.holdOffers = true; elsewhere.setTransport('webrtc'); });
   await fetch(origin + '/api/token/rotate', { method: 'POST', headers: { Authorization: 'Bearer ' + token } });

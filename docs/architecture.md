@@ -205,8 +205,12 @@ The encoder-to-server channel holds two messages. The worker can wait with one e
 releases pending raw pictures and refuses more input during that wait. Configuration and the first
 keyframe reserve their output slots together. Already encoded deltas stay in reference order;
 recovery discards obsolete worker output and begins a new stream with an independently decodable
-keyframe. The server clears older unsent RTC pictures on recovery. Bytes accepted by SCTP remain
-subject to the ordered data channel's retransmission behavior.
+keyframe. Each transport sends the stream configuration before its video. The server clears older
+unsent RTC pictures on recovery, retaining the configuration ahead of the replacement key. Repeated
+configurations for the same stream on that connection leave the browser decoder intact. The browser ignores delayed
+WebSocket video while RTC is active; a new WebSocket configuration closes that RTC attempt before
+changing the decoder. Bytes accepted by SCTP remain subject to the ordered data channel's
+retransmission behavior.
 Each peer admits one 16 KiB fragment at a time, with spacing derived from its current encoder target.
 The rate allows 25% headroom and charges 10% for wire overhead. Idle time accumulates no send credit;
 keyframes, encoder restarts and target changes preserve the next fragment's existing deadline.

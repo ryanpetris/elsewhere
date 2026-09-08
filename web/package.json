@@ -12,6 +12,7 @@
     "check:terminal": "node checks/terminal.mjs",
     "check:encoding-effort": "node checks/encoding-effort.mjs",
     "check:viewer-lifecycle": "node checks/viewer-lifecycle.mjs",
+    "check:rtc-stream": "node checks/rtc-stream.mjs",
     "check:effort-benchmark": "node checks/effort-benchmark.mjs",
     "check:reliability": "node checks/reliability.mjs"
   },

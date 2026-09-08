@@ -168,12 +168,18 @@ try {
             const bytes = new Uint8Array(data), view = new DataView(data), id = view.getUint32(1, true), index = view.getUint16(5, true), count = view.getUint16(7, true);
             measurement.arrivals.push({ at: performance.now(), bytes: bytes.length, transport: 'webrtc' });
             let part = parts.get(id);
-            if (!part) { part = { bytes: 0, got: 0, video: false, key: false }; parts.set(id, part); if (parts.size > 8) parts.delete(parts.keys().next().value); }
-            if (index === 0) { part.video = bytes[9] === 2; part.key = !!(bytes[10] & 1); }
+            if (!part) { part = { bytes: 0, got: 0, video: false, key: false, config: null }; parts.set(id, part); if (parts.size > 8) parts.delete(parts.keys().next().value); }
+            if (index === 0) { part.video = bytes[9] === 2; part.key = !!(bytes[10] & 1); if (bytes[9] === 1) part.config = []; }
+            if (part.config) part.config[index] = bytes.subarray(9);
             part.bytes += bytes.length - 9; part.got++;
             measurement.partialBytes = Math.max(measurement.partialBytes, [...parts.values()].reduce((sum, part) => sum + part.bytes, 0));
             if (part.got === count) {
               if (part.video) measurement.frames.push({ at: performance.now(), bytes: part.bytes - 12, key: part.key });
+              if (part.config) {
+                const config = new Uint8Array(part.bytes); let offset = 0;
+                for (const chunk of part.config) { config.set(chunk, offset); offset += chunk.length; }
+                record(config, 'webrtc');
+              }
               parts.delete(id);
             }
           });
@@ -221,6 +227,7 @@ try {
           });
           await viewer.goto(`${origin}/#token=${token}`);
           await viewer.waitForFunction(codec => elsewhere.store.get().streamState?.codec === codec && elsewhere.store.get().stats.frames > 5 && elsewhere.store.get().videoVia === 'webrtc', codec);
+          await viewer.evaluate(() => elsewhere.setStatsOn(true));
         }
         const consumerFiles = [];
         for (let index = 0; index < blockedCount; index++) {
@@ -324,7 +331,7 @@ try {
           server_transport_pending_bytes: distribution(fields('RTC output queue', 'transport_pending_bytes')), server_progress_age_ms: distribution(fields('RTC output queue', 'progress_age_ms')), all_queue_sessions: queueSessions,
           server_pacing_wait_ms: distribution(fields('RTC output queue', 'pacing_wait_us').map(value => value / 1000)),
           submit_to_packet_ms: distribution(fields('ffmpeg encoded', 'submit_to_packet_us').map(value => value / 1000)),
-          encoder_open_ms: distribution(fields('ffmpeg encoder open', 'open_us').map(value => value / 1000)), reopen_to_key_ms: distribution(reopenKeys.map(reopen => reopen.open_to_key_ms).filter(value => value !== null)), reopen_keys: reopenKeys, reopens: after.m.configs.length,
+          encoder_open_ms: distribution(fields('ffmpeg encoder open', 'open_us').map(value => value / 1000)), reopen_to_key_ms: distribution(reopenKeys.map(reopen => reopen.open_to_key_ms).filter(value => value !== null)), reopen_keys: reopenKeys, reopens: streamIds.size - 1,
           lost: after.state.stats.lost - before.state.stats.lost, dropped: after.state.stats.dropped - before.state.stats.dropped,
           decode_errors: after.state.stats.decodeErrors - before.state.stats.decodeErrors, key_requests: after.m.keyRequests,
           rtc_fraction: ticks.filter(tick => tick.via === 'webrtc').length / ticks.length,

@@ -1,7 +1,7 @@
 //! WebRTC data-channel transport for the video: the same messages the WebSocket carries, over a `video`
 //! data channel the browser opens (ordered, reliable), for viewers who need UDP to reach the desktop
 //! at all: through NAT, or through a TURN relay. It is a viewer's choice, not the default, because the
-//! socket carries the picture better under packet loss (measured in the README). str0m does ICE (lite,
+//! socket carries the picture better under packet loss (see `docs/stream-reliability.md`). str0m does ICE (lite,
 //! host candidates), DTLS and SCTP without I/O of its own; one hub task drives every session's peer
 //! connection over one UDP socket per local address (a received packet's destination must be one of the
 //! candidates, so a socket per address knows it). Signalling goes over the session's WebSocket (`RTC`
@@ -12,7 +12,8 @@
 //! is congestion to the session's rate controller; waiting for the pacing timer is not. A keyframe replaces whatever waits (the page needs it
 //! whatever else it gets, and a keyframe behind a queue on a lossy link is a stall of seconds; what was
 //! written of the frame in flight still has to go out), and a frame arriving at a full queue is dropped
-//! rather than waiting longer; either is a seq gap the page answers with a keyframe request. A fragment
+//! rather than waiting longer; either is a seq gap the page answers with a keyframe request. Configuration
+//! precedes each key on the same ordered channel, so accepted older video cannot cross a decoder change. A fragment
 //! on its way is retransmitted if it is lost, so what the page misses is what was dropped here, never
 //! what the network ate.
 
@@ -50,7 +51,7 @@ enum Msg {
     /// the session's own event queue).
     Offer { session: u64, sdp: String, g: u64, reply: mpsc::Sender<Bytes>, endpoint: Option<Vec<SocketAddr>> },
     /// A frame for a session's channel.
-    Frame { session: u64, data: Bytes, bitrate_kbps: u32 },
+    Frame { session: u64, config: Bytes, data: Bytes, bitrate_kbps: u32 },
     /// The session ended, or went back to its socket.
     Close { session: u64, g: Option<u64>, reply: Option<oneshot::Sender<bool>> },
 }
@@ -119,8 +120,8 @@ impl Hub {
 
     /// A frame for the session's channel; one that doesn't fit the hub's mailbox is dropped (the page asks
     /// for a keyframe when it sees the gap).
-    pub fn frame(&self, session: u64, data: Bytes, bitrate_kbps: u32) {
-        if self.tx.try_send(Msg::Frame { session, data, bitrate_kbps }).is_err() {
+    pub fn frame(&self, session: u64, config: Bytes, data: Bytes, bitrate_kbps: u32) {
+        if self.tx.try_send(Msg::Frame { session, config, data, bitrate_kbps }).is_err() {
             dropped(&self.open, session, 1);
         }
     }
@@ -188,8 +189,10 @@ struct Peer {
     channel: Option<ChannelId>,
     /// Numbers the fragmented messages, so the page can tell one frame's fragments from the next's.
     frame_id: u32,
-    /// Frames waiting for the send buffer, the front one `sent` fragments in since `front_since`.
+    /// Configuration and video waiting for the send buffer, the front message `sent` fragments in.
     queue: VecDeque<Bytes>,
+    /// Latest configuration admitted to the ordered channel, including its stream ID.
+    config: Option<Bytes>,
     sent: usize,
     front_since: Instant,
     progress: SendProgress,
@@ -308,7 +311,7 @@ async fn run(sockets: HashMap<SocketAddr, Arc<UdpSocket>>, mut rx: mpsc::Receive
             let alive = p.rtc.is_alive();
             if !alive {
                 if let Some(claim) = open.lock().unwrap().get_mut(id) { claim.active = false; }
-                let _ = p.reply.try_send(protocol::rtc(&serde_json::json!({ "close": true, "g": p.g, "reason": p.close_reason })));
+                let _ = notify_closed(p.reply.clone(), p.g, p.close_reason);
                 tracing::debug!(session = id, "WebRTC: peer connection over");
             }
             alive
@@ -343,26 +346,12 @@ async fn run(sockets: HashMap<SocketAddr, Arc<UdpSocket>>, mut rx: mpsc::Receive
                         }
                     }
                 }
-                Some(Msg::Frame { session, data, bitrate_kbps }) => {
+                Some(Msg::Frame { session, config, data, bitrate_kbps }) => {
                     if let Some(peer) = peers.get_mut(&session) && peer.channel.is_some() {
                         // New targets affect future charges; keys and encoder restarts retain pacing debt.
                         peer.pacer.bitrate_kbps = bitrate_kbps;
-                        // a keyframe replaces what waits, the frame in flight included (its number is spent)
-                        if data.get(1).is_some_and(|f| f & 1 != 0) {
-                            dropped(&open, session, peer.queue.len() as u32);
-                            peer.queue.clear();
-                            peer.sent = 0;
-                            peer.frame_id = peer.frame_id.wrapping_add(1);
-                        }
-                        if peer.queue.len() < QUEUE {
-                            peer.queue.push_back(data);
-                            if peer.queue.len() == 1 {
-                                peer.front_since = Instant::now();
-                            }
-                            let _ = flush(peer, &open, session);
-                        } else {
-                            dropped(&open, session, 1);
-                        }
+                        dropped(&open, session, enqueue(peer, config, data));
+                        let _ = flush(peer, &open, session);
                     }
                 }
                 Some(Msg::Close { session, g, reply }) => {
@@ -396,7 +385,7 @@ fn answer(sdp: &str, g: u64, addrs: &[SocketAddr], reply: mpsc::Sender<Bytes>, e
         None => answer,
     };
     let _ = reply.try_send(protocol::rtc(&serde_json::json!({ "answer": answer, "g": g })));
-    Ok(Peer { rtc, channel: None, frame_id: 0, queue: VecDeque::new(), sent: 0, front_since: Instant::now(), progress: SendProgress::default(), pacer: Pacer::new(Instant::now()), reply, g, close_reason: "Peer connection closed" })
+    Ok(Peer { rtc, channel: None, frame_id: 0, queue: VecDeque::new(), config: None, sent: 0, front_since: Instant::now(), progress: SendProgress::default(), pacer: Pacer::new(Instant::now()), reply, g, close_reason: "Peer connection closed" })
 }
 
 fn event(session: u64, peer: &mut Peer, e: Event, open: &Open) {
@@ -428,6 +417,36 @@ fn dropped(open: &Open, session: u64, count: u32) {
     if let Some(claim) = open.lock().unwrap().get_mut(&session) {
         claim.dropped += count;
     }
+}
+
+/// A full session event queue must not lose the notice that gives video back to the socket.
+/// This task retains no peer or video buffers and ends when the session drains or drops its receiver.
+fn notify_closed(reply: mpsc::Sender<Bytes>, g: u64, reason: &'static str) -> tokio::task::JoinHandle<()> {
+    let message = protocol::rtc(&serde_json::json!({ "close": true, "g": g, "reason": reason }));
+    tokio::spawn(async move { let _ = reply.send(message).await; })
+}
+
+/// Configuration and video share the channel's order. Every new configuration and every key replaces
+/// unsent video, with its configuration first. A delta can announce a new configuration if the hub's
+/// mailbox dropped its first key; the browser then requests another key from the correct stream.
+fn enqueue(peer: &mut Peer, config: Bytes, data: Bytes) -> u32 {
+    let boundary = peer.config.as_ref() != Some(&config) || data.get(1).is_some_and(|flags| flags & 1 != 0);
+    let discarded = if boundary {
+        let discarded = peer.queue.iter().filter(|message| message.first() == Some(&protocol::VIDEO)).count() as u32;
+        peer.queue.clear();
+        peer.sent = 0;
+        peer.frame_id = peer.frame_id.wrapping_add(1);
+        peer.front_since = Instant::now();
+        peer.queue.push_back(config.clone());
+        peer.config = Some(config);
+        discarded
+    } else { 0 };
+    if peer.queue.iter().filter(|message| message.first() == Some(&protocol::VIDEO)).count() >= QUEUE {
+        return discarded + 1;
+    }
+    if peer.queue.is_empty() { peer.front_since = Instant::now(); }
+    peer.queue.push_back(data);
+    discarded
 }
 
 /// The queue's frames, front first, as fragments `[FRAGMENT][u32 id][u16 index][u16 count]` then the bytes,
@@ -470,7 +489,7 @@ fn flush(peer: &mut Peer, open: &Open, session: u64) -> Option<Instant> {
         if acknowledged { claim.blocked = false; }
         if blocked { claim.blocked = true; }
     }
-    tracing::trace!(session, queued_frames = peer.queue.len(),
+    tracing::trace!(session, queued_frames = peer.queue.iter().filter(|message| message.first() == Some(&protocol::VIDEO)).count(),
         queued_bytes = peer.queue.iter().map(|frame| frame.len()).sum::<usize>(),
         sent_bytes = peer.queue.front().map_or(0, |frame| (peer.sent * FRAGMENT).min(frame.len())),
         front_age_ms = if peer.queue.is_empty() { 0 } else { peer.front_since.elapsed().as_millis() as u64 },
@@ -486,6 +505,66 @@ fn flush(peer: &mut Peer, open: &Open, session: u64) -> Option<Instant> {
 #[cfg(test)]
 mod endpoint_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn close_notice_survives_full_events_and_ends_with_the_session() {
+        let (reply, mut events) = mpsc::channel(1);
+        reply.send(Bytes::from_static(b"full")).await.unwrap();
+        let notice = notify_closed(reply.clone(), 7, "Server queue stalled");
+        tokio::task::yield_now().await;
+        assert!(!notice.is_finished());
+        assert_eq!(events.recv().await.unwrap(), Bytes::from_static(b"full"));
+        let message = tokio::time::timeout(Duration::from_millis(100), events.recv()).await.unwrap().unwrap();
+        assert_eq!(message, protocol::rtc(&serde_json::json!({ "close": true, "g": 7, "reason": "Server queue stalled" })));
+        notice.await.unwrap();
+
+        reply.send(Bytes::from_static(b"full")).await.unwrap();
+        let notice = notify_closed(reply, 8, "Peer connection closed");
+        tokio::task::yield_now().await;
+        assert!(!notice.is_finished());
+        drop(events);
+        tokio::time::timeout(Duration::from_millis(100), notice).await.unwrap().unwrap();
+    }
+
+    #[test]
+    fn configuration_survives_missing_keys_replacement_and_video_pressure() {
+        let now = Instant::now();
+        let (reply, _events) = mpsc::channel(1);
+        let mut peer = Peer {
+            rtc: Rtc::builder().build(now), channel: None, frame_id: 0, queue: VecDeque::new(), config: None,
+            sent: 0, front_since: now, progress: SendProgress { buffered: 100, since: Some(now) },
+            pacer: Pacer::new(now), reply, g: 1, close_reason: "Peer connection closed",
+        };
+        peer.pacer.next = now + Duration::from_secs(1);
+        let config = Bytes::from_static(b"\x01config");
+        let delta = Bytes::from_static(&[protocol::VIDEO, 0]);
+        let key = Bytes::from_static(&[protocol::VIDEO, 1]);
+
+        // A full hub mailbox can lose the first key; the next admitted delta still announces its configuration.
+        let (tx, mut rx) = mpsc::channel(1);
+        let hub = Hub { tx, open: Default::default(), ice_servers: Default::default(), page_endpoint: true, page_port: None };
+        assert!(hub.tx.try_send(Msg::Close { session: 1, g: None, reply: None }).is_ok());
+        hub.frame(1, config.clone(), key.clone(), 8000);
+        rx.try_recv().unwrap();
+        hub.frame(1, config.clone(), delta.clone(), 8000);
+        let Msg::Frame { config: delivered, data, .. } = rx.try_recv().unwrap() else { panic!("frame expected") };
+        assert_eq!(enqueue(&mut peer, delivered, data), 0);
+        assert_eq!(peer.queue, VecDeque::from([config.clone(), delta.clone()]));
+        for _ in 1..QUEUE { assert_eq!(enqueue(&mut peer, config.clone(), delta.clone()), 0); }
+        assert_eq!(peer.queue.len(), QUEUE + 1);
+        assert_eq!(enqueue(&mut peer, config.clone(), delta), 1);
+
+        assert_eq!(enqueue(&mut peer, config.clone(), key.clone()), QUEUE as u32);
+        assert_eq!(peer.queue, VecDeque::from([config.clone(), key.clone()]));
+        // A repeated key carries configuration even after the previous copy entered SCTP.
+        peer.queue.pop_front();
+        peer.sent = 1;
+        assert_eq!(enqueue(&mut peer, config.clone(), key.clone()), 1);
+        assert_eq!(peer.queue, VecDeque::from([config, key]));
+        assert_eq!(peer.sent, 0);
+        assert_eq!(peer.pacer.next, now + Duration::from_secs(1));
+        assert_eq!(peer.progress.since, Some(now));
+    }
 
     #[test]
     fn fragments_are_paced_without_idle_credit_or_target_reset() {

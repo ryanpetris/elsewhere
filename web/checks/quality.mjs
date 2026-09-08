@@ -40,7 +40,9 @@ try {
       window.RTCPeerConnection = class extends OriginalPeer {
         createDataChannel(...args) {
           const channel = super.createDataChannel(...args); window.qualityChannel = channel;
-          channel.addEventListener('message', () => window.qualityRtcFrames++);
+          channel.addEventListener('message', ({ data }) => {
+            if (new DataView(data).getUint16(5, true) === 0 && new Uint8Array(data)[9] === 2) window.qualityRtcFrames++;
+          });
           return channel;
         }
       };
