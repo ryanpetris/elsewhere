@@ -120,11 +120,23 @@ try {
       browser = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--no-sandbox', '--disable-background-timer-throttling'] });
       const context = await browser.newContext({ viewport: { width: 1600, height: 1200 } });
       const page = await context.newPage();
+      const mediaProperties = [];
+      const observeDecoder = async (viewer, index) => {
+        const session = await viewer.context().newCDPSession(viewer);
+        session.on('Media.playerPropertiesChanged', event => {
+          // Other media properties can contain URLs with authentication tokens.
+          const properties = event.properties.filter(({ name }) => ['kVideoDecoderName', 'kIsPlatformVideoDecoder'].includes(name));
+          if (properties.length) mediaProperties.push({ at: Date.now(), viewer: index, playerId: event.playerId, properties });
+        });
+        await session.send('Media.enable');
+      };
+      await observeDecoder(page, 0);
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
       await context.addInitScript(({ width, height }) => {
-        window.measurement = null; window.captures = {};
+        window.measurement = null; window.captures = {}; window.markerReads = [];
         window.readMarker = context => {
+          const start = performance.now();
           const pixels = context.getImageData(8, 8, 768, 40).data;
           const read = (bits, row) => {
             let value = 0;
@@ -134,7 +146,9 @@ try {
             }
             return value;
           };
-          return { timestamp: read(48, 0), sequence: read(32, 24) };
+          const marker = { timestamp: read(48, 0), sequence: read(32, 24) };
+          markerReads.push(performance.now() - start);
+          return marker;
         };
         const draw = CanvasRenderingContext2D.prototype.drawImage;
         CanvasRenderingContext2D.prototype.drawImage = function(source, ...args) {
@@ -214,6 +228,7 @@ try {
       await scene.waitForFunction(() => typeof drawScene === 'function');
       const available = await page.evaluate(() => elsewhere.store.get().decodable);
       for (const codec of codecs) for (const selectedScene of scenes) for (let repeat = 1; repeat <= repeats; repeat++) {
+        const mediaStart = mediaProperties.length;
         assert.ok(available.includes(codec), `browser must decode ${codec}`);
         await scene.evaluate(selectedScene => { window.scene = selectedScene; window.sequence = 0; }, selectedScene);
         await page.evaluate(codec => { elsewhere.setChoice({ codec, quality: 'medium', effort: 'fast' }); elsewhere.setTransport('webrtc'); }, codec);
@@ -222,6 +237,7 @@ try {
         await page.evaluate(() => elsewhere.setStatsOn(true));
         for (let index = 1; index < viewerCount; index++) {
           const viewer = await page.context().newPage(); extraViewers.push(viewer);
+          await observeDecoder(viewer, index);
           await viewer.setViewportSize({ width: Math.max(1600, width + 320), height: Math.max(1200, height + 240) });
           viewer.on('pageerror', error => errors.push(error.message));
           await viewer.addInitScript(({ width, height }) => {
@@ -260,10 +276,10 @@ try {
         const offset = (await stat(directory + '/server.log')).size;
         const qdiscBefore = qdiscs();
         const otherBefore = await Promise.all(extraViewers.map(viewer => viewer.evaluate(() => {
-          window.viewerPaints = []; return { start: performance.now(), state: elsewhere.store.get(), visibility: document.visibilityState };
+          window.viewerPaints = []; window.markerReads = []; return { start: performance.now(), state: elsewhere.store.get(), visibility: document.visibilityState };
         })));
         const before = await page.evaluate(scene => {
-          window.captures = {}; window.measurement = { scene, start: performance.now(), paints: [], arrivals: [], frames: [], configs: [], invalid: 0, partialBytes: 0, keyRequests: 0 };
+          window.captures = {}; window.markerReads = []; window.measurement = { scene, start: performance.now(), paints: [], arrivals: [], frames: [], configs: [], invalid: 0, partialBytes: 0, keyRequests: 0 };
           return { at: Date.now(), state: elsewhere.store.get() };
         }, selectedScene);
         const events = [], ticks = []; let blocked = false, restored = false, reduced = false, recovered = false;
@@ -279,11 +295,12 @@ try {
           ticks.push({ ...state, viewers, qdisc: qdiscs() });
         }
         if (blocked && !restored) blockUdp(false);
-        const after = await page.evaluate(() => { const m = measurement; measurement = null; return { at: Date.now(), now: performance.now(), m, state: elsewhere.store.get() }; });
+        const after = await page.evaluate(() => { const m = measurement; measurement = null; return { at: Date.now(), now: performance.now(), m, markerReads, state: elsewhere.store.get() }; });
         const qdiscAfter = qdiscs();
         const otherAfter = await Promise.all(extraViewers.map(viewer => viewer.evaluate(() => {
-          const paints = viewerPaints; viewerPaints = null; return { end: performance.now(), paints, state: elsewhere.store.get(), visibility: document.visibilityState };
+          const paints = viewerPaints; viewerPaints = null; return { end: performance.now(), paints, markerReads, state: elsewhere.store.get(), visibility: document.visibilityState };
         })));
+        const decoderProperties = mediaProperties.slice(mediaStart);
         const consumersAlive = consumers.every(consumer => consumer.exitCode === null && consumer.signalCode === null);
         for (const consumer of consumers.splice(0)) { consumer.kill('SIGTERM'); await new Promise(resolve => { if (consumer.exitCode !== null || consumer.signalCode !== null) resolve(); else consumer.once('exit', resolve); }); }
         for (const file of consumerLogs.splice(0)) await file.close();
@@ -334,6 +351,7 @@ try {
           target_kbps: distribution(ticks.map(tick => tick.target)), target_kbps_min: Math.min(...ticks.map(tick => tick.target)),
           at_ceiling_fraction: ticks.filter(tick => tick.target === ceiling).length / ticks.length, delivered_fps: paints.length / duration,
           age_ms: distribution(valid.map(paint => paint.age)), gap_ms: distribution(gaps), gaps_over_250ms: gaps.filter(gap => gap > 250).length,
+          marker_read_ms: distribution(after.markerReads),
           gaps_over_1s: gaps.filter(gap => gap > 1000).length, invalid_markers: after.m.invalid,
           source_sequence_fps: span / duration, source_sequence_gaps: span - new Set(sequences).size,
           sequence_regressions: sequences.filter((seq, i) => i && seq < sequences[i - 1]).length,
@@ -353,7 +371,8 @@ try {
           lost: after.state.stats.lost - before.state.stats.lost, dropped: after.state.stats.dropped - before.state.stats.dropped,
           decode_errors: after.state.stats.decodeErrors - before.state.stats.decodeErrors, key_requests: after.m.keyRequests,
           rtc_fraction: ticks.filter(tick => tick.via === 'webrtc').length / ticks.length,
-          other_viewers: otherAfter.map(({ state, paints, end, visibility }, index) => ({ delivered_fps: paints.length / duration,
+          other_viewers: otherAfter.map(({ state, paints, end, visibility, markerReads }, index) => ({ delivered_fps: paints.length / duration,
+            marker_read_ms: distribution(markerReads),
             width: state.stream.width, height: state.stream.height,
             gap_ms: distribution(paintGaps(otherBefore[index].start, paints.map(paint => paint.at), end)),
             age_ms: distribution(paints.filter(paint => paint.age >= 0 && paint.age < 30000).map(paint => paint.age)),
@@ -423,6 +442,7 @@ try {
         results.push(row);
         await writeFile(root + '/results.json', JSON.stringify(results, null, 2));
         await writeFile(`${directory}/${name}.json`, JSON.stringify({ row, ticks, events, consumerEvents,
+          decoder_properties: decoderProperties,
           sample: { wall_start: before.at, wall_end: after.at, monotonic_start: after.m.start, monotonic_end: after.now },
           measurement: after.m, rates, encodedRates, qdiscBefore, qdiscAfter }, null, 2));
         await writeFile(`${directory}/${name}.log`, text);

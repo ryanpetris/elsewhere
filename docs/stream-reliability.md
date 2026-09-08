@@ -270,6 +270,81 @@ encoded picture was 266 kB. Peak encoded rates were 23.24 Mbit/s in a fixed 100 
 during recovery; callback batches are not instantaneous link-throughput measurements. The maximum
 paint gaps and displayed ages above retain the visible cost of that recovery.
 
+## Quiet three-viewer follow-up
+
+A focused retest for [issue #73](https://github.com/ryanpetris/elsewhere/issues/73) uses the
+post-v0.6.0 application with binary hash prefix `859a6dcd`, FFmpeg 9.0.1 and Chromium 152.
+It retains native 1920×1080 geometry, three viewer pages in one browser, Fast encoding effort,
+the 8 Mbit/s ceiling, and the shared 36 Mbit/s, 20 ms, 300-packet link. Each sample lasts
+60 seconds after six seconds of warmup. No builds or other tests run concurrently.
+
+Before retesting, process inspection found two orphaned keyboard probes from completed file-browser
+checks, each consuming roughly one CPU core. Stopping those test-owned processes reduced sampled
+whole-machine CPU activity from 10.8% to 1.7%. The file-browser check now owns and terminates its
+probe on success and failure. Application changes and the execution environment also differ from
+the earlier cohorts, so this observation does not establish the cause of their delays.
+
+The initial quiet samples retain the full marker readback and timing instrumentation:
+
+| Codec | Scene | Per-viewer p99 age range (ms) | Maximum age (ms) | Worst paint gap (ms) | Painted frames/s |
+|---|---|---:|---:|---:|---:|
+| AV1 | Cuts | 270–284 | 450 | 477.8 | 50.4–51.7 |
+| AV1 | Game-like motion | 155–157 | 171 | 47.5 | 52.9–53.3 |
+| AV1 | Video-like motion | 241–249 | 565 | 427.0 | 52.2–52.4 |
+| H.264 | Game-like motion | 146–147 | 183 | 63.6 | 53.1–53.5 |
+| H.264 | Video-like motion | 196–201 | 224 | 122.5 | 53.0–53.5 |
+| AV1 | Cuts, fresh diagnostic browser | 267–272 | 454 | 324.6 | 51.6–52.1 |
+| AV1 | Cuts, same-browser repeat | 266–274 | 447 | 342.2 | 51.5–51.9 |
+
+All seven samples pass the geometry, clock-marker, decoder-error and progress checks, with zero
+qdisc drops and no observed fallback. Primary decoder-drop counts are zero. Each secondary AV1
+cuts viewer in the first run records one decoder-pressure drop; one ends at 4 Mbit/s. The other
+ending targets are 8 Mbit/s. The two additional cuts samples record no decoder-pressure drops.
+H.264 video and the second cuts diagnostic record two and four primary protocol sequence gaps,
+respectively, which are not packet-loss counts. No viewer records an incomplete-assembly count.
+
+The same-browser cuts repeat retains the source browser, server and viewer browser but reloads
+the primary page and recreates secondary pages, matching the maintained check. Its timing stays
+close to the fresh diagnostic browser. Across the two repeats, native encoding p99 is below 20 ms,
+primary server front-frame age peaks at 256 ms, and sampled browser decoder queues reach four.
+The worst one-second receive-to-output p95 is 103 ms and output-to-paint p95 is 23 ms across
+all three pages. This does not reproduce the earlier second-long downstream backlog.
+
+The diagnostic check records Chromium's actual `kVideoDecoderName` and
+`kIsPlatformVideoDecoder` properties through the
+[DevTools Media domain](https://chromedevtools.github.io/devtools-protocol/tot/Media/).
+Only those properties are saved, excluding media URLs. The H.264 samples use
+`FFmpegVideoDecoder` with platform decoding false. The AV1 cuts follow-up uses
+`Dav1dVideoDecoder` with platform decoding false. These identify software browser decoders;
+the native encoders still use VAAPI. Browser capability probes alone do not identify the selected
+decoder. Properties include initialization and warmup; their timestamps distinguish these from
+the timing sample.
+
+Direct clock-marker readback and parsing take about 0.2 ms at the median and 0.3 ms at p95 in
+the H.264 samples and AV1 cuts repeats. This measures the call itself, including any
+synchronous wait, rather than every effect of enabling canvas readback. Receive-to-output timing
+also includes decoder queueing and callback scheduling; output-to-paint includes drawing and
+marker readback. Neither is a measurement of decoder execution alone.
+
+A final 60-second AV1 cuts comparison uses one viewer with the same 36 Mbit/s link and full
+instrumentation. It delivers 52.5 frames/s, p99 age 250 ms, maximum age 419 ms and a 308.5 ms
+maximum paint gap, ending at 8 Mbit/s without decoder drops or fallback. Marker-read median/p95
+is 0.1/0.2 ms. The three-viewer repeats above reach 266–274 ms p99 age at 51.5–52.1 frames/s.
+This measures the aggregate change in viewers, encoders and link demand; it does not isolate
+browser-process sharing from CPU or GPU contention. It supplies no evidence of a load threshold.
+
+An incomplete assembly means the client gave up on a partially received application frame.
+The server can deliberately replace a partly sent frame with a new keyframe. The reliable ordered
+data channel also retransmits network loss, which can delay later delivery. An incomplete count
+therefore cannot identify physical packet loss, and zero qdisc drops do not rule out loss elsewhere.
+The earlier fallback receipts do not retain enough triggering-tick state to attribute every
+fallback interval. The quiet follow-up provides no repeated fallback episode to correlate.
+
+These focused samples do not reproduce the earlier multi-second delay. They do not establish a
+supported three-viewer load limit or isolate the effects of shared browser, CPU and GPU work.
+The earlier observations remain valid for their recorded conditions. No playback policy change
+is justified by this retest, and the controlled 720p timing gates remain unchanged.
+
 ## Allocator reuse across viewer sessions
 
 On glibc builds, the desktop server defaults to two allocation arenas before starting its worker
