@@ -7,9 +7,9 @@
 //! candidates, so a socket per address knows it). Signalling goes over the session's WebSocket (`RTC`
 //! messages: the browser's offer, our answer); the frame path in `ws.rs` hands frames to the hub while
 //! the session's channel is open and to the socket otherwise. A frame goes as numbered fragments the page
-//! reassembles, written as the SCTP send buffer (128 kB, freed by the browser's acknowledgements) has
-//! room; frames wait their turn in a queue as they would for the socket, and the queue's depth is
-//! congestion to the session's rate controller. A keyframe replaces whatever waits (the page needs it
+//! reassembles, admitted one fragment at a time at a rate derived from the encoder target. The SCTP
+//! send buffer (128 kB, freed by the browser's acknowledgements) must also have room. A refused write
+//! is congestion to the session's rate controller; waiting for the pacing timer is not. A keyframe replaces whatever waits (the page needs it
 //! whatever else it gets, and a keyframe behind a queue on a lossy link is a stall of seconds; what was
 //! written of the frame in flight still has to go out), and a frame arriving at a full queue is dropped
 //! rather than waiting longer; either is a seq gap the page answers with a keyframe request. A fragment
@@ -50,7 +50,7 @@ enum Msg {
     /// the session's own event queue).
     Offer { session: u64, sdp: String, g: u64, reply: mpsc::Sender<Bytes>, endpoint: Option<Vec<SocketAddr>> },
     /// A frame for a session's channel.
-    Frame { session: u64, data: Bytes },
+    Frame { session: u64, data: Bytes, bitrate_kbps: u32 },
     /// The session ended, or went back to its socket.
     Close { session: u64, g: Option<u64>, reply: Option<oneshot::Sender<bool>> },
 }
@@ -96,10 +96,9 @@ impl Hub {
         Ok(hub)
     }
 
-    /// The session's channel, while it is open, under pressure: frames dropped since the last call, and
-    /// frames waiting in its queue now; congestion, to its rate controller.
-    pub fn pressure(&self, session: u64) -> Option<(u32, usize)> {
-        self.open.lock().unwrap().get_mut(&session).filter(|c| c.active).map(|c| (std::mem::take(&mut c.dropped), c.queued))
+    /// Frames dropped since the last call and whether the native send buffer refused a write.
+    pub fn pressure(&self, session: u64) -> Option<(u32, bool)> {
+        self.open.lock().unwrap().get_mut(&session).filter(|c| c.active).map(|c| (std::mem::take(&mut c.dropped), c.blocked))
     }
 
     /// Signalling waits for room in the queue: an offer without an answer, or a close that never arrives,
@@ -120,8 +119,8 @@ impl Hub {
 
     /// A frame for the session's channel; one that doesn't fit the hub's mailbox is dropped (the page asks
     /// for a keyframe when it sees the gap).
-    pub fn frame(&self, session: u64, data: Bytes) {
-        if self.tx.try_send(Msg::Frame { session, data }).is_err() {
+    pub fn frame(&self, session: u64, data: Bytes, bitrate_kbps: u32) {
+        if self.tx.try_send(Msg::Frame { session, data, bitrate_kbps }).is_err() {
             dropped(&self.open, session, 1);
         }
     }
@@ -194,6 +193,7 @@ struct Peer {
     sent: usize,
     front_since: Instant,
     progress: SendProgress,
+    pacer: Pacer,
     /// The session's socket and the offer's number, for the word that the channel is given up.
     reply: mpsc::Sender<Bytes>,
     g: u64,
@@ -203,6 +203,22 @@ struct Peer {
 /// A frame waiting this long, or pending SCTP bytes without acknowledgements this long, gives the
 /// video back to the socket.
 const STALL: Duration = Duration::from_secs(3);
+
+struct Pacer {
+    next: Instant,
+    bitrate_kbps: u32,
+}
+
+impl Pacer {
+    fn new(now: Instant) -> Self { Self { next: now, bitrate_kbps: 1 } }
+    fn ready(&self, now: Instant) -> bool { now >= self.next }
+    fn sent(&mut self, bytes: usize, now: Instant) {
+        // Allow 25% above the encoder target, charging 10% for wire overhead: 1.10 / 1.25 = 22/25.
+        // One fragment is the entire burst allowance; idle time never accumulates credit.
+        let nanos = (bytes as u64 * 8 * 1_000_000 * 22).div_ceil(u64::from(self.bitrate_kbps.max(1)) * 25);
+        self.next = now + Duration::from_nanos(nanos);
+    }
+}
 
 #[derive(Default)]
 struct SendProgress {
@@ -233,7 +249,7 @@ struct Claim {
     g: u64,
     active: bool,
     dropped: u32,
-    queued: usize,
+    blocked: bool,
 }
 type Open = Mutex<HashMap<u64, Claim>>;
 
@@ -260,7 +276,7 @@ async fn run(sockets: HashMap<SocketAddr, Arc<UdpSocket>>, mut rx: mpsc::Receive
         // a frame waiting for room in the send buffer goes on first (acknowledgements came in as datagrams)
         let mut deadline = Instant::now() + Duration::from_secs(1);
         for (id, peer) in peers.iter_mut() {
-            flush(peer, &open, *id);
+            if let Some(paced) = flush(peer, &open, *id) { deadline = deadline.min(paced); }
             if (!peer.queue.is_empty() && peer.front_since.elapsed() >= STALL)
                 || peer.progress.since.is_some_and(|since| since.elapsed() >= STALL)
             {
@@ -327,8 +343,10 @@ async fn run(sockets: HashMap<SocketAddr, Arc<UdpSocket>>, mut rx: mpsc::Receive
                         }
                     }
                 }
-                Some(Msg::Frame { session, data }) => {
+                Some(Msg::Frame { session, data, bitrate_kbps }) => {
                     if let Some(peer) = peers.get_mut(&session) && peer.channel.is_some() {
+                        // New targets affect future charges; keys and encoder restarts retain pacing debt.
+                        peer.pacer.bitrate_kbps = bitrate_kbps;
                         // a keyframe replaces what waits, the frame in flight included (its number is spent)
                         if data.get(1).is_some_and(|f| f & 1 != 0) {
                             dropped(&open, session, peer.queue.len() as u32);
@@ -341,7 +359,7 @@ async fn run(sockets: HashMap<SocketAddr, Arc<UdpSocket>>, mut rx: mpsc::Receive
                             if peer.queue.len() == 1 {
                                 peer.front_since = Instant::now();
                             }
-                            flush(peer, &open, session);
+                            let _ = flush(peer, &open, session);
                         } else {
                             dropped(&open, session, 1);
                         }
@@ -378,7 +396,7 @@ fn answer(sdp: &str, g: u64, addrs: &[SocketAddr], reply: mpsc::Sender<Bytes>, e
         None => answer,
     };
     let _ = reply.try_send(protocol::rtc(&serde_json::json!({ "answer": answer, "g": g })));
-    Ok(Peer { rtc, channel: None, frame_id: 0, queue: VecDeque::new(), sent: 0, front_since: Instant::now(), progress: SendProgress::default(), reply, g, close_reason: "Peer connection closed" })
+    Ok(Peer { rtc, channel: None, frame_id: 0, queue: VecDeque::new(), sent: 0, front_since: Instant::now(), progress: SendProgress::default(), pacer: Pacer::new(Instant::now()), reply, g, close_reason: "Peer connection closed" })
 }
 
 fn event(session: u64, peer: &mut Peer, e: Event, open: &Open) {
@@ -386,7 +404,7 @@ fn event(session: u64, peer: &mut Peer, e: Event, open: &Open) {
         Event::ChannelOpen(cid, label) => {
             tracing::info!(session, label, "WebRTC: data channel open");
             peer.channel = Some(cid);
-            open.lock().unwrap().insert(session, Claim { g: peer.g, active: true, dropped: 0, queued: 0 });
+            open.lock().unwrap().insert(session, Claim { g: peer.g, active: true, dropped: 0, blocked: false });
         }
         Event::ChannelClose(cid) => {
             if peer.channel == Some(cid) {
@@ -413,15 +431,18 @@ fn dropped(open: &Open, session: u64, count: u32) {
 }
 
 /// The queue's frames, front first, as fragments `[FRAGMENT][u32 id][u16 index][u16 count]` then the bytes,
-/// as far as the send buffer takes them; the rest waits for the next round. The depth left is the
-/// session's to see.
-fn flush(peer: &mut Peer, open: &Open, session: u64) {
+/// at their pacing deadlines while the send buffer takes them; the rest waits for the next round.
+fn flush(peer: &mut Peer, open: &Open, session: u64) -> Option<Instant> {
     let buffered = peer.channel.and_then(|cid| peer.rtc.channel(cid)).map_or(0, |mut channel| channel.buffered_amount());
+    let acknowledged = buffered < peer.progress.buffered;
     peer.progress.observe(buffered, !peer.queue.is_empty(), Instant::now());
+    let mut blocked = false;
+    let mut deadline = None;
     let mut msg = Vec::with_capacity(FRAGMENT + 9);
     'frames: while let (Some(cid), Some(data)) = (peer.channel, peer.queue.front()) {
         let count = data.chunks(FRAGMENT).count();
         while peer.sent < count {
+            if !peer.pacer.ready(Instant::now()) { deadline = Some(peer.pacer.next); break 'frames; }
             let chunk = &data[peer.sent * FRAGMENT..data.len().min((peer.sent + 1) * FRAGMENT)];
             msg.clear();
             msg.push(protocol::FRAGMENT);
@@ -431,9 +452,11 @@ fn flush(peer: &mut Peer, open: &Open, session: u64) {
             msg.extend_from_slice(chunk);
             let Some(mut channel) = peer.rtc.channel(cid) else { break 'frames };
             match channel.write(true, &msg) {
-                Ok(true) => peer.sent += 1,
-                Ok(false) => break 'frames, // no room: the browser's acknowledgements make some
-                Err(_) => break 'frames,    // the frame stays at the front, and a channel that keeps refusing is given up above
+                Ok(true) => {
+                    peer.sent += 1;
+                    peer.pacer.sent(msg.len(), Instant::now());
+                }
+                Ok(false) | Err(_) => { blocked = true; break 'frames; }
             }
         }
         peer.queue.pop_front();
@@ -444,20 +467,56 @@ fn flush(peer: &mut Peer, open: &Open, session: u64) {
     let buffered = peer.channel.and_then(|cid| peer.rtc.channel(cid)).map_or(0, |mut channel| channel.buffered_amount());
     peer.progress.observe(buffered, !peer.queue.is_empty(), Instant::now());
     if let Some(claim) = open.lock().unwrap().get_mut(&session) {
-        claim.queued = peer.queue.len();
+        if acknowledged { claim.blocked = false; }
+        if blocked { claim.blocked = true; }
     }
     tracing::trace!(session, queued_frames = peer.queue.len(),
         queued_bytes = peer.queue.iter().map(|frame| frame.len()).sum::<usize>(),
         sent_bytes = peer.queue.front().map_or(0, |frame| (peer.sent * FRAGMENT).min(frame.len())),
         front_age_ms = if peer.queue.is_empty() { 0 } else { peer.front_since.elapsed().as_millis() as u64 },
         transport_pending_bytes = buffered,
+        target_kbps = peer.pacer.bitrate_kbps,
+        native_write_blocked = blocked,
+        pacing_wait_us = peer.pacer.next.saturating_duration_since(Instant::now()).as_micros() as u64,
         progress_age_ms = peer.progress.since.map_or(0, |since| since.elapsed().as_millis() as u64),
         "RTC output queue");
+    deadline
 }
 
 #[cfg(test)]
 mod endpoint_tests {
     use super::*;
+
+    #[test]
+    fn fragments_are_paced_without_idle_credit_or_target_reset() {
+        let now = Instant::now();
+        let mut pacer = Pacer::new(now);
+        pacer.bitrate_kbps = 8000;
+        assert!(pacer.ready(now));
+        pacer.sent(FRAGMENT + 9, now);
+        let due = pacer.next;
+        assert_eq!(due - now, Duration::from_nanos(14_425_840));
+        assert!(!pacer.ready(due - Duration::from_nanos(1)));
+        assert!(pacer.ready(due));
+
+        // Reopening or replacing a key changes neither the peer nor its existing deadline.
+        // Lowering the target preserves that debt; the next accepted fragment uses the new rate.
+        pacer.bitrate_kbps = 1000;
+        assert_eq!(pacer.next, due);
+        pacer.sent(FRAGMENT + 9, due);
+        assert_eq!(pacer.next - due, Duration::from_nanos(115_406_720));
+
+        let later = now + Duration::from_secs(10);
+        assert!(pacer.ready(later));
+        pacer.sent(FRAGMENT + 9, later);
+        assert!(!pacer.ready(later));
+        assert_eq!(pacer.next - later, Duration::from_nanos(115_406_720));
+        // Zero is guarded at this internal boundary, and every accepted byte costs time.
+        let due = pacer.next;
+        pacer.bitrate_kbps = 0;
+        pacer.sent(1, due);
+        assert_eq!(pacer.next - due, Duration::from_micros(7040));
+    }
 
     #[test]
     fn pending_transport_deadline_survives_replacement_and_idle_frames() {

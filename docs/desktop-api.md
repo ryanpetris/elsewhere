@@ -403,8 +403,9 @@ way window streams do; audio and events are broadcast with `try_send`. A session
 WebRTC data channel instead while one is open (`rtc.rs`: the page's offer arrives as an `Rtc` message,
 the page includes its hostname and port in the offer, which the server resolves for the answer
 unless `--rtc-addr` sets the advertised endpoint. The hub answers as an ICE-lite str0m peer. The hub drives every
-session's peer connection over one UDP socket per local address, and fragments frames into 16 kB
-channel messages; `Hub::is_open` says whether a session's channel is up; window sessions use the same
+session's peer connection over one UDP socket per local address, and paces frame-data fragments of
+up to 16 KiB plus a nine-byte header using each viewer's encoder target; `Hub::pressure` reports active channels and
+their drops or native send-buffer blockage; window sessions use the same
 hub under keys with the top bit set); a channel that closes, a `{"close": true}`, or the session's end
 drops the peer. The controller's `Mic` packets
 go to `Config::mic`, the channel `elsewhere-stream`'s `audio_sink` plays into the microphone sink (`elsewhere`

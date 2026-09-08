@@ -210,25 +210,15 @@ HTTPS hostname, TLS termination with `--no-tls`, and separate UDP ports for opti
 The video travels on the WebSocket. A viewer can move it to a WebRTC data channel (UDP, ordered and
 reliable) with the Transport select in the status bar. The page offers and the server answers with
 candidates for the page's hostname and port, with `--rtc-port` overriding the port and `--rtc-addr` overriding the address. The frames move to the channel once it opens; input, audio, events and the signalling
-stay on the WebSocket either way, so the socket is needed whatever carries the video. Measured against
-each other on a container link with a 4 Mbit/s desktop stream under an 8 Mbit/s Medium ceiling, the two
-are even on a clean link and the channel is behind under packet loss, which is why the socket carries
-the video unless the channel is picked:
+stay on the WebSocket either way, so the socket is needed whatever carries the video.
 
-| link | WebSocket | data channel |
-| --- | --- | --- |
-| clean, or 20 ms delay | 56 fps, 23–37 ms longest gap | 56 fps, 23 ms |
-| 0.5 % loss | 56 fps, 36 ms | 52–56 fps, a one-second gap in one run of two |
-| 2 % loss, 20 ms delay | 56 fps, 60 ms | 24–26 fps, gaps over a second, then given up |
-| 1 % loss, 100 ms delay | 26–38 fps, 277 ms, at the 1 Mbit/s floor | 16–21 fps, gaps of a second, then given up |
-
-TCP retransmits a lost packet and the picture barely notices; the channel's SCTP waits a second at the
-least before it retransmits (sctp-proto's minimum RTO), its send buffer fills, and a keyframe behind it
-is a stall of seconds. So a channel that loses or holds up
-frames (half a second and more) in three of ten seconds, or holds one frame for three seconds, is given up:
-the video returns to the socket and recovery starts, with WebRTC still selected. What the channel offers is smoother pacing on a clean link (the socket's frames bunch behind
-TCP's acknowledgements; Firefox showed a 58 ms longest gap on the socket against 23 ms on the channel)
-and a path through a TURN relay when direct UDP is blocked.
+The server paces data-channel fragments according to each viewer's encoder target to limit bursts.
+The channel remains ordered and reliable: missing packets can hold up later video until SCTP
+retransmits them. Lost frames or arrival gaps over half a second caused by the link in three of ten
+seconds trigger fallback to the socket. Pending video with no byte acknowledgements for three
+seconds, or a frame waiting that long at the server queue's front, also triggers fallback. Encoder
+restarts preserve the acknowledgement deadline. An idle channel stays open.
+See [stream reliability](docs/stream-reliability.md) for the controlled-link checks and measurements.
 
 The selected transport stays WebRTC during fallback. Socket video continues while a fresh channel
 connects. Failed attempts retry with jittered exponential delays of about 1 to 30 seconds; ten seconds

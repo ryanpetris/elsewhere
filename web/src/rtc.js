@@ -1,11 +1,7 @@
-// The video over a WebRTC data channel, ordered and reliable like the socket: a lost packet is
-// retransmitted and the frames behind it wait a round trip. (Unordered, the frame behind arrived first,
-// the page took the wait for a gap and asked for a keyframe, and the keyframes were what the link then
-// spent itself on.) Measured against the socket it is even on a clean link and behind it under loss
-// (see the README), so it is a choice, not the default. The page offers one channel, the server (ICE
-// lite) answers with candidates for the page endpoint, unless --rtc-addr overrides it;
-// frames above 16 kB come as numbered fragments, reassembled here and handed to the same message handler
-// as the socket's.
+// Video over an ordered, reliable WebRTC data channel. Lost packets hold later frames until
+// retransmission. The page offers one channel; the ICE-lite server answers with candidates for the
+// page endpoint, unless --rtc-addr overrides it. Numbered fragments carry up to 16 KiB of frame data,
+// reassembled here and handed to the same message handler as the socket's.
 export const RTC_TIMING = { gather: 1500, gatherWithServers: 5000, attempt: 10000, retry: 1000, retryMax: 30000, healthy: 10000 };
 
 export function openRtc({ iceServers, endpoint, g, signal, onMessage, onOpen, onClose }) {

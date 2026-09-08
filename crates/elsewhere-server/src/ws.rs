@@ -233,16 +233,16 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
                 Some(StreamMsg::Frame(f)) => {
                     if info.as_ref().is_some_and(|i| i.stream_id == f.stream_id) {
                         // Sent in reference order; the worker refuses raw input while output is blocked.
-                        let (backlog, pressure) = (rx.len(), app.rtc.as_ref().and_then(|hub| hub.pressure(id))); // the channel's drops and queue are congestion too
+                        let (backlog, pressure) = (rx.len(), app.rtc.as_ref().and_then(|hub| hub.pressure(id))); // native send blockage and drops are congestion too
                         let t = Instant::now();
                         match (&app.rtc, pressure) {
                             // the data channel, while the page has one open
-                            (Some(hub), Some(_)) => hub.frame(id, protocol::video(&f, seq)),
+                            (Some(hub), Some(_)) => hub.frame(id, protocol::video(&f, seq), auto.quality.bitrate_kbps),
                             _ => if !send(&mut socket, protocol::video(&f, seq)).await { break None },
                         }
                         seq = seq.wrapping_add(1);
-                        let (dropped, queued) = pressure.unwrap_or((0, 0));
-                        if let Some(q) = auto.frame(backlog > 0 || queued >= 2, dropped, t.elapsed()) {
+                        let (dropped, blocked) = pressure.unwrap_or((0, false));
+                        if let Some(q) = auto.frame(backlog > 0 || blocked, dropped, t.elapsed()) {
                             app.set_quality(id, q);
                             let Some(state) = app.stream_state(id) else { break Some((UNAUTHORIZED, "token rotated")) };
                             if !send(&mut socket, state).await { break None }
@@ -414,12 +414,12 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                         let (backlog, pressure) = (rx.len(), app.rtc.as_ref().and_then(|hub| hub.pressure(rtc_key)));
                         let t = Instant::now();
                         match (&app.rtc, pressure) {
-                            (Some(hub), Some(_)) => hub.frame(rtc_key, protocol::video(&f, seq)),
+                            (Some(hub), Some(_)) => hub.frame(rtc_key, protocol::video(&f, seq), quality.bitrate_kbps),
                             _ => if !send(&mut socket, protocol::video(&f, seq)).await { break None },
                         }
                         seq = seq.wrapping_add(1);
-                        let (dropped, queued) = pressure.unwrap_or((0, 0));
-                        if let Some(q) = auto.frame(backlog > 0 || queued >= 2, dropped, t.elapsed()) {
+                        let (dropped, blocked) = pressure.unwrap_or((0, false));
+                        if let Some(q) = auto.frame(backlog > 0 || blocked, dropped, t.elapsed()) {
                             quality = q;
                             control.set_quality(q);
                             if !send(&mut socket, state(codec, quality, want_codec, preset)).await { break None }
@@ -839,8 +839,8 @@ fn bit(c: Codec) -> u8 {
 }
 
 /// The rate controller: a viewer's quality is a ceiling, and the bitrate lives under it by what the link
-/// and the browser show. A second with a third of its frames congested (encoder or RTC queue pressure, a channel
-/// drop or a channel queue, a slow send), a pong 200 ms over the link's best, or the page reporting frames
+/// and the browser show. A second with a third of its frames congested (encoder backlog, native SCTP write
+/// refusal, channel drops or slow sends), a pong 200 ms over the link's best, or the page reporting frames
 /// a hundred milliseconds later than they were or its decoder dropping some, halves the bitrate, which then
 /// holds two seconds; five clean seconds raise it by a quarter. Every change is a keyframe with the VA
 /// encoders (a new rate opens a new GOP), so the steps are few and large rather than many and small.
@@ -863,7 +863,7 @@ impl AutoRate {
         AutoRate { ceiling, quality: elsewhere_core::Quality { bitrate_kbps: ceiling, max_fps: if ceiling < 3000 { 30 } else { 0 } }, frames: 0, congested: 0, slow: 0, best_rtt: Duration::MAX, clean_secs: 0, hold: 0, window: Instant::now() }
     }
 
-    /// One frame went out; `queued` reports encoder or RTC pressure and the send took `took`.
+    /// One frame went out; `queued` reports encoder backlog or native SCTP write refusal, and the send took `took`.
     fn frame(&mut self, queued: bool, dropped: u32, took: Duration) -> Option<elsewhere_core::Quality> {
         self.frames += 1;
         if queued || dropped > 0 || took > Duration::from_millis(33) {

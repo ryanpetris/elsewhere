@@ -321,6 +321,7 @@ try {
           server_queue_bytes: distribution(fields('RTC output queue', 'queued_bytes')), server_queue_frames: distribution(fields('RTC output queue', 'queued_frames')),
           server_front_accepted_bytes: distribution(fields('RTC output queue', 'sent_bytes')), server_front_age_ms: distribution(fields('RTC output queue', 'front_age_ms')), encoder_ms: distribution(fields('ffmpeg encoded', 'encode_us').map(value => value / 1000)),
           server_transport_pending_bytes: distribution(fields('RTC output queue', 'transport_pending_bytes')), server_progress_age_ms: distribution(fields('RTC output queue', 'progress_age_ms')), all_queue_sessions: queueSessions,
+          server_pacing_wait_ms: distribution(fields('RTC output queue', 'pacing_wait_us').map(value => value / 1000)),
           submit_to_packet_ms: distribution(fields('ffmpeg encoded', 'submit_to_packet_us').map(value => value / 1000)),
           encoder_open_ms: distribution(fields('ffmpeg encoder open', 'open_us').map(value => value / 1000)), reopen_to_key_ms: distribution(reopenKeys.map(reopen => reopen.open_to_key_ms).filter(value => value !== null)), reopen_keys: reopenKeys, reopens: after.m.configs.length,
           lost: after.state.stats.lost - before.state.stats.lost, dropped: after.state.stats.dropped - before.state.stats.dropped,
@@ -386,7 +387,9 @@ try {
         };
         results.push(row);
         await writeFile(root + '/results.json', JSON.stringify(results, null, 2));
-        await writeFile(`${directory}/${name}.json`, JSON.stringify({ row, ticks, events, consumerEvents, measurement: after.m, rates, encodedRates, qdiscBefore, qdiscAfter }, null, 2));
+        await writeFile(`${directory}/${name}.json`, JSON.stringify({ row, ticks, events, consumerEvents,
+          sample: { wall_start: before.at, wall_end: after.at, monotonic_start: after.m.start, monotonic_end: after.now },
+          measurement: after.m, rates, encodedRates, qdiscBefore, qdiscAfter }, null, 2));
         await writeFile(`${directory}/${name}.log`, text);
         console.log(JSON.stringify(row));
         assert.ok(valid.length > 10, 'decoded source clock markers');
