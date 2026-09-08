@@ -47,7 +47,8 @@
 
 ## Reviews
 
-Every completed item gets an independent review before it is considered done.
+Small, trivial changes do not need an independent review. Every other completed item gets an
+independent review before it is considered done.
 
 1. Run a review with a general-purpose subagent.
 2. Apply findings by judgement. Take the ones that are right, even when small. Decline the ones that
