@@ -14,6 +14,20 @@
 
 - Comments and documentation should describe current behaviour. Do not narrate changes.
 
+## Changes before v1.0.0
+
+- Before Elsewhere v1.0.0, do not add migrations, compatibility layers, legacy fallbacks, or
+  deprecation paths to accommodate project changes.
+- Remove replaced functionality entirely, including its tests, documentation, comments, and other
+  references. Do not add tests or explanations about the replaced functionality or its removal;
+  the project should read as though it never existed.
+- At v1.0.0, prompt the maintainer to remove this section. Remove it only after explicit confirmation.
+- At v1.0.0 and later, this section's restrictions no longer apply, even if the section remains,
+  unless the maintainer explicitly asks for them to be enforced.
+- If this section remains at v1.0.0 or later, remind the maintainer to remove it whenever they ask
+  for implementation work, unless they have asked not to be reminded. Silencing reminders does
+  not authorize removal or reinstate the restrictions.
+
 ## Protocol and compatibility versions
 
 - Any protocol, compatibility, or similar version whose meaning we define requires explicit user
