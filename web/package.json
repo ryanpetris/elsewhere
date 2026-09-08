@@ -11,6 +11,7 @@
     "check:url-prefix": "node checks/url-prefix.mjs",
     "check:terminal": "node checks/terminal.mjs",
     "check:encoding-effort": "node checks/encoding-effort.mjs",
+    "check:viewer-lifecycle": "node checks/viewer-lifecycle.mjs",
     "check:effort-benchmark": "node checks/effort-benchmark.mjs",
     "check:reliability": "node checks/reliability.mjs"
   },
