@@ -147,6 +147,28 @@ impl FrameSink for FfmpegSink {
 
 enum Converter { Software(SoftwareConverter), Hardware(crate::gpu::Converter) }
 struct Active { encoder: VideoEncoder, converter: Converter, settings: Settings, epoch: u64, info: Option<StreamInfo>, stream_id: u32 }
+
+/// Encoders can exceed their target even at their largest quantizer. Admit fresh input only after
+/// the delivered payload's budget is paid, without retaining a compositor buffer during the wait.
+struct Admission { due: Instant, kbps: u32 }
+impl Admission {
+    fn new(kbps: u32) -> Self { Self { due: Instant::now(), kbps: kbps.max(1) } }
+    fn set_rate(&mut self, kbps: u32, now: Instant) {
+        let kbps = kbps.max(1);
+        if kbps != self.kbps {
+            let remaining = self.due.saturating_duration_since(now);
+            self.due = now + remaining.mul_f64(f64::from(self.kbps) / f64::from(kbps));
+            self.kbps = kbps;
+        }
+    }
+    fn delay(&self, now: Instant) -> Duration { self.due.saturating_duration_since(now) }
+    fn delivered(&mut self, bytes: usize, encoding: Duration, now: Instant) {
+        let cost = Duration::from_secs_f64(bytes as f64 * 8.0 / (f64::from(self.kbps) * 1000.0));
+        // Encoding contributes to the interval; time blocked on output does not buy another burst.
+        self.due = now + cost.saturating_sub(encoding);
+    }
+}
+
 impl Active {
     fn open(settings: Settings, epoch: u64, encoders: &Encoders) -> Result<Self> {
         let source = settings.source.context("missing video source")?;
@@ -166,6 +188,7 @@ impl Active {
 
 fn run(shared: &Shared, encoders: &Encoders, tx: &mpsc::Sender<StreamMsg>, redraw: &Redraw, runtime: &tokio::runtime::Runtime) -> Result<()> {
     let mut active: Option<Active> = None;
+    let mut admission = Admission::new(shared.state.lock().unwrap_or_else(|e| e.into_inner()).settings.quality.bitrate_kbps);
     loop {
         let (settings, epoch) = {
             let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -176,6 +199,7 @@ fn run(shared: &Shared, encoders: &Encoders, tx: &mpsc::Sender<StreamMsg>, redra
             }
             (state.settings, state.epoch)
         };
+        admission.set_rate(settings.quality.bitrate_kbps, Instant::now());
         if active.as_ref().is_none_or(|a| a.epoch != epoch) {
             active = None;
             let opening = Instant::now();
@@ -217,6 +241,14 @@ fn run(shared: &Shared, encoders: &Encoders, tx: &mpsc::Sender<StreamMsg>, redra
         let next = {
             let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
             if state.epoch != epoch || !state.ready { continue; }
+            if state.pending.is_some() && !admission.delay(Instant::now()).is_zero() {
+                state.pressure = true;
+                let pending = state.pending.take();
+                drop(state);
+                drop(pending);
+                wait_for_admission(shared, tx, epoch, &mut admission, redraw);
+                continue;
+            }
             state.pending.take().map(|frame| (frame, std::mem::take(&mut state.keyframe)))
         };
         let Some((pending, requested_key)) = next else { continue };
@@ -249,7 +281,11 @@ fn run(shared: &Shared, encoders: &Encoders, tx: &mpsc::Sender<StreamMsg>, redra
         match result {
             Ok(messages) => {
                 let key = messages.iter().any(|m| matches!(m, StreamMsg::Frame(f) if f.keyframe));
-                deliver(shared, tx, messages, epoch, key, redraw, runtime)?;
+                let bytes = messages.iter().map(|m| match m { StreamMsg::Frame(f) => f.data.len(), _ => 0 }).sum();
+                let encoding = started.elapsed();
+                if deliver(shared, tx, messages, epoch, key, redraw, runtime)? {
+                    admission.delivered(bytes, encoding, Instant::now());
+                }
             }
             Err(error) => {
                 active = None;
@@ -264,6 +300,31 @@ fn run(shared: &Shared, encoders: &Encoders, tx: &mpsc::Sender<StreamMsg>, redra
                 deliver(shared, tx, vec![StreamMsg::Failed], epoch, false, redraw, runtime)?;
             }
         }
+    }
+}
+
+/// Request a complete redraw after the discarded raw picture's byte budget becomes available.
+fn wait_for_admission(shared: &Shared, tx: &mpsc::Sender<StreamMsg>, epoch: u64, admission: &mut Admission, redraw: &Redraw) {
+    let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
+    loop {
+        if state.stop || state.epoch != epoch || tx.is_closed() { return; }
+        let now = Instant::now();
+        admission.set_rate(state.settings.quality.bitrate_kbps, now);
+        let delay = admission.delay(now);
+        if delay.is_zero() {
+            state.pressure = false;
+            drop(state);
+            redraw();
+            return;
+        }
+        state.pressure = true;
+        if let Some(pending) = state.pending.take() {
+            drop(state);
+            drop(pending);
+            state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
+            continue;
+        }
+        state = shared.changed.wait_timeout(state, delay.min(Duration::from_millis(100))).unwrap_or_else(|e| e.into_inner()).0;
     }
 }
 
@@ -323,6 +384,98 @@ mod tests {
     use super::*;
     use std::sync::{OnceLock, atomic::{AtomicUsize, Ordering}};
 
+    #[test]
+    fn admission_preserves_unpaid_bytes_and_credits_only_encoding() {
+        let now = Instant::now();
+        let mut budget = Admission { due: now, kbps: 8000 };
+        // A 100 KB packet needs 100 ms; 20 ms of conversion/encoding already elapsed.
+        budget.delivered(100_000, Duration::from_millis(20), now);
+        assert_eq!(budget.delay(now), Duration::from_millis(80));
+        budget.set_rate(4000, now + Duration::from_millis(20));
+        assert_eq!(budget.delay(now + Duration::from_millis(20)), Duration::from_millis(120));
+        budget.set_rate(8000, now + Duration::from_millis(40));
+        assert_eq!(budget.delay(now + Duration::from_millis(40)), Duration::from_millis(50));
+        // An idle period or a long blocked delivery buys no credit for the next packet.
+        let later = now + Duration::from_secs(10);
+        budget.delivered(100_000, Duration::from_millis(20), later);
+        assert_eq!(budget.delay(later), Duration::from_millis(80));
+        budget.delivered(1000, Duration::from_millis(20), later + Duration::from_secs(1));
+        assert!(budget.delay(later + Duration::from_secs(1)).is_zero());
+    }
+
+    #[test]
+    fn admission_wait_releases_input_and_preserves_controls_on_cancellation() {
+        let source = Source { geometry: source(), fourcc: u32::from_le_bytes(*b"XR24"), modifier: 0 };
+        struct Lease(Arc<AtomicUsize>);
+        impl Drop for Lease { fn drop(&mut self) { self.0.fetch_add(1, Ordering::Relaxed); } }
+        let released = Arc::new(AtomicUsize::new(0));
+        let input = |seq| {
+            let mut frame = frame(seq);
+            frame.buffer = FrameBuffer::Dmabuf {
+                fd: std::fs::File::open("/dev/null").unwrap().into(), modifier: 0, stride: 1280,
+                offset: 0, slot_id: 1, lease: Box::new(Lease(released.clone())),
+            };
+            Pending { frame, source, submitted: Instant::now() }
+        };
+        let shared = Arc::new(Shared {
+            state: Mutex::new(State {
+                settings: Settings { source: Some(source), size: None, codec: Codec::Vp8,
+                    quality: Quality { bitrate_kbps: 1000, max_fps: 0 }, effort: EncodingEffort::Fast },
+                epoch: 1, pending: Some(input(1)),
+                last_submit: None, ready: true, started: true, pressure: false, failed: false,
+                stop: false, keyframe: false, effort: EffortState::pending(EncodingEffort::Fast),
+            }),
+            changed: Condvar::new(), control: Notify::new(),
+        });
+        let redraws = Arc::new(AtomicUsize::new(0));
+        let signal = redraws.clone();
+        let redraw: Redraw = Arc::new(move || { signal.fetch_add(1, Ordering::Relaxed); });
+        let (tx, rx) = mpsc::channel(2);
+        let spawn_wait = |epoch, mut admission: Admission| {
+            let (shared, tx, redraw) = (shared.clone(), tx.clone(), redraw.clone());
+            std::thread::spawn(move || {
+                wait_for_admission(&shared, &tx, epoch, &mut admission, &redraw);
+                admission
+            })
+        };
+        let worker = spawn_wait(1, Admission { due: Instant::now() + Duration::from_secs(80), kbps: 1000 });
+        wait(|| { let state = shared.state.lock().unwrap(); state.pressure && state.pending.is_none() && released.load(Ordering::Relaxed) == 1 });
+        {
+            let mut state = shared.state.lock().unwrap();
+            state.keyframe = true;
+            state.settings.quality.bitrate_kbps = 8000;
+            // Observe the waiter's next iteration, which must apply this rate before cancellation.
+            state.pressure = false;
+        }
+        shared.changed.notify_one();
+        wait(|| shared.state.lock().unwrap().pressure);
+        let canceled = Instant::now();
+        let pending = shared.state.lock().unwrap().restart();
+        drop(pending);
+        shared.changed.notify_one();
+        let admission = worker.join().unwrap();
+        assert!(canceled.elapsed() < Duration::from_millis(500));
+        assert_eq!(admission.kbps, 8000);
+        assert!(admission.delay(Instant::now()) > Duration::from_secs(5));
+        assert!(admission.delay(Instant::now()) <= Duration::from_secs(10));
+        {
+            let mut state = shared.state.lock().unwrap();
+            assert!(state.keyframe, "admission must not consume the pending recovery request");
+            state.ready = true;
+            state.pending = Some(input(2));
+        }
+        let worker = spawn_wait(2, admission);
+        wait(|| { let state = shared.state.lock().unwrap(); state.pressure && state.pending.is_none() && released.load(Ordering::Relaxed) == 2 });
+        let closed = Instant::now();
+        drop(rx);
+        let admission = worker.join().unwrap();
+        assert!(closed.elapsed() < Duration::from_millis(500));
+        assert!(admission.delay(Instant::now()) > Duration::from_secs(5));
+        assert!(shared.state.lock().unwrap().keyframe);
+        assert_eq!(released.load(Ordering::Relaxed), 2);
+        assert_eq!(redraws.load(Ordering::Relaxed), 0, "canceled waits must not redraw");
+    }
+
     fn encoders() -> Arc<Encoders> {
         static ENCODERS: OnceLock<Arc<Encoders>> = OnceLock::new();
         ENCODERS.get_or_init(|| {
@@ -361,7 +514,7 @@ mod tests {
         });
         result.unwrap()
     }
-    fn receive(rx: &mut mpsc::Receiver<StreamMsg>, info: &mut Option<StreamInfo>) -> EncodedFrame {
+    fn receive(rx: &mut mpsc::Receiver<StreamMsg>, info: &mut Option<StreamInfo>, sink: &mut FfmpegSink, seq: u64, redraws: &AtomicUsize, seen: &mut usize) -> EncodedFrame {
         let mut result = None;
         wait(|| {
             while let Ok(message) = rx.try_recv() {
@@ -371,6 +524,11 @@ mod tests {
                     StreamMsg::Failed => panic!("video encoder failed"),
                     _ => panic!("unexpected audio on video channel"),
                 }
+            }
+            let requested = redraws.load(Ordering::Relaxed);
+            if requested != *seen {
+                *seen = requested;
+                submit(sink, seq); // The source changes only when the test changes seq.
             }
             false
         });
@@ -395,33 +553,34 @@ mod tests {
             let redraws = Arc::new(AtomicUsize::new(0));
             let signal = redraws.clone();
             let (tx, mut rx) = mpsc::channel(2);
-            let mut sink = FfmpegSink::new(4000, available.clone(), tx, Arc::new(move || { signal.fetch_add(1, Ordering::Relaxed); })).unwrap();
+            let mut sink = FfmpegSink::new(100, available.clone(), tx, Arc::new(move || { signal.fetch_add(1, Ordering::Relaxed); })).unwrap();
             let control = sink.control();
             control.set_codec(codec);
             sink.output_changed(source(), u32::from_le_bytes(*b"XR24"), 0);
             wait(|| sink.owner.shared.state.lock().unwrap().ready);
             wait(|| redraws.load(Ordering::Relaxed) > 0);
+            let mut seen = redraws.load(Ordering::Relaxed);
             let mut info = None;
             assert_eq!(submit(&mut sink, 1), Submit::Held);
-            let key = receive(&mut rx, &mut info);
+            let key = receive(&mut rx, &mut info, &mut sink, 1, &redraws, &mut seen);
             assert!(key.keyframe, "{codec:?}");
             assert_eq!(key.pts_us, 33_333);
             assert_eq!(info.as_ref().unwrap().stream_id, key.stream_id);
             decode(codec, &key, (320, 180));
             assert_eq!(submit(&mut sink, 2), Submit::Encoded);
-            // No more input follows this accepted frame; the worker must still deliver it.
-            assert_eq!(receive(&mut rx, &mut info).pts_us, 66_666);
+            // No further source change follows; a requested full redraw repeats this final picture.
+            assert_eq!(receive(&mut rx, &mut info, &mut sink, 2, &redraws, &mut seen).pts_us, 66_666);
 
             control.request_keyframe();
             submit(&mut sink, 3);
-            let recovery = receive(&mut rx, &mut info);
+            let recovery = receive(&mut rx, &mut info, &mut sink, 3, &redraws, &mut seen);
             assert!(recovery.keyframe, "{codec:?} refused a requested key");
             decode(codec, &recovery, (320, 180));
 
             control.set_quality(Quality { bitrate_kbps: 1000, max_fps: 0 });
             wait(|| sink.owner.shared.state.lock().unwrap().ready);
             submit(&mut sink, 4);
-            let changed = receive(&mut rx, &mut info);
+            let changed = receive(&mut rx, &mut info, &mut sink, 4, &redraws, &mut seen);
             if control.effort().encoder.as_deref() == Some("libx264") { assert_eq!(changed.stream_id, key.stream_id); }
             else { assert_ne!(changed.stream_id, key.stream_id); assert!(changed.keyframe); decode(codec, &changed, (320, 180)); }
 
@@ -429,7 +588,7 @@ mod tests {
             control.set_size(Some((160, 90)));
             wait(|| sink.owner.shared.state.lock().unwrap().ready);
             submit(&mut sink, 5);
-            let resized = receive(&mut rx, &mut info);
+            let resized = receive(&mut rx, &mut info, &mut sink, 5, &redraws, &mut seen);
             assert!(resized.keyframe);
             assert_eq!((info.as_ref().unwrap().width, info.as_ref().unwrap().height), (160, 90));
             decode(codec, &resized, (160, 90));
@@ -446,12 +605,13 @@ mod tests {
         struct Lease(Arc<AtomicUsize>);
         impl Drop for Lease { fn drop(&mut self) { self.0.fetch_add(1, Ordering::Relaxed); } }
         let (tx, mut rx) = mpsc::channel(2);
+        // Fill the receiver before encoding so this exercises blocked delivery, not admission delay.
+        tx.try_send(StreamMsg::Failed).unwrap();
+        tx.try_send(StreamMsg::Failed).unwrap();
         let mut sink = FfmpegSink::new(4000, encoders(), tx, Arc::new(|| {})).unwrap();
         sink.output_changed(source(), u32::from_le_bytes(*b"XR24"), 0);
         wait(|| sink.owner.shared.state.lock().unwrap().ready);
         submit(&mut sink, 1);
-        wait(|| rx.len() == 2);
-        submit(&mut sink, 2);
         wait(|| sink.owner.shared.state.lock().unwrap().pressure);
         let released = Arc::new(AtomicUsize::new(0));
         let mut input = frame(3);

@@ -201,6 +201,13 @@ is ready, including on an idle desktop. Accepted final pictures are encoded with
 animation. The compositor also requests one refinement frame 150 ms after the picture settles; it
 uses the current target without a bitrate-change cycle.
 
+The worker also budgets input from the bytes it delivers. A packet can exceed the encoder's target
+even at the largest quantizer. Before encoding another picture, the worker waits for that packet's
+byte budget, crediting conversion and encoding time. It releases raw input during the wait and
+requests a fresh complete picture when the budget is available. Idle time and blocked output do not
+accumulate burst credit. Rate changes rescale the unpaid budget; key requests and encoder reopens
+preserve it. Difficult pictures can therefore lower frame rate without accumulating old encoded video.
+
 The encoder-to-server channel holds two messages. The worker can wait with one encoded packet but
 releases pending raw pictures and refuses more input during that wait. Configuration and the first
 keyframe reserve their output slots together. Already encoded deltas stay in reference order;
