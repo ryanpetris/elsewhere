@@ -1,0 +1,42 @@
+name: check
+on: [push, pull_request]
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: archlinux:base-devel
+      options: --shm-size=1g
+    steps:
+      - name: Native and browser dependencies
+        id: native
+        run: |
+          pacman -Sy --noconfirm archlinux-keyring
+          pacman -Syu --noconfirm --needed rust clang pkgconf git nodejs npm chromium python curl \
+            ffmpeg libpipewire libva mesa libxkbcommon ca-certificates openssl ttf-dejavu
+          native_versions=$(pkg-config --modversion libavcodec libavformat libavutil libavdevice libavfilter libswscale libswresample libva libpipewire-0.3 gbm egl xkbcommon)
+          echo "abi=$(printf '%s\n' "$native_versions" | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: check-${{ steps.native.outputs.abi }}
+      - name: Viewer build
+        working-directory: web
+        run: npm ci --no-audit --no-fund && npm run build
+      - name: Application and software unit tests
+        # Ignored tests require a VAAPI render node or the private-audio Docker rig.
+        run: |
+          cargo build --workspace --bins --examples --release --locked
+          cargo test --workspace --release --locked -- --test-threads=1
+      - name: Browser media checks
+        working-directory: web
+        run: |
+          npm run check:visualiser
+          npm run check:viewer-disposal
+      - name: Software broadcast and TLS checks
+        run: BROADCAST_SOURCE="$PWD/target/release/examples/broadcast-source" python3 web/checks/broadcast-native.py
+      - name: Application startup and software video
+        run: PATH="$PWD/target/release:$PATH" sh scripts/check-release.sh 0.0.0-dev

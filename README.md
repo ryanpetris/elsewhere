@@ -448,3 +448,18 @@ Install the build dependencies listed under [Install](#install) and
 `make`. This installs the locked npm dependencies, builds the viewer, and builds
 the release binary. `web/package-lock.json` pins viewer dependencies and records
 their download URLs and integrity hashes.
+
+## Checks
+
+The [check workflow](.github/workflows/check.yml) runs on pushes and pull requests in an
+Arch Linux container. It builds the application and examples, runs workspace Rust tests,
+checks the browser visualiser and decoder disposal, exercises software RTMP/RTMPS broadcasts,
+and checks application startup, screenshots and software video encode/decode. Its dependency
+installation and commands can also be run in a disposable `archlinux:base-devel` Docker
+container with the checkout mounted and 1 GiB of shared memory.
+
+The ignored VAAPI import test requires a real render node. The ignored private-audio tests
+require the audio Docker rig, with `ELSEWHERE_TEST_PIPEWIRE` pointing to an isolated graph
+for the stream capture test. V4L2 integration checks require a loopback device.
+Those checks run separately in a suitably equipped Docker rig.
+Routine CI does not run the reliability benchmark suite.
