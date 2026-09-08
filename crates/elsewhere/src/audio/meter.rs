@@ -80,8 +80,6 @@ impl Meter {
         Ok(Self { _listener: listener, _stream: stream, reading })
     }
 
-    pub fn peak(&self) -> f32 { self.reading.borrow().peak }
-
     pub fn take_peak(&self) -> f32 {
         std::mem::take(&mut self.reading.borrow_mut().peak)
     }

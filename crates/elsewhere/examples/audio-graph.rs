@@ -185,7 +185,9 @@ fn main() -> anyhow::Result<()> {
     let stop = mainloop.clone();
     let startup = Instant::now();
     let timer = mainloop.loop_().add_timer(move |_| {
-        if ticks.get() == 0 && !["probe-playback", "elsewhere-output", "probe-microphone", "elsewhere-microphone", "pw-record"].iter().all(|name| nodes.borrow().values().any(|node| node.name == *name && node.meter.as_ref().is_some_and(|meter| meter.peak() > 0.01))) {
+        let peaks: HashMap<_, _> = nodes.borrow().iter().filter_map(|(id, node)|
+            node.meter.as_ref().map(|meter| (*id, meter.take_peak()))).collect();
+        if ticks.get() == 0 && !["probe-playback", "elsewhere-output", "probe-microphone", "elsewhere-microphone", "pw-record"].iter().all(|name| nodes.borrow().iter().any(|(id, node)| node.name == *name && peaks.get(id).is_some_and(|peak| *peak > 0.01))) {
             if startup.elapsed() > Duration::from_secs(8) { checks.borrow_mut().push("meters did not receive startup signals".into()); stop.quit(); }
             return;
         }
@@ -225,9 +227,9 @@ fn main() -> anyhow::Result<()> {
                 ("elsewhere-microphone", if tick == 14 { 0.0 } else if tick >= 17 { 0.00625 } else { 0.05 }),
                 ("pw-record", if tick == 14 { 0.0 } else if tick >= 17 { 0.00625 } else { 0.05 }),
             ] {
-                match nodes.values().find(|node| node.name == name).and_then(|node| node.meter.as_ref()) {
-                    Some(meter) if (meter.peak() - expected).abs() <= 0.001 => {}
-                    Some(meter) => checks.borrow_mut().push(format!("tick {tick} {name}: expected {expected}, got {}", meter.peak())),
+                match nodes.iter().find(|(_, node)| node.name == name).and_then(|(id, _)| peaks.get(id)) {
+                    Some(peak) if (*peak - expected).abs() <= 0.001 => {}
+                    Some(peak) => checks.borrow_mut().push(format!("tick {tick} {name}: expected {expected}, got {peak}")),
                     None => checks.borrow_mut().push(format!("tick {tick}: missing {name}")),
                 }
             }
@@ -240,7 +242,7 @@ fn main() -> anyhow::Result<()> {
                 "peak {} {id} {} {}",
                 ticks.get(),
                 node.name,
-                meter.take_peak()
+                peaks[id]
             );
             if (ticks.get() == 3 && node.name == "probe-playback")
                 || (ticks.get() == 9 && node.name == "elsewhere-output")
