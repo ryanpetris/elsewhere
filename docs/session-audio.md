@@ -26,10 +26,18 @@ microphone keep processing while idle, so recording starts without waiting for a
 and inactive microphone input produces silence. WirePlumber chooses defaults by priority; the
 microphone outranks sink monitors, including on older WirePlumber versions.
 
-GStreamer captures the output through `pipewiresrc` and encodes 48 kHz stereo Opus. Browser microphone
-Opus is decoded and injected through `pipewiresink`. These pipelines run in an owned helper process,
-with explicit native socket descriptors. No Pulse modules or Pulse GStreamer elements implement this
-media path. `pactl info` is only a startup check of the compatibility protocol and its defaults.
+Native PipeWire streams capture the output monitor as 48 kHz stereo PCM. Callbacks copy samples to a
+bounded queue and return the device buffers before FFmpeg's libopus encoder runs. Arbitrary capture
+quanta accumulate into 960-frame packets: 20 ms at 96 kbit/s. Packet timestamps follow capture sample
+positions, including gaps, rather than assuming every queued sample was delivered. DTX is enabled
+when the installed FFmpeg wrapper supports it; older wrappers send correctly clocked silence.
+
+FFmpeg's libopus decoder converts browser microphone packets to 48 kHz mono. Playback queues hold at
+most 200 ms of PCM, discard older speech during bursts, and supply silence on underrun. Malformed
+packets do not stop desktop audio. Native capture and playback run in the owned audio helper, with
+explicit private socket descriptors and node targets. Routing properties are restored after
+PipeWire applies inherited selectors, before activating streams. A target that stops processing
+audio for three seconds fails the stream. `pactl info` checks compatibility-protocol startup and defaults.
 
 ## Starting applications
 
@@ -51,16 +59,16 @@ them. Device names remain stable within each isolated graph, including across de
 ## Readiness and failure
 
 Service version checks, native graph discovery and Pulse default checks share an eight-second
-deadline. Pipeline startup has a separate eight-second deadline and must produce an encoded audio
-packet before clients launch. A blocked GStreamer initialization cannot hold the desktop indefinitely.
+deadline. Media helper startup has a separate eight-second deadline and must produce an encoded audio
+packet before clients launch. Blocked native initialization cannot hold the desktop indefinitely.
 
 `--no-audio` starts no audio services. Initialization failure cleans up partial resources and leaves
 the desktop running with audio unavailable. Applications receive failing socket selectors rather
-than inheriting a host audio server. A later service or pipeline failure stops the owned stack and
+than inheriting a host audio server. A later service or media worker failure stops the owned stack and
 withdraws playback and microphone capabilities from connected viewers. It does not restart audio.
 
 SIGTERM and Ctrl+C are handled from startup. Audio children have separate process groups so terminal
-signals go through the owner's cleanup path. Shutdown asks the pipeline helper to stop, gives it
+signals go through the owner's cleanup path. Shutdown asks the audio helper to stop, gives it
 500 ms to exit, then kills and reaps it if necessary before removing services and their directory.
 The compositor thread is also joined before process exit. Repeated signals do not interrupt this join.
 The container runs the compositor as PID 1 so `docker stop` reaches its signal handler.
@@ -100,15 +108,15 @@ three seconds produce an error.
 ## Dependencies
 
 The supported baseline is PipeWire 1.4.2 and WirePlumber 0.5.6. The latter introduces the policy and
-stateless profile blocks used by this configuration. PipeWire 1.4.2 is the oldest validated native
-device and GStreamer implementation; older versions are unsupported. The runtime checks daemon and
-policy versions and reports missing elements during pipeline initialization.
+stateless profile blocks used by this configuration. Older service versions are unsupported. The
+runtime checks daemon and policy versions; media initialization checks for FFmpeg's libopus encoder
+and decoder. The linked FFmpeg libraries are required even when audio services are disabled.
 
 | Distribution | Audio packages |
 | --- | --- |
-| Arch | `pipewire`, `pipewire-pulse`, `wireplumber`, `gst-plugin-pipewire`, `libpulse` |
-| Debian/Ubuntu | `pipewire`, `pipewire-pulse`, `wireplumber`, `gstreamer1.0-pipewire`, `pulseaudio-utils` |
-| Fedora | `pipewire`, `pipewire-pulseaudio`, `wireplumber`, `pipewire-gstreamer`, `pulseaudio-utils` |
+| Arch | `pipewire`, `pipewire-pulse`, `wireplumber`, `libpulse` |
+| Debian/Ubuntu | `pipewire`, `pipewire-pulse`, `wireplumber`, `pulseaudio-utils` |
+| Fedora | `pipewire`, `pipewire-pulseaudio`, `wireplumber`, `pulseaudio-utils` |
 
 Check versions as well as package names. Audio services are optional for installations using
 `--no-audio`; Debian metadata recommends them and Arch metadata lists them as optional dependencies.
@@ -126,7 +134,7 @@ packages. Runtime startup never changes host defaults or invokes a service manag
 
 Run verification inside Docker with the checkout and release build mounted. The lifecycle check is
 `crates/elsewhere/checks/audio-lifecycle.py`, taking the release binary as its argument. It covers idle
-startup, signal handling, missing services/plugins, service and worker readiness timeouts, and
+startup, signal handling, missing services/Opus encoder, service and worker readiness timeouts, and
 individual service exits. Failed audio must be cleaned up while the desktop keeps running.
 `web/checks/private-audio.mjs` exercises native and Pulse playback/recording through a live browser,
 microphone silence transitions, session microphone mute without changing consent, sustained mixer traffic,
@@ -146,6 +154,13 @@ per-stream isolation, real routing to a second output, default selection, object
 monitor cleanup and cross-process control revocation. `web/checks/session-mixer.mjs` checks the rendered
 panel, authoritative controls, three-viewer authorization and shared subscriptions.
 
+`cargo run -p elsewhere --example audio-graph -- --media` starts private services and runs the native
+media integration test. It checks 1024-frame capture quanta into 960-frame Opus packets, continuous
+timestamps, hostile inherited selectors, malformed and burst microphone packets, underrun silence,
+resume, missing targets and joined shutdown. It then verifies media nodes did not survive their workers.
+The example requires Cargo and the checkout; codec and letterboxing unit checks run with
+`cargo test -p elsewhere-stream --lib`.
+
 The browser check's fake capture source is a test WAV;
 production capture still requires browser consent.
 
@@ -162,47 +177,41 @@ policy. Add `--firefox` with geckodriver on port 4445 and a working PulseAudio o
 pending-permission button, control handover and disconnect. Chromium 152 and Firefox 155 pass the
 standalone checks; Chromium also passes the recorder and viewer checks.
 
-Lifecycle and isolation checks pass on PipeWire 1.4.2 with WirePlumber 0.5.6 and 0.5.8, and on PipeWire
-1.6.8 with WirePlumber 0.5.17. Direct GStreamer device publication is unsuitable for idle startup; native virtual
-nodes keep device lifetime independent of browser capture and application streams.
+The native media integration check passes with FFmpeg 9, PipeWire 1.6.8 and WirePlumber 0.5.17.
+Its four-second playback interval delivers continuous Opus without timestamp gaps and joins media
+workers within the helper's 500 ms shutdown allowance. Native virtual nodes keep device lifetime
+independent of browser capture and application streams.
+
+For a ten-minute playback clock check, run `node checks/session-audio.mjs --av-seconds=600` from `web`
+with `ELSEWHERE_TEST_URL` and `ELSEWHERE_TEST_TOKEN_FILE` pointing at the dedicated Docker desktop.
+FFmpeg generates synchronized flashes and chirps; mpv plays them through the private native graph.
+The check compares observed canvas flashes with the AudioContext output clock. It checks pulse loss,
+absolute offset and the change between the first and last 15-pulse median offsets. It does not
+measure sound at the speakers or physical display scanout.
+
+A 600-second software-rendered run matched 300 pulses. Audio followed video by 173.09 ms near the
+start and 166.43 ms near the end, a change of -6.66 ms. The largest matched offset was 240.64 ms.
+The first observed matched pair was 185.81 ms. A separate startup check uses black/silent preroll
+and ordinal pulse matching to distinguish a delayed pulse from the following cycle. Its first source
+pulse offset was 109.33 ms, with every matched pulse below 144 ms. These offsets remain visible
+alongside drift; a stable clock does not establish close audiovisual synchronization.
+
+The webcam device check is `python web/checks/webcam-native.py /dev/videoN`, after building
+`cargo build -p elsewhere-stream --example webcam-output`. Expose an unused v4l2loopback
+device only to the dedicated Docker container. The check decodes actual YUYV capture from the
+selected device, verifies the 1280 by 720 aspect fit and borders, recovers after malformed VP8,
+injects temporary write pressure and a permanent device failure, and checks bounded worker stop.
+An unprivileged run without device access must fail cleanly.
 
 ### Standalone native capture
 
-`python crates/elsewhere/checks/native-capture.py` runs 30 fresh private stacks in Docker. Each
-trial waits for running virtual nodes, captures output and idle microphone silence, then checks
-two microphone tone/stop cycles. Every capture must produce samples and exit within six seconds.
+`python crates/elsewhere/checks/native-capture.py` runs 30 fresh private stacks in Docker using
+`pw-record` for capture and FFmpeg tones through `pw-cat` for playback. Each trial waits for running
+virtual nodes, captures output and idle microphone silence, then checks two microphone tone/stop
+cycles. Every capture must produce at least 20,480 sample frames and exit within six seconds.
+Tone captures also wait for actual signal within that deadline. All 30 fresh-stack trials pass with
+FFmpeg 9, PipeWire 1.6.8 and WirePlumber 0.5.17.
 Failures retain the configuration and logs inside the container; capture timeouts also save a graph snapshot.
-
-Keep the capture sink's default `async=true`, including when using `sync=false` for immediate
-delivery. This matches the application's audio appsink. The check accepts `--sink-async=false`
-to exercise immediate sink activation. On PipeWire/GStreamer-plugin 1.6.8, WirePlumber 0.5.17
-and GStreamer 1.28.6, that variant stalled on trial two after an idle microphone capture started.
-The dummy driver, virtual devices and capture client were running, with an active capture link;
-the client process still failed to deliver samples or exit.
-The same configuration passed 30 trials with `async=true`, totaling 180 captures. With
-`async=false --source-clock=false`, it also passed 30 trials. The latter disables the source's
-clock provider and is an alternative for standalone pipelines that need immediate sink activation.
-
-The failing native log shows streaming, pause, flushing, reactivation and a negotiation error.
-The [1.6.8 plugin state handler](https://github.com/PipeWire/pipewire/blob/1.6.8/src/gst/gstpipewiresrc.c)
-posts clock loss for a paused audio stream; `gst-launch` responds with a pause/play cycle.
-On reactivation, `wait_negotiated` rejects a still-flushing source before the parent state handler
-can clear flushing, and the error path bypasses the loop unlock. This source-level explanation
-matches the captured sequence. It is a native plugin state-transition dependency; the measured
-workarounds avoid that transition during these captures. They do not establish that arbitrary
-pause/resume sequences are safe in the affected plugin.
-The application does not respond to clock-loss messages with a pause/play cycle; it starts capture
-in PLAYING and tears it down with NULL. This is another difference from the failing standalone client.
-
-PipeWire/plugin 1.4.2, WirePlumber 0.5.8 and GStreamer 1.26.2 passed 30 trials with `async=false`
-using the current configuration. That plugin does not expose `provide-clock`, so do not pass
-`--source-clock` on that version. Its
-[state handler](https://github.com/PipeWire/pipewire/blob/1.4.2/src/gst/gstpipewiresrc.c)
-also lacks the newer clock-loss/renegotiation path. Earlier compatibility measurements saw a
-standalone output-capture timeout on this stack, but the current repeat did not reproduce it.
-The evidence does not attribute that earlier timeout to the 1.6.8 mechanism or establish a fixed
-upstream release. Application lifecycle and isolation coverage remains as described above.
-The retained default check also passed 30 trials on both the 1.4.2 and 1.6.8 stacks.
 
 References: [PipeWire configuration](https://docs.pipewire.org/page_daemon.html),
 [native loopback](https://docs.pipewire.org/page_module_loopback.html),

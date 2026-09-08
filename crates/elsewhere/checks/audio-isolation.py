@@ -33,9 +33,9 @@ def remember_audio():
             pass
 
 
-def start(args, env, log):
+def start(args, env, log, stdin=None):
     with log.open("a") as output:
-        child = subprocess.Popen(args, env=env, stdout=output, stderr=output)
+        child = subprocess.Popen(args, env=env, stdin=stdin, stdout=output, stderr=output)
     children.append(child)
     return child
 
@@ -122,7 +122,13 @@ with tempfile.TemporaryDirectory(prefix="elsewhere-isolation-") as directory:
                 return False
         wait_for(outside_ready)
         external_defaults = defaults(outside_env)
-        external_player = start(["gst-launch-1.0", "-q", "audiotestsrc", "is-live=true", "freq=1320", "volume=0.1", "!", "audioconvert", "!", "pulsesink", "stream-properties=properties,application.name=OutsideHostTest"], outside_env, outside / "player.log")
+        generator = subprocess.Popen(["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+            "sine=frequency=1320:sample_rate=48000", "-af", "volume=0.8,pan=stereo|c0=c0|c1=c0", "-f", "f32le", "pipe:1"],
+            env=outside_env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        children.append(generator)
+        external_player = start(["pacat", "--playback", "--raw", "--format=float32le", "--rate=48000", "--channels=2",
+            "--latency-msec=20", "--client-name=OutsideHostTest"], outside_env, outside / "player.log", stdin=generator.stdout)
+        generator.stdout.close()
         time.sleep(.4)
         assert amplitudes(outside_env, "outside-output")[2] > .05
         external_nodes = {o["id"] for o in graph(outside_env) if o["type"].endswith("Node")}

@@ -5,6 +5,7 @@ import {spawn} from 'node:child_process';
 import {mkdir, mkdtemp, open, readFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {chromium} from 'playwright-core';
+import {toneCommand} from './audio-fixture.mjs';
 
 const root = await mkdtemp(tmpdir() + '/elsewhere-pip-probe-');
 await mkdir(root + '/runtime', {mode: 0o700});
@@ -80,9 +81,7 @@ try {
   await page.goto(origin + '/#token=' + token);
   await page.waitForFunction(() => !!window.elsewhere?.store.get().stream);
   await page.evaluate(() => elsewhere.takeControl());
-  await page.evaluate(
-      () => elsewhere.spawn(
-          'gst-launch-1.0 -q audiotestsrc is-live=true freq=440 volume=0.1 ! audioconvert ! audio/x-raw,rate=48000,channels=2 ! pipewiresink sync=false'));
+  await page.evaluate(command => elsewhere.spawn(command), toneCommand());
   await page.waitForFunction(() => !!elsewhere.store.get().playback);
   await page.evaluate(() => elsewhere.mic.start());
   await page.waitForFunction(() => elsewhere.store.get().mic);

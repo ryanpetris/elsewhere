@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, readdir, rm, open, writeFile } from 'node:fs/
 import { spawn, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { chromium } from 'playwright-core';
+import { toneCommand } from './audio-fixture.mjs';
 
 const rtc = process.argv.includes('--rtc');
 const root = await mkdtemp(tmpdir() + '/elsewhere-private-check-');
@@ -85,7 +86,7 @@ try {
   await page.waitForTimeout(500);
   assert.equal(await page.evaluate(() => elsewhere.store.get().audioAvailable), true);
   console.log('invalid microphone lengths leave audio available');
-  await page.evaluate(() => elsewhere.spawn('gst-launch-1.0 -q audiotestsrc is-live=true num-buffers=900 freq=440 volume=0.1 ! audioconvert ! audio/x-raw,rate=48000,channels=2 ! pipewiresink sync=false'));
+  await page.evaluate(command => elsewhere.spawn(command), toneCommand({ seconds: 20 }));
   await page.waitForTimeout(2000);
   console.log('native audio stats', await page.evaluate(() => elsewhere.store.get().stats.audio));
   let clientEnv;
@@ -118,7 +119,7 @@ try {
     console.log('real session audio stayed on WebSocket during RTC playback, fallback and recovery');
   }
 
-  await page.evaluate(() => elsewhere.spawn('gst-launch-1.0 -q audiotestsrc is-live=true num-buffers=300 freq=880 volume=0.1 ! audioconvert ! pulsesink'));
+  await page.evaluate(command => elsewhere.spawn(command), toneCommand({ frequency: 880, seconds: 7, pulse: true }));
   await page.evaluate(() => { elsewhere.store.get().playback.source.smoothingTimeConstant = 0; });
   await page.waitForTimeout(1000);
   const tones = await page.evaluate(() => {

@@ -32,7 +32,7 @@ def owned_audio(pid):
     return found
 
 
-def run_case(name, *, replacement=None, no_audio=False, during_startup=False, group_signal=False, kill_service=None, missing_plugin=False, missing_home=False, freeze_worker=False):
+def run_case(name, *, replacement=None, no_audio=False, during_startup=False, group_signal=False, kill_service=None, missing_codec=False, missing_home=False, freeze_worker=False):
     with tempfile.TemporaryDirectory(prefix="elsewhere-audio-check-") as directory:
         root = Path(directory)
         for folder in ("home", "runtime", "bin"):
@@ -43,13 +43,18 @@ def run_case(name, *, replacement=None, no_audio=False, during_startup=False, gr
         if missing_home:
             env.pop("HOME", None)
             env.pop("XDG_CONFIG_HOME", None)
-        if missing_plugin:
-            plugins = root / "plugins"
-            plugins.mkdir()
-            for plugin in [*Path("/usr/lib").glob("gstreamer-1.0/*.so"), *Path("/usr/lib").glob("*/gstreamer-1.0/*.so")]:
-                if "pipewire" not in plugin.name:
-                    (plugins / plugin.name).symlink_to(plugin)
-            env.update(GST_PLUGIN_SYSTEM_PATH=str(plugins), GST_PLUGIN_PATH="", GST_REGISTRY=str(root / "registry.bin"))
+        if missing_codec:
+            # Exercise normal codec discovery failure without changing application behavior or
+            # hiding shared libraries needed to start the rest of the desktop.
+            source = root / "missing-opus.c"
+            source.write_text('#define _GNU_SOURCE\n#include <dlfcn.h>\n#include <string.h>\n'
+                              'const void *avcodec_find_encoder_by_name(const char *name) {\n'
+                              'if (!strcmp(name, "libopus")) return 0;\n'
+                              'const void *(*find)(const char *) = dlsym(RTLD_NEXT, "avcodec_find_encoder_by_name");\n'
+                              'return find(name);\n}\n')
+            library = root / "missing-opus.so"
+            subprocess.run(["cc", "-shared", "-fPIC", str(source), "-ldl", "-o", str(library)], check=True, timeout=10)
+            env["LD_PRELOAD"] = str(library)
         if replacement:
             program, body = replacement
             wrapper = root / "bin" / program
@@ -96,7 +101,7 @@ def run_case(name, *, replacement=None, no_audio=False, during_startup=False, gr
                 assert "compositor ready" in text, name
                 if no_audio:
                     assert not owned, "no-audio started services"
-                elif replacement or missing_plugin or freeze_worker:
+                elif replacement or missing_codec or freeze_worker:
                     assert "audio unavailable" in text, "failed audio was not reported"
                     if freeze_worker:
                         assert frozen and "native audio pipeline startup timed out" in text, "worker deadline was not exercised"
@@ -137,7 +142,7 @@ def run_case(name, *, replacement=None, no_audio=False, during_startup=False, gr
                 else:
                     raise AssertionError("service failure was not reported")
                 assert process.poll() is None, "audio failure stopped the desktop"
-            if (replacement or missing_plugin or freeze_worker or kill_service) and not during_startup:
+            if (replacement or missing_codec or freeze_worker or kill_service) and not during_startup:
                 deadline = time.monotonic() + 3
                 while time.monotonic() < deadline and any(path.exists() for path in owned.values()):
                     time.sleep(.02)
@@ -175,7 +180,7 @@ if __name__ == "__main__":
     run_case("no-audio", no_audio=True)
     run_case("missing service", replacement=("wireplumber", "exit 127"))
     run_case("partial startup failure", replacement=("pipewire-pulse", "exit 127"))
-    run_case("missing native plugin", missing_plugin=True)
+    run_case("missing Opus encoder", missing_codec=True)
     run_case("missing home configuration", missing_home=True)
     run_case("readiness timeout", replacement=("pipewire", 'if [ "$1" = --version ]; then exec /usr/bin/pipewire "$@"; fi\nexec sleep 60'))
     run_case("SIGTERM during startup", replacement=("pipewire", 'if [ "$1" = --version ]; then exec /usr/bin/pipewire "$@"; fi\nexec sleep 60'), during_startup=True)

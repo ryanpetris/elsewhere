@@ -2,6 +2,8 @@
 #[allow(dead_code)]
 #[path = "../src/audio.rs"]
 mod audio;
+#[path = "common/tone.rs"]
+mod tone;
 
 use anyhow::Context;
 use pipewire::{
@@ -78,51 +80,24 @@ fn main() -> anyhow::Result<()> {
     if std::env::args().nth(1).as_deref() != Some("--native") {
         let services = audio::Services::start(&Arc::new(AtomicBool::new(false)))?;
         let env = services.client_env();
-        let _player = Probe(
-            Command::new("gst-launch-1.0")
-                .args([
-                    "-q",
-                    "audiotestsrc",
-                    "is-live=true",
-                    "freq=440",
-                    "volume=0.1",
-                    "!",
-                    "audioconvert",
-                    "!",
-                    "audio/x-raw,rate=48000,channels=2",
-                    "!",
-                    "pipewiresink",
-                    "sync=false",
-                    "stream-properties=properties,node.name=probe-playback",
-                ])
-                .envs(env.clone())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()?,
-        );
-        let _microphone = Probe(
-            Command::new("gst-launch-1.0")
-                .args([
-                    "-q",
-                    "audiotestsrc",
-                    "is-live=true",
-                    "freq=880",
-                    "volume=0.05",
-                    "!",
-                    "audioconvert",
-                    "!",
-                    "audio/x-raw,rate=48000,channels=1",
-                    "!",
-                    "pipewiresink",
-                    "sync=false",
-                    "target-object=elsewhere-microphone-input",
-                    "stream-properties=properties,node.name=probe-microphone",
-                ])
-                .envs(env.clone())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()?,
-        );
+        if std::env::args().nth(1).as_deref() == Some("--media") {
+            let socket = env.iter().find(|(key, _)| key == "PIPEWIRE_REMOTE").context("private test socket")?.1.clone();
+            let mut check = Probe(Command::new("cargo").args(["test", "-p", "elsewhere-stream", "--lib",
+                "private_pipewire_capture_microphone_and_stop", "--", "--ignored", "--nocapture"])
+                .envs(env.clone()).env("ELSEWHERE_TEST_PIPEWIRE", socket)
+                .env("PIPEWIRE_REMOTE", "/nonexistent/inherited-audio")
+                .env("PIPEWIRE_NODE", "99999").env("PIPEWIRE_AUTOCONNECT", "false")
+                .env("PIPEWIRE_PROPS", "{ target.object = 99999 node.dont-fallback = false }")
+                .env("PULSE_SINK", "wrong").env("PULSE_SOURCE", "wrong").spawn()?);
+            anyhow::ensure!(check.wait(Duration::from_secs(60))?.success(), "private media check failed");
+            let state = graph(&env)?;
+            anyhow::ensure!(!state.as_array().context("graph array")?.iter().any(|node|
+                matches!(node["info"]["props"]["node.name"].as_str(), Some("elsewhere-capture" | "elsewhere-microphone-stream" | "audio-test-tone"))),
+                "native media nodes survived their workers");
+            return Ok(());
+        }
+        let _player = tone::Tone::start(&env, 440, 0.1, 2, "probe-playback", "AudioProbe", None, false)?;
+        let _microphone = tone::Tone::start(&env, 880, 0.05, 1, "probe-microphone", "AudioProbe", Some("elsewhere-microphone-input"), false)?;
         let mut recording = tempfile::NamedTempFile::new()?;
         let recorder = Probe(
             Command::new("pw-record")

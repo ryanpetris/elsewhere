@@ -2,6 +2,8 @@
 #[allow(dead_code)]
 #[path = "../src/audio.rs"]
 mod audio;
+#[path = "common/tone.rs"]
+mod tone;
 
 use anyhow::{Context, Result, ensure};
 use elsewhere_core::audio::{Command as MixerCommand, Event, Kind, Request, Snapshot};
@@ -72,16 +74,11 @@ fn main() -> Result<()> {
     }
     if std::env::args().nth(1).as_deref() != Some("--native") {
         let services = audio::Services::start(&Arc::new(AtomicBool::new(false)))?;
-        let mut probes = Vec::new();
-        for (frequency, volume, sink, properties) in [
-            ("440", "0.1", "pipewiresink", "stream-properties=properties,node.name=NativeTest,node.description=NativeTest,media.name=NativeTest,application.name=MixerTest"),
-            ("880", "0.2", "pulsesink", "stream-properties=properties,media.name=PulseTest,application.name=MixerTest"),
-        ] {
-            probes.push(Probe(Command::new("gst-launch-1.0").args(["-q", "audiotestsrc", "is-live=true", &format!("freq={frequency}"), &format!("volume={volume}"), "!", "audioconvert", "!", "audio/x-raw,format=S16LE,rate=48000,channels=2", "!", sink, "sync=false", properties])
-                .envs(services.client_env()).stdout(Stdio::null()).stderr(Stdio::inherit()).spawn()?));
-        }
-        probes.push(Probe(Command::new("pw-record").args(["--raw", "--format=f32", "--rate=48000", "--channels=1", "-"])
-            .envs(services.client_env()).stdout(Stdio::null()).stderr(Stdio::inherit()).spawn()?));
+        let env = services.client_env();
+        let _native = tone::Tone::start(&env, 440, 0.1, 2, "NativeTest", "MixerTest", None, false)?;
+        let _pulse = tone::Tone::start(&env, 880, 0.2, 2, "PulseTest", "MixerTest", None, true)?;
+        let _recording = Probe(Command::new("pw-record").args(["--raw", "--format=f32", "--rate=48000", "--channels=1", "-"])
+            .envs(services.client_env()).stdout(Stdio::null()).stderr(Stdio::inherit()).spawn()?);
         let mut child = Probe(Command::new(std::env::current_exe()?).arg("--native").envs(services.client_env()).spawn()?);
         let deadline = Instant::now() + Duration::from_secs(60);
         let status = loop { if let Some(status) = child.0.try_wait()? { break status; } ensure!(Instant::now() < deadline, "mixer check timed out"); std::thread::sleep(Duration::from_millis(10)); };
@@ -138,7 +135,7 @@ fn main() -> Result<()> {
     rig.wait("explicit target restored", |r| r.state.nodes.iter().any(|n| n.id == native && n.targets == [other.clone()]) && r.peak(&other, 0.0125))?;
     rig.send(2, 2, MixerCommand::Default { id: other.clone() })?;
     rig.wait("WirePlumber changes the session default", |r| r.state.nodes.iter().any(|n| n.id == other && n.is_default) && r.state.nodes.iter().any(|n| n.id == output && !n.is_default))?;
-    let next_player = || -> Result<Probe> { Ok(Probe(Command::new("gst-launch-1.0").args(["-q", "audiotestsrc", "is-live=true", "freq=1320", "volume=0.15", "!", "audioconvert", "!", "audio/x-raw,rate=48000,channels=2", "!", "pipewiresink", "sync=false", "stream-properties=properties,node.name=NextTest,node.description=NextTest,media.name=NextTest"]).stdout(Stdio::null()).spawn()?)) };
+    let next_player = || tone::Tone::start(&[], 1320, 0.15, 2, "NextTest", "MixerTest", None, false);
     let next = next_player()?;
     rig.wait("new application uses changed default", |r| r.state.nodes.iter().any(|n| n.name == "NextTest" && n.targets == [other.clone()]))?;
     let removed = rig.id("NextTest")?;

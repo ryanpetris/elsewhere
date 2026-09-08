@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, readdir, rm, open, writeFile } from 'node:fs/
 import { spawn, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { chromium } from 'playwright-core';
+import { toneCommand } from './audio-fixture.mjs';
 
 const disabled = process.argv.includes('--no-audio');
 const root = await mkdtemp(tmpdir() + '/elsewhere-private-check-');
@@ -62,7 +63,7 @@ try {
   const panel = page.getByRole('region', { name: 'Session audio mixer', exact: true });
   await panel.waitFor();
   assert.equal(await page.evaluate(() => elsewhere.store.get().mic), false);
-  await page.evaluate(() => elsewhere.spawn('gst-launch-1.0 -q audiotestsrc is-live=true freq=440 volume=0.1 ! audioconvert ! audio/x-raw,format=S16LE,rate=48000,channels=2 ! pipewiresink sync=false stream-properties=properties,node.name=MixerBrowserTest,node.description=MixerBrowserTest,media.name=MixerBrowserTest,application.name=BrowserTest'));
+  await page.evaluate(command => elsewhere.spawn(command), toneCommand({ name: 'MixerBrowserTest', application: 'BrowserTest' }));
   await page.waitForFunction(() => {
     const node = elsewhere.store.get().mixer.nodes.find(n => n.name === 'MixerBrowserTest');
     return node?.meter_active && elsewhere.store.get().mixerLevels[node.id] > .09;
@@ -123,7 +124,7 @@ try {
   }
   assert.equal(await participant.evaluate(id => elsewhere.store.get().mixer.nodes.find(n => n.id === id).mute, nativeId), false);
   console.log('read-only/participant rejection, handoff, shared authoritative state and malformed/stale errors passed');
-  await participant.evaluate(() => elsewhere.spawn('gst-launch-1.0 -q audiotestsrc is-live=true freq=880 volume=0.2 ! audioconvert ! pulsesink sync=false stream-properties=properties,application.name=BrowserTest'));
+  await participant.evaluate(command => elsewhere.spawn(command), toneCommand({ frequency: 880, volume: .2, pulse: true, application: 'BrowserTest' }));
   await page.waitForFunction(() => elsewhere.store.get().mixer.nodes.filter(n => n.kind === 'playback' && n.application === 'BrowserTest').length === 2);
   let clientEnv;
   for (const id of (await readdir('/proc')).filter(n => /^\d+$/.test(n))) {
