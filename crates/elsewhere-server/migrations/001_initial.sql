@@ -10,6 +10,5 @@ CREATE TABLE tokens (
 CREATE TABLE token_permissions (
     token_id TEXT NOT NULL REFERENCES tokens(id) ON DELETE CASCADE,
     permission TEXT NOT NULL CHECK (length(permission) > 0),
-    created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0),
     PRIMARY KEY (token_id, permission)
 ) STRICT;

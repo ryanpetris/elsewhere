@@ -111,7 +111,7 @@ impl Store {
             let tx = db.transaction()?;
             tx.execute("INSERT INTO tokens VALUES (?1, ?2, ?3, ?4, ?5)", params![metadata.id.to_string(), digest.as_slice(), metadata.label, metadata.created_at_ms, metadata.expires_at_ms])?;
             for permission in &metadata.permissions {
-                tx.execute("INSERT INTO token_permissions VALUES (?1, ?2, ?3)", params![metadata.id.to_string(), permission.name(), metadata.created_at_ms])?;
+                tx.execute("INSERT INTO token_permissions VALUES (?1, ?2)", params![metadata.id.to_string(), permission.name()])?;
             }
             tx.commit()?;
             Ok(Created { token: secret, metadata })
@@ -152,12 +152,10 @@ fn read_tokens(db: &Connection, id: Option<&str>) -> Result<Vec<Token>> {
         let expires_at_ms: Option<i64> = row.get(3)?;
         let digest: Vec<u8> = row.get(4)?;
         ensure!(digest.len() == 32 && created_at_ms >= 0 && expires_at_ms.is_none_or(|e| e > created_at_ms), "invalid token record");
-        let mut grants = db.prepare("SELECT permission, created_at_ms FROM token_permissions WHERE token_id = ?1 ORDER BY permission")?;
+        let mut grants = db.prepare("SELECT permission FROM token_permissions WHERE token_id = ?1 ORDER BY permission")?;
         let mut grants = grants.query([&id])?;
         let mut permissions = BTreeSet::new();
         while let Some(row) = grants.next()? {
-            let timestamp: i64 = row.get(1)?;
-            ensure!(timestamp >= created_at_ms, "invalid grant timestamp");
             permissions.insert(Permission::parse(&row.get::<_, String>(0)?)?);
         }
         tokens.push(Token { id: parse_id(&id)?, label, created_at_ms, expires_at_ms, permissions });
@@ -186,7 +184,6 @@ mod tests {
         assert_eq!(second.authenticate(&created.token).await?.unwrap().id, created.metadata.id);
         assert!(second.authenticate(&created.token.to_uppercase()).await?.is_none());
         first.run(|db| {
-            assert_eq!(db.query_row("SELECT COUNT(*) FROM token_permissions WHERE created_at_ms != (SELECT created_at_ms FROM tokens WHERE tokens.id = token_id)", [], |r| r.get::<_, i64>(0))?, 0);
             db.execute_batch("CREATE TRIGGER reject_grant BEFORE INSERT ON token_permissions BEGIN SELECT RAISE(ABORT, 'blocked'); END;")?;
             Ok(())
         }).await?;
