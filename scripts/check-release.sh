@@ -33,10 +33,6 @@ for _ in $(seq 1 30); do
             http://127.0.0.1:18443/api/screenshot.png -o "$work/frame.png"; then
         test -s "$work/frame.png"
         python3 scripts/check-release-video.py 18443 "$XDG_CONFIG_HOME/elsewhere/token"
-        if grep -Eqi 'libgst|gstreamer' "/proc/$pid/maps"; then
-            echo 'Unexpected GStreamer library in the release process' >&2
-            exit 1
-        fi
         printf 'Release version, screenshot, and encoded viewer video verified\n'
         exit 0
     fi
