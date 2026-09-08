@@ -35,7 +35,7 @@ struct Cli {
     /// browser decodes in hardware, among what this machine encodes.
     #[arg(long, default_value = "auto", value_parser = ["auto", "h264", "hevc", "vp9", "av1", "vp8"])]
     codec: String,
-    /// Encode on the CPU (libvpx, x264, x265, SVT-AV1: whichever is installed) instead of with VA-API,
+    /// Encode on the CPU (libvpx, x264, x265, libaom: whichever is installed) instead of with VA-API,
     /// for machines without a usable GPU encoder. Slower; the desktop runs at 30 Hz.
     #[arg(long)]
     software_encoding: bool,

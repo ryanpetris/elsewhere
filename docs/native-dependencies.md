@@ -6,7 +6,7 @@ their copyright notices and their corresponding source packages.
 
 Media processing uses [FFmpeg](https://ffmpeg.org/legal.html), including libavcodec, libavutil,
 libavfilter, libswscale, libswresample, libavformat and libavdevice. Distribution builds commonly
-include libvpx, x264, x265, libaom, SVT-AV1 and libopus. FFmpeg's license depends on its build options;
+include libvpx, x264, x265, libaom and libopus. FFmpeg's license depends on its build options;
 consult the installed FFmpeg package's license and copyright files for that build.
 
 Device access uses [PipeWire](https://gitlab.freedesktop.org/pipewire/pipewire),

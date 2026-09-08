@@ -32,7 +32,7 @@ impl Encoders {
                 (false, Codec::Hevc) => &["libx265"],
                 (false, Codec::Vp8) => &["libvpx"],
                 (false, Codec::Vp9) => &["libvpx-vp9"],
-                (false, Codec::Av1) => &["libaom-av1", "libsvtav1"],
+                (false, Codec::Av1) => &["libaom-av1"],
             };
             'candidate: for &name in names {
                 if ffmpeg::encoder::find_by_name(name).is_none() { continue; }
@@ -88,7 +88,12 @@ impl VideoEncoder {
         video.set_max_b_frames(0);
         video.set_gop(if hw_frames.is_null() { i32::MAX as u32 } else { 1024 });
         video.set_qmin(0);
-        video.set_qmax(match choice.codec { Codec::H264 | Codec::Hevc => 51, _ => 63 });
+        // VA uses native quantizer indices; software VP9/AV1 expose the 0..63 scale.
+        video.set_qmax(match choice.codec {
+            Codec::H264 | Codec::Hevc => 51,
+            Codec::Vp9 | Codec::Av1 if !hw_frames.is_null() => 255,
+            _ => 63,
+        });
         let mut options = ffmpeg::Dictionary::new();
         let index = match effort { EncodingEffort::Fast => 0, EncodingEffort::Balanced => 1, EncodingEffort::High => 2 };
         let mut state = EffortState { requested: effort, applied: Some(effort), encoder: Some(choice.name.into()), setting: None, pending: true };
@@ -148,12 +153,6 @@ impl VideoEncoder {
                         options.set("row-mt", "1");
                         options.set("cpu-used", speed);
                         state.setting = Some(format!("cpu-used={speed}"));
-                    }
-                    "libsvtav1" => {
-                        let preset = ["12", "10", "8"][index];
-                        options.set("preset", preset);
-                        options.set("svtav1-params", "rtc=1:lookahead=0:hierarchical-levels=0");
-                        state.setting = Some(format!("preset={preset}"));
                     }
                     "libopenh264" => { state.applied = None; }
                     _ => bail!("unknown software encoder"),

@@ -332,7 +332,7 @@ mod tests {
                 (Codec::Hevc, &["libx265"][..]),
                 (Codec::Vp8, &["libvpx"][..]),
                 (Codec::Vp9, &["libvpx-vp9"][..]),
-                (Codec::Av1, &["libaom-av1", "libsvtav1"][..]),
+                (Codec::Av1, &["libaom-av1"][..]),
             ] {
                 if libraries.iter().any(|name| ffmpeg_next::encoder::find_by_name(name).is_some()) {
                     assert!(encoders.codecs().contains(&codec), "installed software codec {codec:?} failed its capability probe");

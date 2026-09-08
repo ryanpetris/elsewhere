@@ -188,7 +188,7 @@ RGB input is full range; converted NV12 and encoded output use limited-range BT.
 
 With `--software-encoding`, the compositor supplies memory or linear DMA-buf pixels. The worker maps
 and synchronizes DMA-buf CPU access, converts through libswscale, and uses libvpx, libx264 or
-OpenH264, libx265, or libaom/SVT-AV1. The compositor clock runs at 30 Hz in this mode. Software codec
+OpenH264, libx265, or libaom. The compositor clock runs at 30 Hz in this mode. Software codec
 preference is VP8, H.264, VP9, HEVC, AV1; hardware preference is AV1, HEVC, VP9, H.264. Native capability
 probes require an actual keyframe. The browser intersects that list with its WebCodecs support;
 `--codec` wins when both sides support it. AV1 and VP9 codec levels are selected from picture size.

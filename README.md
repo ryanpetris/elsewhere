@@ -37,7 +37,7 @@ with Python 3 and Git; run it in the Docker rig.
 - Linux, with a GPU render node (`/dev/dri/renderD128`) and Mesa for hardware rendering and encoding, or
   none at all (Mesa's llvmpipe renders and the CPU encodes; see below).
 - FFmpeg 6.1 or later, with VAAPI support for hardware encoding. `--software-encoding` uses
-  libvpx, x264 or OpenH264, x265, and libaom or SVT-AV1, according to the installed FFmpeg build.
+  libvpx, x264 or OpenH264, x265, and libaom, according to the installed FFmpeg build.
   Software encoding runs the desktop at 30 Hz. Standard distribution FFmpeg packages supply these
   libraries; codec availability is checked by opening an encoder and producing a keyframe.
 - `xorg-xwayland` for X11 clients. Audio requires PipeWire 1.4.2+, its Pulse compatibility service,
