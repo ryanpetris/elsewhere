@@ -49,7 +49,7 @@ FROM archlinux:latest AS media-runtime
 RUN pacman -Sy --noconfirm archlinux-keyring \
     && pacman -Syu --noconfirm --needed \
         ffmpeg \
-        mesa vulkan-intel vulkan-radeon libva intel-media-driver libva-mesa-driver xorg-xwayland \
+        mesa vulkan-intel vulkan-radeon libva intel-media-driver libva-mesa-driver libxkbcommon xorg-xwayland \
         dbus pipewire pipewire-pulse pipewire-alsa wireplumber libpulse \
         ttf-dejavu \
     && rm -rf /var/cache/pacman/pkg/*
