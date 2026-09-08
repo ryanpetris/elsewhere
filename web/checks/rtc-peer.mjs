@@ -26,8 +26,8 @@ class Peer {
 }
 globalThis.RTCPeerConnection = Peer;
 const settle = async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); };
-let messages = 0, opens = 0, failures = [], offers = [];
-const start = () => openRtc({ iceServers: [], endpoint: { host: 'localhost', port: 8080 }, g: 7, signal: o => offers.push(o), onMessage: () => messages++, onOpen: () => opens++, onClose: reason => failures.push(reason) });
+let messages = 0, opens = 0, failures = [], offers = [], received = [];
+const start = () => openRtc({ iceServers: [], endpoint: { host: 'localhost', port: 8080 }, g: 7, signal: o => offers.push(o), onMessage: (buffer, arrival) => { messages++; received.push({ bytes: [...new Uint8Array(buffer)], arrival }); }, onOpen: () => opens++, onClose: reason => failures.push(reason) });
 let peer = start();
 const oldOpen = pc.channel.onopen, oldMessage = pc.channel.onmessage, oldClose = pc.channel.onclose;
 peer.close();
@@ -75,4 +75,24 @@ pc.iceGatheringState = 'complete'; pc.onicegatheringstatechange();
 assert.equal(timers.size, 0);
 assert.equal(offers.length, 2);
 peer.close();
-console.log('RTC peer callback disposal, late gathering, rejected answers and connection failures passed');
+
+// Pacing a frame's remaining fragments must not move its first-arrival timestamp.
+let now = 100;
+Object.defineProperty(globalThis, 'performance', { configurable: true, value: { now: () => now } });
+const fragment = (id, index, count, bytes) => {
+  const data = new Uint8Array(9 + bytes.length), view = new DataView(data.buffer);
+  view.setUint32(1, id, true); view.setUint16(5, index, true); view.setUint16(7, count, true);
+  data.set(bytes, 9);
+  return { data: data.buffer };
+};
+peer = start();
+pc.channel.onmessage(fragment(1, 0, 2, [2, 3]));
+assert.equal(received.length, 0, 'partial video cannot reach the decoder');
+now = 900;
+pc.channel.onmessage(fragment(1, 1, 2, [4, 5]));
+assert.deepEqual(received, [{ bytes: [2, 3, 4, 5], arrival: 100 }]);
+now = 950;
+pc.channel.onmessage(fragment(2, 0, 1, [6]));
+assert.deepEqual(received[1], { bytes: [6], arrival: 950 });
+peer.close();
+console.log('RTC peer callback disposal, gathering, failure and first-fragment arrival checks passed');

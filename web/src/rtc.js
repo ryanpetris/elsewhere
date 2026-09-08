@@ -19,7 +19,7 @@ export function openRtc({ iceServers, endpoint, g, signal, onMessage, onOpen, on
     const id = dv.getUint32(1, true), index = dv.getUint16(5, true), count = dv.getUint16(7, true);
     let p = parts.get(id);
     if (!p) {
-      p = { got: 0, chunks: new Array(count) };
+      p = { got: 0, chunks: new Array(count), arrival: performance.now() };
       parts.set(id, p);
       if (parts.size > 8) { parts.delete(parts.keys().next().value); incomplete++; } // a frame that lost a fragment is forgotten
     }
@@ -29,7 +29,7 @@ export function openRtc({ iceServers, endpoint, g, signal, onMessage, onOpen, on
     const out = new Uint8Array(p.chunks.reduce((n, c) => n + c.length, 0));
     let o = 0;
     for (const c of p.chunks) { out.set(c, o); o += c.length; }
-    onMessage(out.buffer);
+    onMessage(out.buffer, p.arrival);
   };
   ch.onopen = () => { if (!closed) onOpen(); };
   ch.onclose = () => fail('Data channel closed');

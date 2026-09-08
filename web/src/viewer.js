@@ -341,7 +341,7 @@ export function createViewer() {
     send(REQUEST_KEYFRAME, 0);
   }
 
-  function onMessage(buf, via = 'websocket') {
+  function onMessage(buf, via = 'websocket', arrival = performance.now()) {
     windowBytes += buf.byteLength;
     const dv = new DataView(buf);
     switch (dv.getUint8(0)) {
@@ -480,7 +480,8 @@ export function createViewer() {
         const key = (dv.getUint8(1) & 1) !== 0, seq = dv.getUint16(2, true), pts = Number(dv.getBigUint64(4, true)), now = performance.now();
         // Both paths share a sequence; late and duplicate frames cannot update the path baselines.
         if (videoSeq >= 0 && ((videoSeq - seq) & 0xffff) < 0x8000) return;
-        delaySec = Math.min(delaySec, now - pts / 1000); // how late the frame is against its stamp; the second's least is what the link added
+        // First-fragment arrival includes queued video, but excludes deliberately paced assembly.
+        delaySec = Math.min(delaySec, arrival - pts / 1000);
         if (lastPts && pts - lastPts < 100e3 && now - lastArrival > 500) freezes++; // frames made together arriving apart: the link held them
         lastArrival = now; lastPts = pts;
         if (key) { keyframes++; sinceKey = 0; } else sinceKey++;
@@ -693,7 +694,7 @@ export function createViewer() {
       rtc = openRtc({
         iceServers, endpoint: pageEndpoint(location), g: attempt.g,
         signal: o => { if (current()) sendText(RTC_CLIENT, JSON.stringify(o)); },
-        onMessage: buf => { if (current()) onMessage(buf, 'webrtc'); },
+        onMessage: (buf, arrival) => { if (current()) onMessage(buf, 'webrtc', arrival); },
         onOpen: () => {
           if (!current()) return;
           clearTimeout(rtcTimer);

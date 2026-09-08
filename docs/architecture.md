@@ -201,7 +201,7 @@ is ready, including on an idle desktop. Accepted final pictures are encoded with
 animation. The compositor also requests one refinement frame 150 ms after the picture settles; it
 uses the current target without a bitrate-change cycle.
 
-The worker also budgets input from the bytes it delivers. A packet can exceed the encoder's target
+The worker also budgets input from the bytes it delivers. An encoder can exceed its target bitrate
 even at the largest quantizer. Before encoding another picture, the worker waits for that packet's
 byte budget, crediting conversion and encoding time. It releases raw input during the wait and
 requests a fresh complete picture when the budget is available. Idle time and blocked output do not
@@ -238,6 +238,10 @@ under sustained output backlog, slow sends, excess RTT or browser delay/drop rep
 reduction for two seconds and raises the target by a quarter after five clean seconds, up to the
 ceiling. Targets below 3 Mbit/s cap delivery at 30 fps. Both read-only and controlling viewers report
 congestion. Encoder reopening preserves this adaptation state.
+RTC delay reports use the first fragment's arrival time so deliberate spacing of a large frame's
+remaining fragments does not itself signal congestion. Full-frame arrival gaps and decoder drops
+still feed recovery. A delayed tail on an isolated low-frame-rate picture may reach the native
+three-second stall deadline before those browser checks detect it.
 
 Effort is separate from Quality. Fast, Balanced and High map to encoder-specific speed settings and
 preserve the requested preference across codec changes and reconnects. The page shows pending until
