@@ -80,7 +80,9 @@ and regressions describe the decoded marker, which can itself suffer compression
 separate from the browser drop counters. This includes capture, encode,
 transport, decode and browser paint submission, plus the same stripe readback for every setting. It
 does not include physical display scanout or input-to-response delay. Encoded payload bytes give the
-actual bitrate. Browser counters distinguish transport loss, decoder drops and decode errors.
+actual bitrate. Browser counters distinguish protocol sequence gaps, delta-drop events and decode
+errors. A delta-drop event starts keyframe recovery after a sequence gap or a decoder queue above four
+frames. Further deltas skipped while waiting for the key do not increase that counter.
 
 The worker's `ffmpeg encoded` trace reports conversion plus encoding time as `encode_us` and time
 from raw submission to packet as `submit_to_packet_us`. These are elapsed times, not CPU time.
