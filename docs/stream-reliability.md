@@ -101,6 +101,8 @@ three 60-second repeats of each scene for each listed codec/resolution. It uses 
 libva 2.24, Intel media driver 26.2.4 and Mesa 26.2.2. Encoding uses VAAPI and Fast effort.
 The source, compositor, encoders and viewer browser share one machine; multiple viewers are pages
 in one browser instance, not independent physical clients.
+Other machine activity was not fully controlled. The affected multi-viewer samples require a quiet
+rerun before attributing the measured slowdown to a reproducible viewer load limit.
 
 Forty-five single-viewer samples and the 24 three-viewer 720p samples use the same build. Three single-viewer
 samples use a build with equivalent hardware media code and settings; its software VP9 settings
@@ -122,17 +124,22 @@ contains 12 samples. Single-viewer links use 12 Mbit/s and 100 packets; three-vi
 | AV1 | 1280×720 | 3 | 106–238 | 225.2 | 53.3–54.2 | 5.446–6.586 |
 
 Every observed viewer in both 720p matrices met the p99-below-300-ms and gap-below-500-ms targets.
-All 72 samples had zero qdisc packet drops, primary decoder-pressure drops, decoder errors and fallback.
+All 72 samples had zero qdisc packet drops, primary browser delta drops, decoder errors and fallback.
 The three single-viewer AV1 720p scroll samples started at 4 Mbit/s and recovered to 8 Mbit/s, each
 with four reopens and four key requests. The other 45 single-viewer samples and every page in the
 three-viewer 720p samples held 8 Mbit/s during measurement.
 
 The primary protocol-loss counter totaled 16 across the single-viewer samples and two across the
-three-viewer 720p samples. Those counts are distinct from decoder-pressure drops and network loss:
+three-viewer 720p samples. Those counts are distinct from browser delta drops and network loss:
 replacing unsent video with a key can leave protocol sequence gaps. Source-clock sequence gaps are
 different again. In single-viewer H.264 1080p cuts, byte admission delivered 28.6–29.1 frames/s from
 about 54 source positions/s, skipping roughly 1,500 source positions per sample to contain output
 rate. That is a visible cadence tradeoff despite bounded frame age and paint gaps.
+
+The browser delta-drop counter increments for the first non-key frame discarded after a sequence gap
+or when the decoder queue exceeds four. Further discarded deltas while awaiting a key do not increment
+it. A nonzero count alone does not identify decoder pressure; the queue and timing observations provide
+that distinction.
 
 Per-session queue distributions stayed stable across sample quarters and repeatedly returned to
 empty, with at most 475 ms between observed empty states. The largest single-viewer primary queue
@@ -149,15 +156,18 @@ Diagnostic native three-viewer 1080p samples from the same pre-correction build 
 playback pressure, tracked in
 [issue #73](https://github.com/ryanpetris/elsewhere/issues/73). One AV1 cuts sample averaged about 33 frames/s per
 viewer, reached 890 ms worst viewer p99 age and 2.585 s maximum displayed age, and ended near
-1–1.5 Mbit/s after decoder-pressure drops and reopens. AV1 game samples reached 1.860 s maximum
+1–1.5 Mbit/s after browser delta drops and reopens. AV1 game samples reached 1.860 s maximum
 age even while server queues were empty in about 97% of observations and native encoding p99 was
 about 18 ms. Receive-to-decoder-output and drawing timings locate delay downstream of native encoding
 and transport; the contributions of CPU, GPU, decoder backend, browser scheduling and measurement
 readback remain unresolved.
 H.264 scroll had an affected sample followed by two repeats at 8 Mbit/s and about 52–53 frames/s,
-with zero primary decoder-pressure drops and worst all-viewer gaps of 103 and 92 ms. These stress
+with zero primary browser delta drops and worst all-viewer gaps of 103 and 92 ms. These stress
 observations must not be described as uniformly low-latency playback, sustained H.264 failure, or
 measurements of the corrected controller.
+The same build's H.264 cuts sample failed the one-second progress check with a 1.851 s paint gap.
+Its low-target recovery also exposed intentional key replacement being counted as congestion;
+that failure remains separate from the corrected-controller cuts samples below.
 
 A separate three-viewer AV1 720p scroll condition kept only 100 packets at 36 Mbit/s. Its three
 samples recorded 36, 55 and 74 non-injected qdisc drops; the worst paint gap was 1.058 s. That
@@ -166,3 +176,96 @@ than 100 packets at 12 Mbit/s. A 300-packet diagnostic had zero drops and worst 
 maintained 300-packet 720p matrix is reported above. Sampled queue length did not directly capture
 the instantaneous overflow point. The 100-packet results remain evidence for the tighter-buffer
 condition, separate from the matrix with equivalent bandwidth headroom and approximate queue time.
+
+A separate 15-second-per-codec buffer comparison used 720p cuts, an 8 Mbit/s target and an earlier
+paced build, before the final producer admission settings. At 50, 100 and 200 ms native buffer sizes,
+H.264 p99 age was 180, 174 and 340 ms; AV1 was 259, 251 and 250 ms. The H.264 maximum server queue
+grew from 165 kB at 100 ms to 420 kB at 200 ms. All six samples held the target without reopens or
+browser delta drops. This supported retaining the 100 ms buffer for the formal measurements;
+the short comparison does not establish an optimum for every encoder or source.
+
+## Current controller and impaired links
+
+The pressure-accounting build from source commit
+[`4cc0fe9`](https://github.com/ryanpetris/elsewhere/commit/4cc0fe9), with binary hash prefix `2902bd23`,
+has nine additional three-viewer H.264 1080p samples: three 60-second repeats each of cuts,
+game-like motion and video-like motion.
+They use the shared 36 Mbit/s, 20 ms, 300-packet link and normal adaptation under an 8 Mbit/s ceiling
+per viewer. These results are separate from the earlier cohorts. The first cuts sample also enables
+the existing AutoRate debug messages; each artifact records its effective logging filter.
+These timing cohorts describe the identified build. Keeping the previous canvas picture visible
+through configuration changes has separate functional verification and is not a rerun of these timings.
+
+| Scene | Samples | p99 frame age (ms) | Maximum frame age (ms) | Worst paint gap (ms) | Painted frames/s | Primary encoded Mbit/s |
+|---|---:|---:|---:|---:|---:|---:|
+| Cuts | 3 | 207–457 | 700 | 593.7 | 22.0–29.9 | 6.788–8.007 |
+| Game-like motion | 3 | 118–663 | 1532 | 740.0 | 34.8–52.0 | 2.794–6.208 |
+| Video-like motion | 3 | 183–842 | 1125 | 765.4 | 10.5–52.7 | 2.439–5.872 |
+
+Timing and frame-rate ranges include all three pages. All nine samples passed the native-geometry,
+decode-error and one-second progress checks, with zero qdisc drops. This is not uniformly low-latency
+1080p playback: the primary minimum targets were 3.906, 1.000 and 1.525 Mbit/s for the three scene
+groups, and some secondary pages also reduced their targets. A video sample initiated two WebSocket
+fallbacks with the browser's repeated-loss-or-stalls reason despite zero qdisc drops; its primary RTC
+fraction was 95.3%. The first attempt returned to RTC during the sample, while the second was still
+recovering at its end.
+Primary browser delta-drop/reopen totals were 6/5 for cuts, 44/7 for game-like motion and 27/28 for
+video-like motion.
+
+The affected game sample confirms that the downstream limitation in issue #73 also occurs with the
+current controller. Native encoding p99 was 19.7 ms and the primary front-frame age stayed below
+45 ms, with queues empty in about 96% of observations. Browser receive-to-output p95 reached
+1.145 s and the maximum displayed age reached 1.532 s. These measurements locate the backlog without
+identifying a particular decoder backend or separating browser scheduling from readback overhead.
+
+The cuts validation recorded 174 AutoRate evaluation windows across its three viewers, all with
+zero congested-frame counts despite encoder reopens. The controller still reduced targets in windows
+with a nonzero `slow` count. Deliberate replacement of queued video contributes no congestion count;
+the capacity trial below checks that genuine congestion still reduces the target and permits recovery.
+
+The following ten samples use the same build, 720p cuts and normal adaptation. Each lasts 60 seconds,
+except the 180-second capacity trials. Competition uses three viewers sharing 12 Mbit/s and 100
+packets; the other conditions have one viewer. Frame age, gaps and frame-rate ranges include every
+viewer. Each p99 value is the worst per-viewer p99, not a pooled percentile. Targets and encoded means
+describe the primary viewer. Packet counts show total qdisc drops
+followed by the deliberately injected subset.
+
+| Condition | Codec | Frame age p99 / max (ms) | Worst paint gap (ms) | Painted frames/s | Minimum → final target (Mbit/s) | Encoded Mbit/s | Packet drops total / injected |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Random 0.5% loss | H.264 | 530 / 742 | 398.8 | 32.6 | 2.500 → 7.446 | 4.050 | 143 / 143 |
+| Random 0.5% loss | AV1 | 449 / 743 | 825.4 | 39.8 | 1.861 → 1.861 | 2.505 | 103 / 103 |
+| Burst loss | H.264 | 996 / 1308 | 1048.2 | 18.6 | 1.250 → 2.977 | 2.355 | 102 / 102 |
+| Burst loss | AV1 | 304 / 434 | 537.3 | 30.8 | 1.000 → 3.050 | 1.323 | 65 / 65 |
+| UDP blackout | H.264 | 176 / 217 | 3353.9 | 47.9 | 4.000 → 8.000 | 6.085 | 561 / 561 |
+| UDP blackout | AV1 | 232 / 354 | 3398.3 | 48.5 | 4.000 → 8.000 | 5.652 | 569 / 569 |
+| Capacity 12 → 4 → 12 Mbit/s | H.264 | 350 / 3088 | 2593.6 | 39.2 | 1.000 → 8.000 | 4.891 | 79 / 0 |
+| Capacity 12 → 4 → 12 Mbit/s | AV1 | 260 / 3534 | 1693.4 | 43.9 | 1.000 → 8.000 | 4.629 | 64 / 0 |
+| Shared-capacity competition | H.264 | 1245 / 1636 | 1458.4 | 18.8–25.5 | 1.906 → 3.721 | 2.431 | 142 / 0 |
+| Shared-capacity competition | AV1 | 302 / 1453 | 1541.8 | 30.8–39.6 | 2.000 → 4.652 | 2.397 | 98 / 0 |
+
+The capacity drops occurred at 60 seconds and restoration at 120 seconds. H.264 returned to its
+8 Mbit/s ceiling 22.79 seconds after restoration; AV1 took 19.05 seconds. H.264's debug trace recorded
+four congestion windows during the reduced-capacity phase, including 34 congested frames out of 56
+in one window. It recorded no congestion or slow-feedback windows after restoration. That trial
+therefore exercises both genuine pressure and recovery with deliberate key replacement excluded.
+The H.264 capacity run includes AutoRate debug logging in addition to the default trace filter.
+
+Both UDP-blackout checks passed their explicit fallback and return requirements. They reached
+WebSocket about 3.35 seconds after UDP was blocked and returned to RTC 1.74 seconds (H.264) and
+1.84 seconds (AV1) after UDP restoration. Their low frame-age percentiles coexist with multi-second
+paint gaps because no new picture arrived during the interruption. H.264 random loss and AV1
+capacity also included brief browser-initiated fallback intervals.
+
+Both shared-capacity competition checks failed the one-second secondary-viewer progress requirement;
+their nonzero exits and measurements are retained. They continued decoding valid frames, but real
+queue overflow and recovery produced visible stalls. The random-loss, burst-loss and competition
+rows had no periodic target observations at the 8 Mbit/s ceiling. These are measurements of adaptive
+behavior under impaired or insufficient capacity, not full-rate quality results. All ten samples
+had zero decoder errors and valid source markers.
+
+Across these impaired-link samples, native encoding p99 ranged from 6.3 to 13.5 ms and the longest
+encoder-open-to-key interval was 398 ms. The largest primary server queue was 563 kB and the largest
+encoded picture was 266 kB. Peak encoded rates were 23.24 Mbit/s in a fixed 100 ms bin and
+8.40 Mbit/s in a one-second bin. Browser arrival callbacks reached 51.62 Mbit/s in a 100 ms bin
+during recovery; callback batches are not instantaneous link-throughput measurements. The maximum
+paint gaps and displayed ages above retain the visible cost of that recovery.
