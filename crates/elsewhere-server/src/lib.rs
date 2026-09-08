@@ -18,6 +18,7 @@ mod protocol;
 mod reference;
 mod ws;
 mod terminal;
+pub mod tokens;
 
 use std::{
     collections::HashMap,

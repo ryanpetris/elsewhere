@@ -16,6 +16,9 @@ axum-server = { version = "0.8", features = ["tls-rustls"] }
 rustls = "0.23"
 rcgen = "0.14"
 sha2 = "0.10"
+rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite_migration = "2.6"
+uuid = { version = "1", features = ["v4", "serde"] }
 if-addrs = "0.15"
 calloop = "0.14"
 serde_json = { version = "1", features = ["raw_value"] }

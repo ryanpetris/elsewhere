@@ -96,11 +96,20 @@ struct Cli {
 
 #[derive(clap::Subcommand)]
 enum Operation {
-    /// Print an existing token from the server's configuration directory without starting the server.
+    /// Manage tokens in the configured state database.
     Token {
-        /// Print the read-only viewer token instead of the control token.
-        #[arg(long)]
-        viewer: bool,
+        #[command(subcommand)]
+        command: TokenOperation,
+    },
+}
+
+#[derive(clap::Subcommand)]
+enum TokenOperation {
+    /// Create a token and print its secret once.
+    Create {
+        /// Grant every implemented permission, with no expiry.
+        #[arg(long, required = true)]
+        admin: bool,
     },
 }
 
@@ -116,11 +125,16 @@ fn parse_screen_size(value: &str) -> std::result::Result<(u32, u32), String> {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     if cli.broadcast_output_worker { return elsewhere_stream::broadcast::output_worker(); }
-    if let Some(Operation::Token { viewer }) = cli.command {
-        let path = elsewhere_server::Config::default_data_dir()?.join(if viewer { "viewer-token" } else { "token" });
-        let token = std::fs::read_to_string(&path).with_context(|| format!("read saved token from {}; start Elsewhere once with this configuration to create tokens", path.display()))?;
-        anyhow::ensure!(!token.trim().is_empty(), "saved token file is empty: {}", path.display());
-        println!("{}", token.trim());
+    if let Some(Operation::Token { command: TokenOperation::Create { admin: _ } }) = cli.command {
+        use std::io::Write;
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+        let created = runtime.block_on(async {
+            let store = elsewhere_server::tokens::Store::open(elsewhere_server::Config::default_data_dir()?.join("state.sqlite3")).await?;
+            store.create(elsewhere_server::tokens::Create::admin()).await
+        })?;
+        let mut output = std::io::stdout().lock();
+        writeln!(output, "{}", created.token)?;
+        output.flush()?;
         return Ok(());
     }
     if cli.audio_worker {
