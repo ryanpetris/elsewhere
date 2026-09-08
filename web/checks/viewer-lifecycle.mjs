@@ -1,4 +1,5 @@
 // Run in Docker with the release build, Chromium and Wayland development tools.
+// --colors checks decoded charts only; ELSEWHERE_SOFTWARE_ENCODING retains GPU rendering.
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, open, readFile, readdir, readlink, writeFile } from 'node:fs/promises';
@@ -6,7 +7,8 @@ import { chromium } from 'playwright-core';
 
 const root = await mkdtemp('/tmp/elsewhere-viewer-lifecycle-');
 const renderNode = process.env.ELSEWHERE_RENDER_NODE ?? 'none';
-const codec = renderNode === 'none' ? 'vp8' : 'h264';
+const codec = renderNode === 'none' || process.env.ELSEWHERE_SOFTWARE_ENCODING ? 'vp8' : 'h264';
+const colorsOnly = process.argv.includes('--colors');
 const origin = 'http://127.0.0.1:8850';
 await mkdir(root + '/runtime', { mode: 0o700 });
 const log = await open(root + '/server.log', 'w');
@@ -18,6 +20,7 @@ const environment = { ...process.env, XDG_CONFIG_HOME: root + '/config', XDG_RUN
 // Fix glibc's arena count for the RSS ownership gate.
 const server = spawn(process.env.ELSEWHERE_BINARY ?? '/src/target/release/elsewhere', [
   '--no-audio', '--no-rtc', '--no-tls', '--render-node', renderNode, '--codec', codec,
+  ...(process.env.ELSEWHERE_SOFTWARE_ENCODING ? ['--software-encoding'] : []),
   '--listen', '127.0.0.1:8850', '--socket-name', 'wayland-lifecycle',
 ], { env: { ...environment, MALLOC_ARENA_MAX: '2' }, stdio: ['ignore', log.fd, log.fd] });
 const clients = new Set();
@@ -92,8 +95,75 @@ try {
     throw error;
   });
   const main = await connect();
+  if (colorsOnly) {
+    const command = root + '/color-picture';
+    const child = spawn(root + '/source', [command], { env: { ...environment, WAYLAND_DISPLAY: 'wayland-lifecycle' }, stdio: 'ignore' });
+    clients.add(child); child.once('exit', () => clients.delete(child));
+    await main.waitForFunction(() => elsewhere.store.get().windows.length === 1);
+    const id = await main.evaluate(() => elsewhere.store.get().windows[0].id);
+    const windowPage = await connect(id);
+    await main.evaluate(id => elsewhere.control({ id, op: 'resize', w: 400, h: 300 }), id);
+    await main.waitForFunction(() => { const window = elsewhere.store.get().windows[0]; return window.w === 400 && window.h === 300; });
+    await windowPage.waitForFunction(() => { const stream = elsewhere.store.get().stream; return stream.width === 400 && stream.height === 300; });
+    const geometry = await main.evaluate(() => elsewhere.store.get().windows[0]);
+    const desktop = await main.evaluate(() => { const stream = elsewhere.store.get().stream; return { width: stream.width / stream.scale, height: stream.height / stream.scale }; });
+    assert(geometry.x >= 0 && geometry.y >= 0 && geometry.x + geometry.w <= desktop.width && geometry.y + geometry.h <= desktop.height, 'chart fits in the desktop');
+    const patches = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [0, 0, 0], [64, 64, 64], [128, 128, 128], [192, 192, 192], [255, 255, 255]];
+    const points = patches.map((expected, index) => ({ x: Math.floor((index + .5) * geometry.w / 8), y: Math.floor(geometry.h / 4), expected }));
+    for (let index = 1; index < 16; index++) {
+      const x = Math.floor(index * (geometry.w - 1) / 16), gray = Math.floor(x * 255 / (geometry.w - 1));
+      points.push({ x, y: Math.floor(geometry.h * .75), expected: [gray, gray, gray] });
+    }
+    const checkPicture = async (text, points) => {
+      const before = await Promise.all([main, windowPage].map(page => page.evaluate(() => elsewhere.store.get().stats.frames)));
+      const revision = await main.evaluate(() => elsewhere.store.get().windows[0].content_revision);
+      await writeFile(command, text);
+      await main.waitForFunction(revision => elsewhere.store.get().windows[0].content_revision > revision, revision);
+      for (const [index, page] of [main, windowPage].entries()) {
+        let reference;
+        await wait(async () => {
+          reference = await page.evaluate(async ({ id, geometry, points }) => {
+            const bitmap = await createImageBitmap(await elsewhere.snapshot(id));
+            const canvas = document.createElement('canvas'); canvas.width = bitmap.width; canvas.height = bitmap.height;
+            const video = document.querySelector('canvas');
+            if (video.width !== canvas.width || video.height !== canvas.height) throw new Error('snapshot and decoded canvas dimensions differ');
+            const context = canvas.getContext('2d'); context.drawImage(bitmap, 0, 0); bitmap.close();
+            const scale = id ? canvas.width / geometry.w : elsewhere.store.get().stream.scale;
+            return points.map(point => {
+              const x = Math.floor((point.x + (id ? 0 : geometry.x)) * scale), y = Math.floor((point.y + (id ? 0 : geometry.y)) * scale);
+              return { x, y, rgb: [...context.getImageData(x, y, 1, 1).data].slice(0, 3), expected: point.expected };
+            });
+          }, { id: index ? id : null, geometry, points });
+          return reference.every(point => !point.expected || point.expected.every((value, channel) => Math.abs(point.rgb[channel] - value) <= 2))
+            && (!text.startsWith('sub ') || reference[0].rgb.slice(0, 2).every(value => value > 20 && value < 230));
+        }).catch(error => {
+          console.error('compositor picture readiness failed', { picture: text, stream: index ? 'window' : 'desktop', geometry, reference });
+          throw error;
+        });
+        for (const point of reference) if (point.expected) assert(point.expected.every((value, channel) => Math.abs(point.rgb[channel] - value) <= 2), 'compositor chart matches the source patches: ' + JSON.stringify({ picture: text, stream: index ? 'window' : 'desktop', geometry, point }));
+        if (text.startsWith('sub ')) assert(reference[0].rgb.slice(0, 2).every(value => value > 20 && value < 230), 'transparent green and the red background both contribute');
+        await page.waitForFunction(({ before, reference }) => {
+          const canvas = document.querySelector('canvas'), scratch = document.createElement('canvas');
+          scratch.width = canvas.width; scratch.height = canvas.height;
+          const context = scratch.getContext('2d'); context.drawImage(canvas, 0, 0);
+          return elsewhere.store.get().stats.frames > before && reference.every(({ x, y, rgb }) => {
+            const actual = context.getImageData(x, y, 1, 1).data;
+            return rgb.every((value, channel) => Math.abs(actual[channel] - value) <= 12);
+          });
+        }, { before: before[index], reference });
+        console.log(JSON.stringify({ picture: text, stream: index ? 'window' : 'desktop', reference }));
+        assert.equal(await page.evaluate(() => elsewhere.store.get().stats.decodeErrors), 0);
+      }
+    };
+    await checkPicture('chart', points);
+    await checkPicture('root ffff0000', [{ x: 90, y: 90, expected: [255, 0, 0] }]);
+    // Compare composition to the compositor's own PNG, without prescribing its blend transfer curve.
+    await checkPicture('sub 80008000', [{ x: 90, y: 90 }, { x: 180, y: 180, expected: [255, 0, 0] }]);
+    await windowPage.context().close(); await stop(child);
+    console.log('desktop/window primary colors, gray ramp and transparent subsurface match compositor snapshots');
+  }
   let baseline, baselineResources, baselineDesktop, baselineDmaSizes;
-  for (let cycle = 0; cycle < 5; cycle++) {
+  for (let cycle = 0; cycle < (colorsOnly ? 0 : 5); cycle++) {
     const viewers = [];
     for (let index = 0; index < 3; index++) {
       const known = await main.evaluate(() => elsewhere.store.get().windows.map(window => window.id));
@@ -187,7 +257,7 @@ try {
     assert(idle.rssKiB <= baseline.rssKiB + 64 * 1024, 'retained RSS grew by more than 64 MiB after warmup: ' + JSON.stringify({ baseline, idle }));
   }
   assert.deepEqual(errors, []);
-  console.log('viewer resize/effort storms, simultaneous 30fps/unlimited streams, read-only pressure feedback, static final pictures and teardown passed');
+  if (!colorsOnly) console.log('viewer resize/effort storms, simultaneous 30fps/unlimited streams, read-only pressure feedback, static final pictures and teardown passed');
 } finally {
   await browser?.close().catch(() => {});
   await Promise.allSettled([...clients].map(stop));

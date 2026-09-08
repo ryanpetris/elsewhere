@@ -314,6 +314,7 @@ mod tests {
         let source_frames = frames(&device, 64, 32, ffi::AVPixelFormat::AV_PIX_FMT_BGRA).unwrap();
         let mut converter = None;
         let dropped = Arc::new(AtomicUsize::new(0));
+        let rejected = Arc::new(AtomicUsize::new(0));
         for i in 0..8 {
             let mut cpu = video().unwrap();
             cpu.set_format(ffmpeg::format::Pixel::BGRA);
@@ -335,8 +336,15 @@ mod tests {
             let object = descriptor.objects[0];
             let plane = descriptor.layers[0].planes[0];
             let fd = unsafe { BorrowedFd::borrow_raw(object.fd) }.try_clone_to_owned().unwrap();
+            let converter = converter.get_or_insert_with(|| Converter::new(&node, 64, 32, u32::from_le_bytes(*b"AR24"), object.format_modifier, (32, 16)).unwrap());
+            if i == 0 {
+                // This allocation passes descriptor bounds but cannot be imported as a GPU buffer.
+                let frame = test_frame(memory_fd(), object.format_modifier, 256, 0, Box::new(Lease(rejected.clone())));
+                let error = converter.convert(frame).err().expect("memfd must not import as a DMA-buf");
+                assert!(format!("{error:#}").contains("import compositor DMA-buf"));
+                assert_eq!(rejected.load(Ordering::Relaxed), 1);
+            }
             let frame = test_frame(fd, object.format_modifier, plane.pitch as u32, plane.offset as u32, Box::new((drm, Lease(dropped.clone()))));
-            let converter = converter.get_or_insert_with(|| Converter::new(&node, 64, 32, frame.fourcc, object.format_modifier, (32, 16)).unwrap());
             if i == 0 { eprintln!("H.264 quality levels: {:?}", unsafe { quality_range(converter.hw_frames_ctx(), Codec::H264, false) }); }
             if i == 7 {
                 checked(unsafe { ffi::av_buffersrc_close(converter.source, 1_234_567, 0) }, "close test source").unwrap();
@@ -362,5 +370,6 @@ mod tests {
         }
         drop(converter);
         assert_eq!(dropped.load(Ordering::Relaxed), 8);
+        assert_eq!(rejected.load(Ordering::Relaxed), 1);
     }
 }

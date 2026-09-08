@@ -21,7 +21,7 @@ static struct wl_subsurface *subsurface, *popup_subsurface;
 static struct wl_surface *popup_child;
 static struct xdg_surface *shell, *popup_shell;
 static struct xdg_popup *popup;
-static int width = 400, height = 300, running = 1;
+static int width = 400, height = 300, running = 1, chart;
 static uint32_t color = 0xff202080;
 
 static void paint(struct wl_surface *surface, int w, int h, uint32_t value) {
@@ -29,7 +29,13 @@ static void paint(struct wl_surface *surface, int w, int h, uint32_t value) {
     if (fd < 0 || ftruncate(fd, w*h*4)) exit(2);
     uint32_t *pixels = mmap(NULL, w*h*4, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
     if (pixels == MAP_FAILED) exit(2);
-    for (int i = 0; i < w*h; i++) pixels[i] = value;
+    const uint32_t patches[] = { 0xffff0000, 0xff00ff00, 0xff0000ff, 0xff000000,
+        0xff404040, 0xff808080, 0xffc0c0c0, 0xffffffff };
+    for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
+        uint32_t gray = x * 255 / (w > 1 ? w - 1 : 1);
+        pixels[y*w+x] = !chart || surface != root ? value : y < h/2
+            ? patches[x*8/w] : 0xff000000 | gray * 0x010101;
+    }
     struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, w*h*4);
     struct wl_buffer *buffer = wl_shm_pool_create_buffer(pool, 0, w, h, w*4, WL_SHM_FORMAT_ARGB8888);
     wl_shm_pool_destroy(pool); munmap(pixels, w*h*4); close(fd);
@@ -95,7 +101,8 @@ int main(int argc, char **argv) {
         if (!command[0] || !strcmp(previous, command)) continue;
         strcpy(previous, command);
         uint32_t value;
-        if (sscanf(command, "root %x", &value) == 1) { color = value; paint(root, width, height, color); }
+        if (sscanf(command, "root %x", &value) == 1) { chart = 0; color = value; paint(root, width, height, color); }
+        if (!strcmp(command, "chart")) { chart = 1; paint(root, width, height, color); }
         if (sscanf(command, "sub %x", &value) == 1) {
             if (!child) {
                 child = wl_compositor_create_surface(compositor);
