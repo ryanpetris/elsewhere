@@ -126,15 +126,18 @@ impl FrameSink for FfmpegSink {
             Err(std::sync::TryLockError::WouldBlock) => return Ok(Submit::Held),
             Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
         };
-        if state.stop || !state.ready || state.pressure { return Ok(Submit::Held); }
-        let Some(source) = state.settings.source else { return Ok(Submit::Held) };
+        if state.stop || !state.ready || state.pressure { return Ok(Submit::Deferred); }
+        let Some(source) = state.settings.source else { return Ok(Submit::Deferred) };
         if source.geometry.width_px != frame.width || source.geometry.height_px != frame.height || source.fourcc != frame.fourcc ||
             matches!(&frame.buffer, FrameBuffer::Dmabuf { modifier, .. } if *modifier != source.modifier) {
             return Ok(Submit::Held);
         }
         let now = Instant::now();
         let fps = state.settings.quality.max_fps;
-        if !frame.refine && fps > 0 && state.last_submit.is_some_and(|last| now.duration_since(last) < Duration::from_micros(900_000 / fps as u64)) { return Ok(Submit::Held); }
+        if !frame.refine && fps > 0 && let Some(last) = state.last_submit {
+            let due = last + Duration::from_micros(900_000 / fps as u64);
+            if now < due { return Ok(Submit::RetryAt(due)); }
+        }
         state.last_submit = Some(now);
         let replaced = state.pending.replace(Pending { frame, source, submitted: now });
         let result = if state.started { Submit::Encoded } else { Submit::Held };
@@ -643,7 +646,7 @@ mod tests {
         input.buffer = FrameBuffer::Dmabuf {
             fd: std::fs::File::open("/dev/null").unwrap().into(), modifier: 0, stride: 1280, offset: 0, slot_id: 1, lease: Box::new(Lease(released.clone())),
         };
-        assert_eq!(sink.submit(input).unwrap(), Submit::Held);
+        assert_eq!(sink.submit(input).unwrap(), Submit::Deferred);
         assert_eq!(released.load(Ordering::Relaxed), 1);
         let control = sink.control();
         drop(sink);
@@ -651,6 +654,73 @@ mod tests {
         assert!(control.owner.upgrade().is_none());
         assert_eq!(rx.len(), 2, "teardown must not wait for queued output to drain");
         rx.close();
+    }
+
+    #[test]
+    fn output_pressure_requests_final_picture_after_drain() {
+        let redraws = Arc::new(AtomicUsize::new(0));
+        let signal = redraws.clone();
+        let (tx, mut rx) = mpsc::channel(2);
+        tx.try_send(StreamMsg::Failed).unwrap();
+        tx.try_send(StreamMsg::Failed).unwrap();
+        let mut sink = FfmpegSink::new(4000, encoders(), tx, Arc::new(move || { signal.fetch_add(1, Ordering::Relaxed); })).unwrap();
+        sink.control().set_codec(Codec::Vp8);
+        sink.output_changed(source(), u32::from_le_bytes(*b"XR24"), 0);
+        wait(|| sink.owner.shared.state.lock().unwrap().ready);
+        submit(&mut sink, 1);
+        wait(|| sink.owner.shared.state.lock().unwrap().pressure);
+        assert_eq!(sink.submit(frame(2)).unwrap(), Submit::Deferred);
+        let before = redraws.load(Ordering::Relaxed);
+        assert!(matches!(rx.try_recv().unwrap(), StreamMsg::Failed));
+        assert!(matches!(rx.try_recv().unwrap(), StreamMsg::Failed));
+        wait(|| redraws.load(Ordering::Relaxed) > before);
+        let mut seen = redraws.load(Ordering::Relaxed);
+        let first = receive(&mut rx, &mut None, &mut sink, 1, &redraws, &mut seen);
+        submit(&mut sink, 2);
+        let final_frame = receive(&mut rx, &mut None, &mut sink, 2, &redraws, &mut seen);
+        assert_eq!(final_frame.pts_us, 66_666);
+        let codec = ffmpeg_next::decoder::find(ffmpeg_next::codec::Id::VP8).unwrap();
+        let mut decoder = ffmpeg_next::codec::Context::new_with_codec(codec).decoder().video().unwrap();
+        for packet in [first, final_frame] {
+            decoder.send_packet(&ffmpeg_next::Packet::copy(&packet.data)).unwrap();
+            let mut decoded = ffmpeg_next::frame::Video::empty();
+            decoder.receive_frame(&mut decoded).unwrap();
+            assert_eq!((decoded.width(), decoded.height()), (320, 180));
+        }
+    }
+
+    #[test]
+    fn frame_cap_retries_final_picture_and_refinement_bypasses_cap() {
+        let redraws = Arc::new(AtomicUsize::new(0));
+        let signal = redraws.clone();
+        let (tx, mut rx) = mpsc::channel(2);
+        let mut sink = FfmpegSink::new(4000, encoders(), tx, Arc::new(move || { signal.fetch_add(1, Ordering::Relaxed); })).unwrap();
+        assert_eq!(sink.submit(frame(1)).unwrap(), Submit::Deferred);
+        let control = sink.control();
+        control.set_codec(Codec::Vp8);
+        sink.output_changed(source(), u32::from_le_bytes(*b"XR24"), 0);
+        wait(|| sink.owner.shared.state.lock().unwrap().ready);
+        submit(&mut sink, 1);
+        let mut info = None;
+        let mut seen = redraws.load(Ordering::Relaxed);
+        receive(&mut rx, &mut info, &mut sink, 1, &redraws, &mut seen);
+        control.set_quality(Quality { bitrate_kbps: 4000, max_fps: 1 });
+        let mut due = None;
+        wait(|| {
+            if let Submit::RetryAt(deadline) = sink.submit(frame(2)).unwrap() { due = Some(deadline); }
+            due.is_some()
+        });
+        std::thread::sleep(due.unwrap().saturating_duration_since(Instant::now()));
+        submit(&mut sink, 2);
+        assert_eq!(receive(&mut rx, &mut info, &mut sink, 2, &redraws, &mut seen).pts_us, 66_666);
+        let start = Instant::now();
+        wait(|| {
+            let mut final_frame = frame(3);
+            final_frame.refine = true;
+            sink.submit(final_frame).unwrap() == Submit::Encoded
+        });
+        assert!(start.elapsed() < Duration::from_millis(500), "refinement waited for the one-fps cap");
+        assert_eq!(receive(&mut rx, &mut info, &mut sink, 3, &redraws, &mut seen).pts_us, 99_999);
     }
 
     #[test]

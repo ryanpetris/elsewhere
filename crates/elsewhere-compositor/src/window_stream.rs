@@ -32,9 +32,14 @@ pub struct WindowStream {
     settling: Option<(Size<i32, Physical>, Instant)>,
     /// What the buffers really are (GBM may fall back); the sink is told when it differs.
     modifier: u64,
-    /// The last frame wasn't handed over (no free buffer, or the sink refused it): render again, whole.
+    /// A complete picture is needed on the next tick or at `retry_at`.
     pub pending: bool,
+    retry_at: Option<Instant>,
     seq: u64,
+}
+
+impl WindowStream {
+    pub fn retry_due(&self) -> bool { self.pending && self.retry_at.is_none_or(|due| Instant::now() >= due) }
 }
 
 impl State {
@@ -43,7 +48,7 @@ impl State {
         let targets = self.gpu.targets(2, 2); // resized to the window before the first frame
         let tracker = OutputDamageTracker::new((2, 2), 1.0, Transform::Normal);
         let modifier = u64::from(self.gpu.modifier);
-        self.window_streams.push(WindowStream { key, window, targets, tracker, sink, size: Size::default(), scale: 0.0, settling: None, modifier, pending: true, seq: 0 });
+        self.window_streams.push(WindowStream { key, window, targets, tracker, sink, size: Size::default(), scale: 0.0, settling: None, modifier, pending: true, retry_at: None, seq: 0 });
         self.dirty = true;
     }
 
@@ -52,11 +57,13 @@ impl State {
     }
 
     /// Called after the output's frame: every stream whose window changed gets a frame (every stream, if `force`).
-    pub fn render_window_streams(&mut self, force: bool) {
+    pub fn render_window_streams(&mut self, force: bool, changed: bool) {
         // gone from the desktop (closed, or an X11 window withdrawn while its handle lives on): stream over
         let present = self.full_stack();
         self.window_streams.retain(|s| present.contains(&s.window));
         for i in 0..self.window_streams.len() {
+            if !(force || changed || self.window_streams[i].retry_due()) { continue; }
+            self.window_streams[i].retry_at = None;
             if let Err(e) = self.render_window_stream(i, force) {
                 tracing::warn!(key = self.window_streams[i].key, "window stream: {e:#}");
                 self.window_streams[i].pending = true; // the update it missed is retried whole
@@ -148,7 +155,8 @@ impl State {
             Target::Texture => FrameBuffer::Memory { data: elsewhere_core::Bytes::from(pixels.unwrap()), stride: size.w as u32 * 4 }, // read back above: damaged
         };
         let submitted = s.sink.submit(Frame { width: size.w as u32, height: size.h as u32, fourcc, pts: now.into(), seq: s.seq, refine: false, buffer });
-        s.pending = !matches!(submitted, Ok(elsewhere_core::Submit::Encoded)); // the tracker advanced: a retry redraws everything
+        s.pending = !matches!(submitted, Ok(elsewhere_core::Submit::Encoded | elsewhere_core::Submit::Deferred));
+        if let Ok(elsewhere_core::Submit::RetryAt(due)) = submitted { s.retry_at = Some(due); }
         submitted.map(|_| ()).map_err(|e| anyhow::anyhow!("{e}"))
     }
 }

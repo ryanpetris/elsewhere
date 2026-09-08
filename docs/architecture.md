@@ -199,12 +199,18 @@ probes require an actual keyframe. The browser intersects that list with its Web
 `--codec` wins when both sides support it. AV1 and VP9 codec levels are selected from picture size.
 
 Submission does not wait for the worker. It replaces one pending raw picture, applies the frame cap,
-and returns `Held` while initializing or refusing input. Each pending picture includes its source
+and returns a retry deadline when the cap rejects a picture. Initialization and output or admission
+pressure return `Deferred`; the worker requests a complete picture when it becomes ready.
+`Held` asks for a retry on the next compositor tick, including transient lock contention and initial
+keyframe delivery. Retry state belongs to each desktop or window stream, so compositor-scheduled
+retries of unchanged content do not resubmit it to healthy viewers. Worker recovery requests a full
+redraw for all streams once. Broadcast cadence is tracked separately per sink.
+Each pending picture includes its source
 layout. A control or resize change invalidates incompatible pending work; repeated changes coalesce
 before the worker publishes a new stream. The worker requests a complete redraw when a new encoder
 is ready, including on an idle desktop. Accepted final pictures are encoded without requiring later
 animation. The compositor also requests one refinement frame 150 ms after the picture settles; it
-uses the current target without a bitrate-change cycle.
+uses the current target and bypasses the frame cap without a bitrate-change cycle.
 
 The worker also budgets input from the bytes it delivers. An encoder can exceed its target bitrate
 even at the largest quantizer. The worker accumulates those bytes with a 100 ms burst allowance,

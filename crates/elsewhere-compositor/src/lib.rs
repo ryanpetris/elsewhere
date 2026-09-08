@@ -104,6 +104,18 @@ pub struct CompositorHandle {
     pub join: JoinHandle<()>,
 }
 
+pub(crate) struct ViewerSink {
+    key: u64,
+    sink: Box<dyn FrameSink>,
+    retry_at: Option<Instant>,
+    last_submit: Instant,
+}
+
+impl ViewerSink {
+    fn retry_due(&self, now: Instant) -> bool { self.retry_at.is_some_and(|due| now >= due) }
+    fn cadence_due(&self, now: Instant) -> bool { self.sink.cadence().is_some_and(|interval| now.saturating_duration_since(self.last_submit) >= interval) }
+}
+
 /// Start the compositor on its own thread. Returns once the Wayland socket exists.
 pub fn spawn(cfg: Config, events: tokio::sync::mpsc::UnboundedSender<Event>) -> Result<CompositorHandle> {
     let (commands, rx) = channel::channel();
@@ -146,7 +158,7 @@ pub struct State {
     pub syncobj_state: Option<DrmSyncobjState>,
     pub dmabuf_feedback: Option<DmabufFeedback>,
     /// The viewers' encoders, by the server's key: every output frame goes to each of them.
-    pub viewer_sinks: Vec<(u64, Box<dyn FrameSink>)>,
+    pub(crate) viewer_sinks: Vec<ViewerSink>,
     pub events: tokio::sync::mpsc::UnboundedSender<Event>,
     pub frame_seq: u64,
     pub frame_interval: Duration,
@@ -625,8 +637,8 @@ impl State {
         self.geometry = geo;
         layer_map_for_output(&self.output).arrange();
         self.relayout();
-        for (_, sink) in &mut self.viewer_sinks {
-            sink.output_changed(geo, self.gpu.fourcc as u32, u64::from(self.gpu.modifier));
+        for viewer in &mut self.viewer_sinks {
+            viewer.sink.output_changed(geo, self.gpu.fourcc as u32, u64::from(self.gpu.modifier));
         }
         self.force_full_frame = true;
         self.dirty = true;
@@ -635,13 +647,13 @@ impl State {
     /// A viewer arrived: its encoder gets every frame from now on, starting with a whole one.
     pub fn start_viewer_stream(&mut self, key: u64, mut sink: Box<dyn FrameSink>) {
         sink.output_changed(self.geometry, self.gpu.fourcc as u32, u64::from(self.gpu.modifier));
-        self.viewer_sinks.push((key, sink));
+        self.viewer_sinks.push(ViewerSink { key, sink, retry_at: None, last_submit: Instant::now() });
         self.force_full_frame = true;
         self.dirty = true;
     }
 
     pub fn stop_viewer_stream(&mut self, key: u64) {
-        self.viewer_sinks.retain(|(k, _)| *k != key); // dropping the sink stops its worker
+        self.viewer_sinks.retain(|viewer| viewer.key != key); // dropping the sink stops its worker
     }
 
     /// Re-arrange the panels; re-fit the windows if that moved the work area.

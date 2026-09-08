@@ -455,15 +455,18 @@ session's senders, which ends them with `4001`.
 
 `window_stream.rs`. `Command::WindowStream { key, window, sink }` starts (or, with no sink, stops) one
 stream: a `WindowStream` holds the window, a dmabuf swapchain and damage tracker of its own, and the
-encoder sink the server made for it (`SinkFactory` in `elsewhere-server`, a `FfmpegSink` per stream). After every
-output frame, `render_window_streams` renders each streamed window's elements (popups too, within the
+encoder sink the server made for it (`SinkFactory` in `elsewhere-server`, a `FfmpegSink` per stream).
+On content changes, redraw requests or a stream's retry deadline, `render_window_streams` renders
+the relevant windows' elements (popups too, within the
 geometry) with the geometry's corner at the origin, at the output's scale, into its swapchain, and
 submits the frame only if its damage tracker saw a change, so an idle window costs nothing; a size
 change, once it has held for 150 ms (an interactive resize commits one per frame), resizes the swapchain
 and tells the sink, which reopens its encoder with a new stream id. Sizes under 16 px (an unmapped
-window) are skipped. A frame that found no
-free buffer or that the sink refused marks the stream `pending`, which keeps the loop ticking and
-redraws it whole. Streams of windows no longer on the desktop are dropped, which drops their sinks and
+window) are skipped. Missing buffers and transient refusal keep that stream pending for the next
+tick; a frame-cap refusal schedules a complete picture at its deadline. Initialization and encoder
+pressure wait for the worker's redraw notification. Per-stream timed and next-tick retries leave
+unchanged healthy streams idle.
+Streams of windows no longer on the desktop are dropped, which drops their sinks and
 stops their workers; the server session sees its channel close and ends with `4003`.
 
 Server: `ws::window_session` authenticates, takes `Hello` for the codec, builds the sink, and forwards

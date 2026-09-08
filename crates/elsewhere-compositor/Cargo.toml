@@ -15,3 +15,7 @@ smithay = { git = "https://github.com/Smithay/smithay", rev = "28c8e0fad905f3e7d
 ] }
 ab_glyph = "0.2.32"
 fontdb = "0.24.0"
+
+[[example]]
+name = "check-render-retry"
+path = "checks/render-retry.rs"

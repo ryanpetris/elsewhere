@@ -382,12 +382,16 @@ impl EffortState {
     }
 }
 
-/// Whether a submitted frame can count as presented, or the compositor must offer another whole
-/// frame because of a rate cap or an encoder that still needs input to produce its first keyframe.
+/// Whether a frame can count as presented and how to schedule the next complete picture.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Submit {
     Encoded,
+    /// Offer a complete picture on the next compositor tick.
     Held,
+    /// Offer a complete picture at or after this deadline.
+    RetryAt(std::time::Instant),
+    /// The sink requests a complete picture when it becomes ready.
+    Deferred,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

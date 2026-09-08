@@ -89,33 +89,37 @@ impl State {
     }
 
     pub fn tick(&mut self) {
-        // The picture settled: one more frame, unchanged, for the encoders to sharpen what motion left rough.
+        // Send one uncapped frame after the picture settles.
         let refine = !self.dirty && !self.force_full_frame && !self.viewer_sinks.is_empty() && self.refine_due.is_some_and(|t| Instant::now() >= t);
         if refine {
             tracing::debug!("refine frame: the picture settled");
             self.refine_due = None;
             self.force_full_frame = true;
         }
-        let broadcast_due = self.viewer_sinks.iter().filter_map(|(_, s)| s.cadence()).min().is_some_and(|interval| self.last_render.elapsed() >= interval);
+        let broadcast_due = self.viewer_sinks.iter().any(|viewer| viewer.cadence_due(Instant::now()));
         let broadcast_only = broadcast_due && !self.dirty && !self.force_full_frame;
-        if !(broadcast_due || self.dirty || self.force_full_frame || self.window_streams.iter().any(|s| s.pending)) {
+        let retry_only = !self.dirty && !self.force_full_frame;
+        if !(broadcast_due || self.dirty || self.force_full_frame || self.viewer_sinks.iter().any(|viewer| viewer.retry_due(Instant::now())) || self.window_streams.iter().any(|s| s.retry_due())) {
             return;
         }
         let force = self.force_full_frame; // render_frame clears it
-        if let Err(e) = self.render_frame(refine, broadcast_only) {
+        let changed = self.dirty;
+        if let Err(e) = self.render_frame(refine, broadcast_only, retry_only) {
             tracing::warn!("render failed: {e:#}");
             self.force_full_frame = true; // the damage tracker advanced: the retry draws everything
         }
-        self.render_window_streams(force && !refine); // a refine is the desktop's; the windows didn't change
+        self.render_window_streams(force && !refine, changed); // a refine is the desktop's; the windows didn't change
     }
 
-    fn render_frame(&mut self, refine: bool, broadcast_only: bool) -> Result<()> {
+    fn render_frame(&mut self, refine: bool, broadcast_only: bool, retry_only: bool) -> Result<()> {
+        let retry_now = Instant::now();
+        if retry_only && !broadcast_only && !self.viewer_sinks.iter().any(|viewer| viewer.retry_due(retry_now)) { return Ok(()); }
         // No free slot means the encoder still holds every buffer: skip this tick, stay dirty.
         let Some((mut target, age)) = self.gpu.targets.acquire(&mut self.gpu.renderer, self.gpu.fourcc)? else {
             tracing::debug!("no free swapchain slot: every frame is still with an encoder");
             return Ok(());
         };
-        let age = if self.force_full_frame || broadcast_only { 0 } else { age };
+        let age = if self.force_full_frame || retry_only { 0 } else { age };
 
         if let (false, Target::Slot { dmabuf, .. }) = (self.gpu.modifier_verified, &target) {
             // GBM can return an implicit modifier. Publish the actual layout before importing it.
@@ -127,8 +131,8 @@ impl State {
                 // Reopen conversion for the actual layout; unsupported imports fail visibly.
                 tracing::warn!(?got, negotiated = ?self.gpu.modifier, "swapchain buffer modifier is not the negotiated one; rebuilding the encoders for it");
                 self.gpu.modifier = got;
-                for (_, sink) in &mut self.viewer_sinks {
-                    sink.output_changed(self.geometry, self.gpu.fourcc as u32, u64::from(got));
+                for viewer in &mut self.viewer_sinks {
+                    viewer.sink.output_changed(self.geometry, self.gpu.fourcc as u32, u64::from(got));
                 }
             }
         }
@@ -136,7 +140,7 @@ impl State {
         let elements = self.output_elements(self.geometry.scale);
         let size = (self.geometry.width_px as i32, self.geometry.height_px as i32).into();
         let texture = matches!(target, Target::Texture);
-        let broadcast = self.viewer_sinks.iter().any(|(_, s)| s.wants_pixels());
+        let broadcast = self.viewer_sinks.iter().any(|viewer| viewer.sink.wants_pixels() && (!retry_only || viewer.cadence_due(retry_now) || viewer.retry_due(retry_now)));
         let (sync, damaged, states, pixels) = {
             let Gpu { renderer, targets, fourcc, .. } = &mut self.gpu;
             let mut fb = targets.bind(renderer, &mut target)?;
@@ -214,9 +218,11 @@ impl State {
             }
         };
         let now = self.clock.now(); // after the GPU wait: when the frame really left
-        let (mut encoded, mut failed) = (0, false);
-        for (key, sink) in &mut self.viewer_sinks {
-            if broadcast_only && !sink.wants_pixels() { continue; }
+        let mut encoded = 0;
+        for viewer in &mut self.viewer_sinks {
+            if retry_only && !viewer.retry_due(retry_now) && !viewer.cadence_due(retry_now) { continue; }
+            let crate::ViewerSink { key, sink, retry_at, last_submit } = viewer;
+            *last_submit = self.last_render;
             let raw = sink.wants_pixels();
             if raw { sink.cursor(cursor.clone(), self.pointer_location.x, self.pointer_location.y, self.geometry.scale); }
             let frame_buffer = if raw { Ok(FrameBuffer::Memory { data: cpu_pixels.clone().unwrap(), stride: self.geometry.width_px * 4 }) } else { buffer() };
@@ -224,25 +230,26 @@ impl State {
                 sink.submit(Frame { width: self.geometry.width_px, height: self.geometry.height_px, fourcc: if raw { smithay::backend::allocator::Fourcc::Xrgb8888 as u32 } else { self.gpu.fourcc as u32 }, pts: now.into(), seq: self.frame_seq, refine, buffer })
                     .map_err(|e| anyhow::anyhow!("{e}"))
             });
-            match submitted {
-                Ok(Submit::Encoded) => encoded += 1,
-                Ok(Submit::Held) => failed = true, // rate cap or encoder priming: offer the whole picture again
+            *retry_at = match submitted {
+                Ok(Submit::Encoded) => { encoded += 1; None }
+                Ok(Submit::Deferred) => None,
+                Ok(Submit::Held) => Some(Instant::now()),
+                Ok(Submit::RetryAt(due)) => Some(due),
                 Err(e) => {
-                    failed = true;
                     tracing::warn!(key, "frame not encoded: {e}");
+                    Some(Instant::now())
                 }
-            }
+            };
         }
+        if !retry_only { self.refine_due = if refine { None } else { Some(Instant::now() + REFINE_AFTER) }; }
         if encoded > 0 {
-            self.dirty = false;
-            if !broadcast_only { self.refine_due = if refine { None } else { Some(Instant::now() + REFINE_AFTER) }; }
             // an encoder has it: the closest thing to "presented" without a display; no MSC, so seq 0
             feedback.presented(now, Refresh::Fixed(self.frame_interval), 0, wp_presentation_feedback::Kind::empty());
         } else {
             feedback.discarded();
         }
-        // An encoder that got nothing gets the next frame whole: the damage tracker already advanced.
-        self.force_full_frame = failed || encoded == 0;
+        self.dirty = false;
+        self.force_full_frame = false;
         Ok(())
     }
 }
