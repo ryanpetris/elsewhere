@@ -1,24 +1,25 @@
-//! A control-token terminal with a real PTY and the compositor's client environment.
+//! A commands.execute terminal with a real PTY and the compositor's client environment.
 use std::{
     ffi::CStr, fs::{File, OpenOptions}, io::{self, Read, Write},
     os::{fd::{AsRawFd, FromRawFd}, unix::{ffi::OsStrExt, fs::OpenOptionsExt, process::CommandExt}},
     process::Stdio, sync::Arc, time::Duration,
 };
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use axum::{extract::{State, ws::{Message, WebSocket, WebSocketUpgrade}}, response::Response};
 use serde::Deserialize;
 use tokio::{io::unix::AsyncFd, time::timeout};
-use crate::{App, Command, Key};
+use crate::{App, Command, Key, tokens::Permission as P};
 
 const WINDOW: usize = 256 * 1024;
 
 pub async fn upgrade(ws: WebSocketUpgrade, State(app): State<Arc<App>>) -> Response {
     ws.max_message_size(64 * 1024).on_upgrade(move |mut socket| async move {
-        let Some((token, Key::Control)) = crate::ws::authenticate(&mut socket, &app).await else {
+        let Some(key) = crate::ws::authenticate(&mut socket, &app).await else {
             let _ = socket.send(Message::Close(None)).await;
             return;
         };
-        if let Err(error) = session(&mut socket, &app, &token).await {
+        if !key.has(P::CommandsExecute) { let _ = socket.send(Message::Close(None)).await; return; }
+        if let Err(error) = session(&mut socket, &app, &key).await {
             tracing::warn!(%error, "terminal ended");
             let _ = timeout(Duration::from_secs(1), socket.send(Message::Text("Terminal unavailable or connection closed.".into()))).await;
         }
@@ -60,11 +61,11 @@ fn resize(master: &File, cols: u16, rows: u16) -> Result<()> {
     Ok(())
 }
 
-async fn session(socket: &mut WebSocket, app: &App, token: &str) -> Result<()> {
+async fn session(socket: &mut WebSocket, app: &App, key: &Key) -> Result<()> {
     let (reply, receive) = std::sync::mpsc::channel();
     app.commands.send(Command::ShellCommand { reply }).map_err(|_| anyhow::anyhow!("desktop unavailable"))?;
     let mut command = tokio::task::spawn_blocking(move || receive.recv_timeout(Duration::from_secs(3))).await??;
-    if app.key_for(token) != Some(Key::Control) { bail!("token revoked"); }
+    if !key.has(P::CommandsExecute) { bail!("token revoked"); }
     let (master, slave) = pty()?;
     command.env("TERM", "xterm-256color").env("COLORTERM", "truecolor")
         .stdin(Stdio::from(slave.try_clone()?)).stdout(Stdio::from(slave.try_clone()?)).stderr(Stdio::from(slave));
@@ -78,10 +79,10 @@ async fn session(socket: &mut WebSocket, app: &App, token: &str) -> Result<()> {
     }
     let master = AsyncFd::new(master)?;
     let mut command = tokio::process::Command::from(command);
-    let mut child = command.kill_on_drop(true).spawn().context("interactive shell")?;
+    let mut child = key.with(&[P::CommandsExecute], || command.kill_on_drop(true).spawn().map_err(|_| crate::api::ApiError::Internal("interactive shell failed".into())))?;
     // The command owns its Stdio files after spawn; release them so slave EOF can reach the master.
     drop(command);
-    let result = transfer(socket, app, token, &master, &mut child).await;
+    let result = tokio::select! { biased; _ = key.ended() => Err(anyhow::anyhow!("token revoked or expired")), result = transfer(socket, key, &master, &mut child) => result };
     // Closing the master hangs up the foreground job as a local terminal would. Reap the shell.
     drop(master);
     if timeout(Duration::from_secs(1), child.wait()).await.is_err() {
@@ -90,7 +91,7 @@ async fn session(socket: &mut WebSocket, app: &App, token: &str) -> Result<()> {
     result
 }
 
-async fn transfer(socket: &mut WebSocket, app: &App, token: &str, master: &AsyncFd<File>, child: &mut tokio::process::Child) -> Result<()> {
+async fn transfer(socket: &mut WebSocket, key: &Key, master: &AsyncFd<File>, child: &mut tokio::process::Child) -> Result<()> {
     let mut buffer = [0; 16 * 1024];
     let mut input = Vec::new();
     let mut in_flight = 0;
@@ -98,6 +99,7 @@ async fn transfer(socket: &mut WebSocket, app: &App, token: &str, master: &Async
     loop {
         tokio::select! {
             biased;
+            _ = key.ended() => bail!("token revoked or expired"),
             ready = master.writable(), if !input.is_empty() => {
                 match ready?.try_io(|fd| fd.get_ref().write(&input)) {
                     Ok(Ok(0)) => bail!("terminal stopped accepting input"),
@@ -120,7 +122,7 @@ async fn transfer(socket: &mut WebSocket, app: &App, token: &str, master: &Async
                 }
             }
             incoming = socket.recv() => {
-                if app.key_for(token) != Some(Key::Control) { bail!("token revoked"); }
+                if !key.has(P::CommandsExecute) { bail!("token revoked"); }
                 match incoming {
                     Some(Ok(Message::Binary(data))) => {
                         if input.len() + data.len() > WINDOW { bail!("terminal input exceeded buffer"); }
@@ -139,7 +141,7 @@ async fn transfer(socket: &mut WebSocket, app: &App, token: &str, master: &Async
                 }
             }
             _ = tick.tick() => {
-                if app.key_for(token) != Some(Key::Control) { bail!("token revoked"); }
+                if !key.has(P::CommandsExecute) { bail!("token revoked"); }
                 if in_flight == 0 && child.try_wait()?.is_some() { return Ok(()); }
             }
         }

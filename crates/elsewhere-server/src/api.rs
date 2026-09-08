@@ -32,11 +32,12 @@ pub enum ApiError {
     Broadcast { code: &'static str, message: String },
     File { code: &'static str, message: String },
     InvalidSize(&'static str),
+    InvalidInput(String),
     /// The feature is switched off (`--elements`).
     Disabled(&'static str),
-    /// The presented token isn't the current one (rotation).
+    /// No live token authorized the request.
     Unauthorized,
-    /// The viewer token: it can look, not act.
+    /// A required permission is absent.
     Forbidden,
     /// No such window.
     NotFound,
@@ -54,6 +55,8 @@ pub enum ApiError {
     Internal(String),
 }
 
+impl std::error::Error for ApiError {}
+
 impl ApiError {
     pub fn status(&self) -> StatusCode {
         match self {
@@ -66,6 +69,7 @@ impl ApiError {
                 "unsupported_type" | "unsupported_operation" => StatusCode::UNPROCESSABLE_ENTITY,
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
             },
+            ApiError::InvalidInput(_) => StatusCode::BAD_REQUEST,
             ApiError::InvalidSize(_) => StatusCode::BAD_REQUEST,
             ApiError::Disabled(_) => StatusCode::NOT_IMPLEMENTED,
             ApiError::Unauthorized => StatusCode::UNAUTHORIZED,
@@ -83,10 +87,11 @@ impl std::fmt::Display for ApiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ApiError::Broadcast { message, .. } | ApiError::File { message, .. } => f.write_str(message),
+            ApiError::InvalidInput(why) => f.write_str(why),
             ApiError::InvalidSize(why) => f.write_str(why),
             ApiError::Disabled(what) => f.write_str(what),
-            ApiError::Unauthorized => f.write_str("not the current token"),
-            ApiError::Forbidden => f.write_str("read-only token"),
+            ApiError::Unauthorized => f.write_str("invalid or expired token"),
+            ApiError::Forbidden => f.write_str("permission denied"),
             ApiError::NotFound => f.write_str("no such window"),
             ApiError::NoSuchApp => f.write_str("no such application"),
             ApiError::NoSuchFile => f.write_str("no such file"),

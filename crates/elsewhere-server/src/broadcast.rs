@@ -3,14 +3,14 @@ use std::{collections::HashMap, sync::Arc, time::{Duration, Instant}};
 use axum::{extract::{Path, State}, Extension, Json};
 use elsewhere_core::{broadcast::{Capabilities, Control, Start, Status}, Command, FrameSink};
 use sha2::{Digest, Sha256};
-use crate::{api::ApiError, App, Key};
+use crate::{api::ApiError, App, Key, tokens::Permission as P};
 
 pub type Factory = Box<dyn Fn(Start) -> anyhow::Result<(Box<dyn FrameSink>, Arc<dyn Control>)> + Send + Sync>;
 pub struct Backend {
     pub start: Factory,
     pub capabilities: Box<dyn Fn() -> Capabilities + Send + Sync>,
 }
-struct Entry { status: Status, control: Arc<dyn Control>, request_id: String, digest: [u8; 32], created: Instant, key: u64, attached: bool }
+struct Entry { owner: Key, status: Status, control: Arc<dyn Control>, request_id: String, digest: [u8; 32], created: Instant, key: u64, attached: bool }
 #[derive(Default)]
 pub struct Registry { entries: HashMap<String, Entry>, sequence: u64 }
 const RETAIN: Duration = Duration::from_secs(600);
@@ -35,13 +35,16 @@ impl App {
         c.desktop_audio &= self.audio_available.load(std::sync::atomic::Ordering::Relaxed);
         c
     }
-    pub fn broadcast_start(&self, key: Key, settings: Start) -> Result<Status, ApiError> {
-        crate::writable(key)?;
+    pub fn broadcast_start(&self, key: &Key, settings: Start) -> Result<Status, ApiError> {
+        let _admission = key.admit()?;
+        key.require(P::BroadcastsManage)?;
+        key.require(P::DesktopView)?;
+        if settings.audio == elsewhere_core::broadcast::Audio::Desktop { key.require(P::AudioListen)?; }
         let caps = self.broadcast_capabilities();
         let digest: [u8; 32] = Sha256::digest(serde_json::to_vec(&settings).map_err(|_| error("invalid", "Invalid broadcast settings."))?).into();
         let mut registry = self.broadcasts.lock().unwrap();
         self.broadcast_sweep_locked(&mut registry);
-        if let Some(entry) = registry.entries.values().find(|e| e.request_id == settings.request_id) {
+        if let Some(entry) = registry.entries.values().find(|e| e.owner.metadata.id == key.metadata.id && e.request_id == settings.request_id) {
             if entry.digest != digest { return Err(error("conflict", "This request_id already belongs to different settings.")); }
             return Ok(snapshot(entry));
         }
@@ -54,11 +57,12 @@ impl App {
         let id = crate::random_hex(16);
         let status = Status { id: id.clone(), label: settings.label, width: settings.width, height: settings.height, fps: settings.fps, bitrate_kbps: settings.bitrate_kbps, audio: settings.audio, cursor: settings.cursor, progress: control.progress() };
         if self.commands.send(Command::ViewerStream { key: output_key, sink: Some(sink) }).is_err() { control.stop(); return Err(error("unavailable", "The desktop is unavailable.")); }
-        registry.entries.insert(id, Entry { status: status.clone(), control, request_id: settings.request_id, digest, created: Instant::now(), key: output_key, attached: true });
+        registry.entries.insert(id, Entry { owner: key.clone(), status: status.clone(), control, request_id: settings.request_id, digest, created: Instant::now(), key: output_key, attached: true });
         Ok(status)
     }
-    pub fn broadcast_stop(&self, key: Key, id: &str) -> Result<Status, ApiError> {
-        crate::writable(key)?;
+    pub fn broadcast_stop(&self, key: &Key, id: &str) -> Result<Status, ApiError> {
+        let _admission = key.admit()?;
+        key.require(P::BroadcastsManage)?;
         let mut r = self.broadcasts.lock().unwrap();
         let e = r.entries.get_mut(id).ok_or_else(|| error("missing", "No such broadcast."))?;
         e.control.stop();
@@ -70,8 +74,15 @@ impl App {
         let mut result: Vec<_> = r.entries.values().map(snapshot).collect(); result.sort_by(|a,b| a.id.cmp(&b.id)); result
     }
     pub fn broadcast_get(&self, id: &str) -> Result<Status, ApiError> { self.broadcasts.lock().unwrap().entries.get(id).map(snapshot).ok_or_else(|| error("missing", "No such broadcast.")) }
+    pub(crate) fn stop_token_broadcasts(&self, id: uuid::Uuid) {
+        for e in self.broadcasts.lock().unwrap().entries.values_mut().filter(|e| e.owner.metadata.id == id) {
+            e.control.stop();
+            if e.attached { let _ = self.commands.send(Command::ViewerStream { key: e.key, sink: None }); e.attached = false; }
+        }
+    }
     fn broadcast_sweep_locked(&self, r: &mut Registry) {
         for e in r.entries.values_mut() {
+            if !e.owner.live() { e.control.stop(); }
             if e.attached && e.control.progress().state.terminal() { let _ = self.commands.send(Command::ViewerStream { key: e.key, sink: None }); e.attached = false; }
         }
         r.entries.retain(|_, e| !e.control.progress().state.terminal() || e.created.elapsed() < RETAIN);
@@ -80,11 +91,11 @@ impl App {
 fn snapshot(e: &Entry) -> Status { Status { progress: e.control.progress(), ..e.status.clone() } }
 impl Drop for Registry { fn drop(&mut self) { for e in self.entries.values() { e.control.stop(); } } }
 
-pub async fn start(Extension(key): Extension<Key>, State(app): State<Arc<App>>, Json(settings): Json<Start>) -> Result<Json<Status>, ApiError> { app.broadcast_start(key, settings).map(Json) }
-pub async fn stop(Extension(key): Extension<Key>, State(app): State<Arc<App>>, Path(id): Path<String>) -> Result<Json<Status>, ApiError> { app.broadcast_stop(key, &id).map(Json) }
-pub async fn list(State(app): State<Arc<App>>) -> Json<Vec<Status>> { Json(app.broadcast_list()) }
-pub async fn get(State(app): State<Arc<App>>, Path(id): Path<String>) -> Result<Json<Status>, ApiError> { app.broadcast_get(&id).map(Json) }
-pub async fn capabilities(State(app): State<Arc<App>>) -> Json<Capabilities> { Json(app.broadcast_capabilities()) }
+pub async fn start(Extension(key): Extension<Key>, State(app): State<Arc<App>>, Json(settings): Json<Start>) -> Result<Json<Status>, ApiError> { app.broadcast_start(&key, settings).map(Json) }
+pub async fn stop(Extension(key): Extension<Key>, State(app): State<Arc<App>>, Path(id): Path<String>) -> Result<Json<Status>, ApiError> { app.broadcast_stop(&key, &id).map(Json) }
+pub async fn list(Extension(key): Extension<Key>, State(app): State<Arc<App>>) -> Result<Json<Vec<Status>>, ApiError> { key.require(P::BroadcastsManage)?; Ok(Json(app.broadcast_list())) }
+pub async fn get(Extension(key): Extension<Key>, State(app): State<Arc<App>>, Path(id): Path<String>) -> Result<Json<Status>, ApiError> { key.require(P::BroadcastsManage)?; app.broadcast_get(&id).map(Json) }
+pub async fn capabilities(Extension(key): Extension<Key>, State(app): State<Arc<App>>) -> Result<Json<Capabilities>, ApiError> { key.require(P::BroadcastsManage)?; Ok(Json(app.broadcast_capabilities())) }
 pub async fn sweep(app: std::sync::Weak<App>) {
     let mut interval = tokio::time::interval(Duration::from_secs(1));
     loop { interval.tick().await; let Some(app) = app.upgrade() else { return; }; app.broadcast_list(); }

@@ -1,76 +1,141 @@
 #!/usr/bin/env python3
-"""Docker check: explicit token reads and token-free startup/rotation output."""
+"""Docker integration check for SQLite token creation, API grants and durable revocation."""
+import concurrent.futures
+import hashlib
 import json
 import os
 from pathlib import Path
+import re
+import sqlite3
 import subprocess
 import tempfile
 import time
+import urllib.error
 import urllib.request
+import uuid
 
 binary = os.environ.get('ELSEWHERE_BINARY', '/src/target/release/elsewhere')
-with tempfile.TemporaryDirectory(prefix='elsewhere-token-') as directory:
+with tempfile.TemporaryDirectory(prefix='elsewhere-tokens-') as directory:
     root = Path(directory)
-    env = {**os.environ, 'HOME': str(root / 'home'), 'XDG_CONFIG_HOME': str(root / 'config'),
-           'XDG_RUNTIME_DIR': str(root / 'runtime')}
-    def command(*args, environment=env):
-        return subprocess.run([binary, 'token', *args], env=environment, capture_output=True, timeout=5)
-    missing = command()
-    assert missing.returncode != 0 and not missing.stdout
-    assert not (root / 'config').exists() and not (root / 'runtime').exists()
-    home_tokens = root / 'home' / '.config' / 'elsewhere'
-    home_tokens.mkdir(parents=True)
-    (home_tokens / 'token').write_text('control-fixture\n')
-    (home_tokens / 'viewer-token').write_text('viewer-fixture\n')
-    home_env = {key: value for key, value in env.items() if key != 'XDG_CONFIG_HOME'}
-    for args, expected in [((), b'control-fixture\n'), (('--viewer',), b'viewer-fixture\n')]:
-        result = command(*args, environment=home_env)
-        assert result.returncode == 0 and result.stdout == expected and not result.stderr
-    assert not (root / 'runtime').exists()
-    (home_tokens / 'token').write_text(' \n')
-    empty = command(environment=home_env)
-    assert empty.returncode != 0 and not empty.stdout
+    env = {**os.environ, 'HOME': str(root), 'XDG_CONFIG_HOME': str(root / 'config'),
+           'XDG_CACHE_HOME': str(root / 'cache'), 'XDG_RUNTIME_DIR': str(root / 'runtime')}
     (root / 'runtime').mkdir(mode=0o700)
-    log_path = root / 'server.log'
-    with log_path.open('wb') as log:
-        server = subprocess.Popen([binary, '--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none',
-                                   '--codec', 'vp8', '--screen-size', '320x240', '--listen', '127.0.0.1:18444'],
-                                  env=env, stdout=log, stderr=subprocess.STDOUT)
+    database = root / 'config/elsewhere/state.sqlite3'
+    origin = 'http://127.0.0.1:18444'
+    def cli(environment=env):
+        result = subprocess.run([binary, 'token', 'create', '--admin'], env=environment, capture_output=True, timeout=10)
+        assert result.returncode == 0, result.stderr.decode()
+        assert re.fullmatch(rb'[0-9a-f]{64}\n', result.stdout), result.stdout
+        assert not result.stderr, result.stderr
+        return result.stdout.decode().strip()
+    def request(path, token='', method='GET', data=None, mime='application/json'):
+        if isinstance(data, (dict, list)):
+            data = json.dumps(data).encode()
+        req = urllib.request.Request(origin + path, data=data, method=method,
+            headers={'Authorization': 'Bearer ' + token, 'Content-Type': mime})
         try:
-            url = 'http://127.0.0.1:18444'
-            for _ in range(100):
-                assert server.poll() is None, 'server exited before readiness'
-                try:
-                    with urllib.request.urlopen(url, timeout=1) as response:
-                        if response.status == 200:
-                            break
-                except OSError:
-                    time.sleep(.1)
-            else:
-                raise AssertionError('server readiness timed out')
-            def tokens():
-                results = [command(), command('--viewer')]
-                assert all(result.returncode == 0 and not result.stderr for result in results)
-                return [result.stdout.decode().strip() for result in results]
-            before = tokens()
-            assert before == [(root / 'config' / 'elsewhere' / name).read_text().strip()
-                              for name in ['token', 'viewer-token']]
-            request = urllib.request.Request(url + '/api/token/rotate', method='POST',
-                                             headers={'Authorization': 'Bearer ' + before[0]})
-            with urllib.request.urlopen(request, timeout=5) as response:
-                rotated = json.load(response)
-            after = tokens()
-            assert after == [rotated['token'], rotated['viewer_token']]
-            assert all(old != new for old, new in zip(before, after))
-        finally:
-            server.terminate()
+            response = urllib.request.urlopen(req, timeout=10)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            body = response.read()
+            return response.status, json.loads(body) if body and 'application/json' in response.headers.get('Content-Type', '') else body
+    def create(permissions, expiry=None):
+        status, result = request('/api/tokens', admin, 'POST', {'label': ' Fixture ', 'permissions': permissions, 'expires_at_ms': expiry})
+        assert status == 201, (status, result)
+        assert result['metadata']['label'] == 'Fixture'
+        assert result['metadata']['permissions'] == sorted(set(permissions))
+        assert str(uuid.UUID(result['metadata']['id'], version=4)) == result['metadata']['id']
+        return result
+    def start(log):
+        server = subprocess.Popen([binary, '--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codec', 'vp8',
+            '--screen-size', '320x240', '--listen', '127.0.0.1:18444'], env=env, stdout=log, stderr=subprocess.STDOUT)
+        for _ in range(150):
+            assert server.poll() is None, (root / 'server.log').read_text()
             try:
-                server.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                server.kill()
-                server.wait()
-    output = log_path.read_text()
-    assert all(token not in output for token in before + after), 'server output contains a token'
-    assert '#token=' not in output
-    assert 'elsewhere token --viewer' in output and 'tokens rotated' in output
-print('Token reads, missing/empty files, HOME/XDG lookup and secret-free startup/rotation passed')
+                if request('/')[0] == 200:
+                    return server
+            except OSError:
+                pass
+            time.sleep(.1)
+        server.terminate()
+        raise AssertionError('server readiness timeout')
+    # The same command initializes a fresh store without a running server.
+    offline = {**env, 'XDG_CONFIG_HOME': str(root / 'offline')}
+    secret = cli(offline)
+    with sqlite3.connect(root / 'offline/elsewhere/state.sqlite3') as db:
+        assert db.execute('SELECT secret_hash FROM tokens').fetchone()[0] == hashlib.sha256(secret.encode()).digest()
+    with (root / 'server.log').open('wb') as log:
+        server = start(log)
+        try:
+            with sqlite3.connect(database) as db:
+                assert db.execute('SELECT COUNT(*) FROM tokens').fetchone()[0] == 0
+            admin = cli()
+            status, me = request('/api/me', admin)
+            assert status == 200 and me['permissions'] == me['available_permissions']
+            assert me['metadata']['expires_at_ms'] is None
+            catalog = me['permissions']
+            assert request('/api/me', admin.upper())[0] == 401
+            assert request('/api/me', 'a' * 63)[0] == 401
+            assert request('/api/tokens', admin, 'POST', {'label': 'x', 'permissions': ['unknown']})[0] >= 400
+            assert request('/api/tokens', admin, 'POST', {'label': 'x', 'permissions': [], 'preset': 'Admin'})[0] >= 400
+            for bad in ['not-a-uuid', me['metadata']['id'].upper(), str(uuid.uuid1())]:
+                assert request('/api/tokens/' + bad, admin, 'DELETE')[0] == 400
+            empty = create([])
+            assert request('/api/me', empty['token'])[0] == 200
+            gates = [('desktop.view', '/api/windows', 'GET', None), ('files.browse', '/api/files?path=@transfer', 'GET', None),
+                     ('files.upload', '/api/files/probe?path=@transfer', 'PUT', b'probe'), ('files.download', '/api/files/probe?path=@transfer', 'GET', None),
+                     ('files.manage', '/api/files/probe?path=@transfer', 'DELETE', None), ('clipboard.read', '/api/clipboard/state', 'GET', None),
+                     ('clipboard.write', '/api/clipboard', 'PUT', b'text'), ('tokens.manage', '/api/tokens', 'GET', None),
+                     ('desktop.control', '/api/input', 'POST', {'type': 'key', 'keys': 'Escape'}),
+                     ('apps.launch', '/api/control', 'POST', {'op': 'launch', 'app': 'missing-fixture'}),
+                     ('commands.execute', '/api/control', 'POST', {'op': 'spawn', 'cmd': 'true'}),
+                     ('server.manage', '/api/control', 'POST', {'op': 'quit'}),
+                     ('broadcasts.manage', '/api/broadcasts', 'GET', None)]
+            for permission, path, method, data in gates:
+                assert request(path, empty['token'], method, data)[0] == 403, permission
+                if permission == 'server.manage':
+                    continue
+                scoped = create([permission])
+                status, body = request(path, scoped['token'], method, data)
+                assert status not in (401, 403), (permission, status, body)
+            a = create(['clipboard.write', 'files.upload'])
+            b = create(['clipboard.write', 'files.upload'])
+            batch = str(uuid.uuid4())
+            assert request('/api/drop/' + batch + '/private.txt', a['token'], 'PUT', b'private')[0] == 201
+            assert request('/api/clipboard/files', b['token'], 'POST', {'batch': batch, 'names': ['private.txt']})[0] == 403
+            uri = ('file://' + str(root / 'cache/elsewhere/drops' / a['metadata']['id'] / batch / 'private.txt')).encode()
+            assert request('/api/clipboard', b['token'], 'PUT', uri, 'text/uri-list')[0] == 403
+            assert request('/api/tokens/' + a['metadata']['id'], admin, 'DELETE')[0] == 204
+            assert request('/api/drop/' + batch + '/dummy.txt', b['token'], 'PUT', b'dummy')[0] == 201
+            assert request('/api/clipboard/files', b['token'], 'POST', {'batch': batch, 'names': ['private.txt']})[0] >= 400
+            expiring = create([], int(time.time() * 1000) + 300)
+            time.sleep(.4)
+            assert request('/api/me', expiring['token'])[0] == 401
+            assert any(t['id'] == expiring['metadata']['id'] for t in request('/api/tokens', admin)[1]['tokens'])
+            with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+                concurrent = list(pool.map(lambda _: cli(), range(6)))
+            assert len(set(concurrent)) == 6
+            for token in concurrent:
+                assert request('/api/me', token)[0] == 200
+            self_revoking = create(['tokens.manage'])
+            assert request('/api/tokens/' + self_revoking['metadata']['id'], self_revoking['token'], 'DELETE')[0] == 204
+            assert request('/api/me', self_revoking['token'])[0] == 401
+            victim = create(['desktop.view'])
+            assert request('/api/tokens/' + victim['metadata']['id'], admin, 'DELETE')[0] == 204
+            assert request('/api/me', victim['token'])[0] == 401
+            listing = request('/api/tokens', admin)[1]
+            assert 'secret_hash' not in json.dumps(listing) and admin not in json.dumps(listing)
+            with sqlite3.connect(database) as db:
+                assert db.execute('PRAGMA foreign_key_check').fetchall() == []
+                assert db.execute('SELECT COUNT(*) FROM token_permissions WHERE token_id=?', (victim['metadata']['id'],)).fetchone()[0] == 0
+            assert database.stat().st_mode & 0o777 == 0o600
+            server.terminate(); server.wait(timeout=10)
+            server = start(log)
+            assert request('/api/me', admin)[0] == 200
+            assert request('/api/me', victim['token'])[0] == 401
+        finally:
+            server.terminate(); server.wait(timeout=10)
+    output = (root / 'server.log').read_text()
+    assert 'elsewhere token create --admin' in output and admin not in output
+    print('SQLite CLI/API creation, permission gates, batch ownership, expiry, revocation and restart passed')

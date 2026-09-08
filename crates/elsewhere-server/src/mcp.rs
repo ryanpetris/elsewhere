@@ -17,7 +17,7 @@ use rmcp::{
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use crate::{App, Key, api::{self, ApiError}};
+use crate::{App, Key, auth, tokens::Permission as P, api::{self, ApiError}};
 
 pub const SKILL: &str = include_str!("../../../skills/elsewhere/SKILL.md");
 pub const REFERENCE: &str = include_str!("../../../skills/elsewhere/reference.md");
@@ -223,17 +223,20 @@ impl Mcp {
         Mcp { app, tool_router: Self::tool_router() }
     }
 
-    /// The tools that act need the control token; the bearer middleware left which one it was in the request.
-    fn acting(&self, parts: &Parts) -> Result<(), ApiError> {
-        if parts.extensions.get::<Key>() == Some(&Key::Control) { Ok(()) } else { Err(ApiError::Forbidden) }
+    fn require_key<'a>(&self, parts: &'a Parts, permission: P) -> Result<&'a Key, ApiError> {
+        let key = parts.extensions.get::<Key>().ok_or(ApiError::Unauthorized)?;
+        key.require(permission)?;
+        Ok(key)
     }
 
     fn control(&self, parts: &Parts, id: u64, op: ControlOp) -> ToolResult {
-        done(self.acting(parts).and_then(|()| self.app.control(ControlMsg { id, op })))
+        let msg = ControlMsg { id, op };
+        let permission = auth::control_permission(&msg);
+        done(self.require_key(parts, permission).and_then(|key| key.with(&[permission], || self.app.control(msg))))
     }
 
     fn input(&self, parts: &Parts, msg: InputMsg) -> ToolResult {
-        done(self.acting(parts).and_then(|()| self.app.input(msg)))
+        done(self.require_key(parts, P::DesktopControl).and_then(|key| key.with(&[P::DesktopControl], || self.app.authorized_input(key, msg))))
     }
 
     async fn png(&self, id: Option<u64>, sizing: elsewhere_core::SnapshotSizing) -> ToolResult {
@@ -247,12 +250,14 @@ impl Mcp {
 #[tool_router(vis = "pub(crate)")]
 impl Mcp {
     #[tool(description = "The windows on the desktop: id, title, app_id, icon (name the client set; its picture is at GET /api/windows/{id}/icon), content (video/game/photo when the client says so), pid, geometry x y w h (logical px), stacking z, maximized/fullscreen/minimized/focused, updated_ms (last redraw), popups (open menus, relative to x y).")]
-    fn windows(&self) -> ToolResult {
+    fn windows(&self, Extension(parts): Extension<Parts>) -> ToolResult {
+        if let Err(e) = self.require_key(&parts, P::DesktopView) { return done(Err(e)); }
         json(self.app.windows())
     }
 
     #[tool(description = "The UI elements of a window (buttons, links, text fields, menu items, tabs, ...): role, name, and x y w h relative to the window's own x y. `level` full means the list is complete; none/app/frame mean the application exposes nothing (use a snapshot).")]
-    async fn elements(&self, Parameters(WindowArg { window }): Parameters<WindowArg>) -> ToolResult {
+    async fn elements(&self, Extension(parts): Extension<Parts>, Parameters(WindowArg { window }): Parameters<WindowArg>) -> ToolResult {
+        if let Err(e) = self.require_key(&parts, P::DesktopView) { return done(Err(e)); }
         match self.app.elements(window).await {
             Ok(page) => json(page),
             Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(e.to_string())])),
@@ -260,12 +265,14 @@ impl Mcp {
     }
 
     #[tool(description = "PNG of the whole output (panels included, pointer excluded), native size by default. Supply at most one of width, height, or percentage.")]
-    async fn screenshot(&self, Parameters(sizing): Parameters<ScreenshotArgs>) -> ToolResult {
+    async fn screenshot(&self, Extension(parts): Extension<Parts>, Parameters(sizing): Parameters<ScreenshotArgs>) -> ToolResult {
+        if let Err(e) = self.require_key(&parts, P::DesktopView) { return done(Err(e)); }
         self.png(None, sizing).await
     }
 
     #[tool(description = "PNG of one window's own buffers (works for covered and minimized windows), popups included. Native size by default; supply at most one of width, height, or percentage.")]
-    async fn snapshot(&self, Parameters(SnapshotArgs { window, sizing }): Parameters<SnapshotArgs>) -> ToolResult {
+    async fn snapshot(&self, Extension(parts): Extension<Parts>, Parameters(SnapshotArgs { window, sizing }): Parameters<SnapshotArgs>) -> ToolResult {
+        if let Err(e) = self.require_key(&parts, P::DesktopView) { return done(Err(e)); }
         self.png(Some(window), sizing).await
     }
 
@@ -294,22 +301,25 @@ impl Mcp {
         self.control(&parts, window, ControlOp::Resize { w, h })
     }
 
-    #[tool(description = "Start a desktop broadcast with complete connection and encoding settings. Control token required. Returns runtime status without credentials. Retry the same request_id for ten minutes; different settings with that ID conflict.")]
+    #[tool(description = "Start a desktop broadcast with complete connection and encoding settings. Requires broadcasts.manage. Returns runtime status without credentials. Retry the same request_id for ten minutes; different settings with that ID conflict.")]
     fn broadcast_start(&self, Extension(parts): Extension<Parts>, Parameters(settings): Parameters<elsewhere_core::broadcast::Start>) -> ToolResult {
-        match self.app.broadcast_start(parts.extensions.get::<Key>().copied().unwrap_or(Key::Viewer), settings) { Ok(s) => json(s), Err(e) => done(Err(e)) }
+        match self.require_key(&parts, P::BroadcastsManage).and_then(|key| self.app.broadcast_start(key, settings)) { Ok(s) => json(s), Err(e) => done(Err(e)) }
     }
     #[tool(description = "Stop a runtime broadcast. Control token required; repeated stops are safe.")]
     fn broadcast_stop(&self, Extension(parts): Extension<Parts>, Parameters(arg): Parameters<BroadcastId>) -> ToolResult {
-        match self.app.broadcast_stop(parts.extensions.get::<Key>().copied().unwrap_or(Key::Viewer), &arg.id) { Ok(s) => json(s), Err(e) => done(Err(e)) }
+        match self.require_key(&parts, P::BroadcastsManage).and_then(|key| self.app.broadcast_stop(key, &arg.id)) { Ok(s) => json(s), Err(e) => done(Err(e)) }
     }
     #[tool(description = "List this host's runtime broadcasts and sanitized status. No connection credentials are returned.")]
-    fn broadcast_list(&self) -> ToolResult { json(self.app.broadcast_list()) }
+    fn broadcast_list(&self, Extension(parts): Extension<Parts>) -> ToolResult {
+        if let Err(e) = self.require_key(&parts, P::BroadcastsManage) { return done(Err(e)); } json(self.app.broadcast_list()) }
     #[tool(description = "Get a runtime broadcast's status without connection credentials.")]
-    fn broadcast_get(&self, Parameters(arg): Parameters<BroadcastId>) -> ToolResult {
+    fn broadcast_get(&self, Extension(parts): Extension<Parts>, Parameters(arg): Parameters<BroadcastId>) -> ToolResult {
+        if let Err(e) = self.require_key(&parts, P::BroadcastsManage) { return done(Err(e)); }
         match self.app.broadcast_get(&arg.id) { Ok(s) => json(s), Err(e) => done(Err(e)) }
     }
     #[tool(description = "Discover broadcast encoder availability and supported settings.")]
-    fn broadcast_capabilities(&self) -> ToolResult { json(self.app.broadcast_capabilities()) }
+    fn broadcast_capabilities(&self, Extension(parts): Extension<Parts>) -> ToolResult {
+        if let Err(e) = self.require_key(&parts, P::BroadcastsManage) { return done(Err(e)); } json(self.app.broadcast_capabilities()) }
 
     #[tool(description = "Start a program as a client of this desktop (`sh -c cmd`). Its window appears in `windows` after a moment.")]
     fn spawn(&self, Extension(parts): Extension<Parts>, Parameters(SpawnArgs { cmd }): Parameters<SpawnArgs>) -> ToolResult {
@@ -317,13 +327,14 @@ impl Mcp {
     }
 
     #[tool(description = "The applications installed on the desktop (its .desktop launchers): id, name, comment, categories. `launch` starts one.")]
-    async fn applications(&self) -> ToolResult {
+    async fn applications(&self, Extension(parts): Extension<Parts>) -> ToolResult {
+        if let Err(e) = self.require_key(&parts, P::DesktopView) { return done(Err(e)); }
         json(self.app.applications().await)
     }
 
-    #[tool(description = "Control token required. List a directory by absolute path, @home, or @transfer. Returns FileListing with entries and pagination; hidden, sort, desc, offset, and limit match GET /api/files. Download entries with GET /api/files/{name}?path=... .")]
+    #[tool(description = "Requires files.browse. List a directory by absolute path, @home, or @transfer. Returns FileListing with entries and pagination; hidden, sort, desc, offset, and limit match GET /api/files. Download entries with GET /api/files/{name}?path=... .")]
     async fn files(&self, Extension(parts): Extension<Parts>, Parameters(query): Parameters<crate::files::FileQuery>) -> ToolResult {
-        if let Err(e) = self.acting(&parts) { return done(Err(e)); }
+        if let Err(e) = self.require_key(&parts, P::FilesBrowse) { return done(Err(e)); }
         match self.app.browse_files(query).await {
             Ok(list) => json(list),
             Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(e.to_string())])),
@@ -331,7 +342,8 @@ impl Mcp {
     }
 
     #[tool(description = "The desktop notifications currently shown (id, app, summary, body, actions, timeout_ms): what applications reported. POST /api/notifications/{id} with {\"action\": key} acts on one, {} dismisses it.")]
-    fn notifications(&self) -> ToolResult {
+    fn notifications(&self, Extension(parts): Extension<Parts>) -> ToolResult {
+        if let Err(e) = self.require_key(&parts, P::DesktopView) { return done(Err(e)); }
         json(self.app.notifications())
     }
 
@@ -342,7 +354,7 @@ impl Mcp {
 
     #[tool(description = "Move the pointer there and click. With `window`, x y are relative to that window, e.g. the centre of an element's rectangle.")]
     fn click(&self, Extension(parts): Extension<Parts>, Parameters(ClickArgs { x, y, window, button, count }): Parameters<ClickArgs>) -> ToolResult {
-        match self.acting(&parts).and_then(|()| self.app.input(InputMsg::Click { x, y, window, button, count })) {
+        match self.require_key(&parts, P::DesktopControl).and_then(|key| key.with(&[P::DesktopControl], || self.app.authorized_input(key, InputMsg::Click { x, y, window, button, count }))) {
             Ok(()) => Ok(CallToolResult::success(vec![ContentBlock::text(match window.and_then(|w| self.app.x11_edge_warning(w, x, y)) {
                 Some(w) => format!("ok; {w}"),
                 None => "ok".into(),
@@ -371,10 +383,11 @@ impl Mcp {
         self.input(&parts, InputMsg::Key { keys })
     }
 
-    #[tool(description = "The last text a desktop application copied to the clipboard (empty if none yet). An image says so; copied files require a control token and are their file:// URIs; GET /api/clipboard returns the bytes.")]
+    #[tool(description = "The last text a desktop application copied to the clipboard (empty if none yet). An image says so; copied files require files.download and are their file:// URIs; GET /api/clipboard returns the bytes.")]
     fn clipboard_read(&self, Extension(parts): Extension<Parts>) -> ToolResult {
+        if let Err(e) = self.require_key(&parts, P::ClipboardRead) { return done(Err(e)); }
         let text = match self.app.clipboard() {
-            Some((mime, _)) if mime == api::URI_LIST && self.acting(&parts).is_err() => return done(Err(ApiError::Forbidden)),
+            Some((mime, _)) if mime == api::URI_LIST && self.require_key(&parts, P::FilesDownload).is_err() => return done(Err(ApiError::Forbidden)),
             Some((mime, data)) if mime == api::PNG => format!("[{} bytes of {mime}; GET /api/clipboard returns them]", data.len()),
             Some((_, data)) => String::from_utf8_lossy(&data).into_owned(),
             None => String::new(),
@@ -384,7 +397,7 @@ impl Mcp {
 
     #[tool(description = "Put text on the desktop clipboard, for pasting into an application (images go through PUT /api/clipboard).")]
     fn clipboard_write(&self, Extension(parts): Extension<Parts>, Parameters(ClipboardWriteArgs { text }): Parameters<ClipboardWriteArgs>) -> ToolResult {
-        done(self.acting(&parts).and_then(|()| self.app.set_clipboard(api::TEXT, text.into())))
+        done(self.require_key(&parts, P::ClipboardWrite).and_then(|key| key.with(&[P::ClipboardWrite], || self.app.set_clipboard(api::TEXT, text.into()))))
     }
 
     #[tool(name = "type", description = "Type text into the focused field through the keyboard layout (click it first). `\\n` is Return.")]

@@ -1,9 +1,9 @@
 //! HTTPS + WebSocket front end: serves the viewer page, authenticates the WebSocket in-band and the
 //! HTTP API with a bearer token (never a cookie), streams encoded video out (one encoder per viewer)
-//! and turns the controlling viewer's input into `Command`s. Two tokens: the control token acts, the
-//! viewer token only looks.
+//! and turns permitted input into `Command`s. Each token carries explicit grants.
 
 mod api;
+mod auth;
 mod apps;
 mod elements;
 mod mcp;
@@ -26,7 +26,7 @@ use std::{
     net::SocketAddr,
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, Mutex, Weak},
 };
 
 use anyhow::{Context, Result};
@@ -49,14 +49,8 @@ pub type CodecPolicy = Option<Codec>;
 /// handle that must not keep the encoder worker alive (the stream ends when the compositor drops the sink).
 pub type SinkFactory = Box<dyn Fn(mpsc::Sender<StreamMsg>) -> Result<(Box<dyn FrameSink>, Box<dyn StreamControl>)> + Send + Sync>;
 
-/// Which token a request came with.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Key {
-    /// Acts: input, windows, programs, the clipboard; may control the desktop.
-    Control,
-    /// Looks: the window list, elements, snapshots, the clipboard's text, the video.
-    Viewer,
-}
+pub type Key = Arc<auth::Access>;
+use tokens::Permission as P;
 
 pub struct Config {
     pub listen: SocketAddr,
@@ -76,7 +70,7 @@ pub struct Config {
     pub initial: elsewhere_core::OutputGeometry,
     /// Keep the initial resolution when viewers resize or take control.
     pub fixed_size: bool,
-    /// Where `cert.pem`, `key.pem` and `token` live.
+    /// Where the state database and TLS certificate/key live.
     pub data_dir: PathBuf,
     /// Serve /api/windows/{id}/elements (see `elements.rs`).
     pub elements: bool,
@@ -110,9 +104,11 @@ impl Config {
 }
 
 pub struct App {
-    /// The control token and the viewer token.
-    tokens: RwLock<(String, String)>,
-    data_dir: PathBuf,
+    tokens: tokens::Store,
+    auth_serial: tokio::sync::Mutex<()>,
+    active_tokens: Mutex<HashMap<uuid::Uuid, Weak<auth::Access>>>,
+    input_owner: Mutex<Option<(uuid::Uuid, u64)>>,
+    batches: Mutex<HashMap<String, Key>>,
     commands: calloop::channel::Sender<Command>,
     policy: CodecPolicy,
     codecs: Vec<Codec>,
@@ -131,7 +127,7 @@ pub struct App {
     /// The webcam worker failed; withdraw the feature.
     cam_dead: std::sync::atomic::AtomicBool,
     /// Event senders of the window-stream sessions (cursor, clipboard, window list go to them too).
-    window_viewers: Mutex<HashMap<u64, mpsc::Sender<Bytes>>>,
+    window_viewers: Mutex<HashMap<u64, WindowViewer>>,
     snapshot_lock: Arc<tokio::sync::Semaphore>,
     /// Open desktop notifications by id (`notify.rs`), the next id, and the bus we serve them on.
     notifications: Mutex<HashMap<u32, notify::Open>>,
@@ -190,8 +186,8 @@ impl Clipboard {
         self.mime.is_some() && !(self.mime.as_deref().is_some_and(api::text_mime) && self.data.as_ref().is_some_and(Bytes::is_empty))
     }
 
-    fn metadata(&self, key: Key, scope: &str) -> serde_json::Value {
-        let restricted = self.mime.as_deref() == Some(api::URI_LIST) && key != Key::Control;
+    fn metadata(&self, key: &Key, scope: &str) -> serde_json::Value {
+        let restricted = self.mime.as_deref() == Some(api::URI_LIST) && !key.has(P::FilesDownload);
         serde_json::json!({
             "observation": format!("{scope}:{}", self.observation), "operation": self.operation.map(|id| format!("{scope}:{id}")),
             "present": self.present(), "mime": self.mime, "size": self.data.as_ref().filter(|_| !restricted).map(Bytes::len),
@@ -200,6 +196,8 @@ impl Clipboard {
         })
     }
 }
+
+pub(crate) struct WindowViewer { window: u64, key: Key, events: mpsc::Sender<Bytes> }
 
 pub(crate) struct ViewerSession {
     key: Key,
@@ -227,8 +225,7 @@ pub(crate) struct ViewerSession {
 /// `audio_rx` carries the clients' Opus packets, for every viewer.
 pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio_rx: mpsc::Receiver<StreamMsg>, events_rx: mpsc::UnboundedReceiver<Event>) -> Result<()> {
     fs::create_dir_all(&cfg.data_dir)?;
-    let token = load_or_create(&cfg.data_dir.join("token"), || Ok(random_hex(32)))?;
-    let viewer_token = load_or_create(&cfg.data_dir.join("viewer-token"), || Ok(random_hex(32)))?;
+    let tokens = tokens::Store::open(cfg.data_dir.join("state.sqlite3")).await?;
     let rtc = match cfg.rtc {
         Some(c) => rtc::Hub::start(c).await.map_err(|e| tracing::warn!("WebRTC disabled: {e:#}")).ok(),
         None => None,
@@ -236,8 +233,11 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
     let mut mixer = cfg.mixer;
     let mixer_errors = mixer.as_mut().and_then(|mixer| mixer.errors.take());
     let app = Arc::new(App {
-        tokens: RwLock::new((token, viewer_token)),
-        data_dir: cfg.data_dir.clone(),
+        tokens,
+        auth_serial: tokio::sync::Mutex::new(()),
+        active_tokens: Mutex::default(),
+        input_owner: Mutex::default(),
+        batches: Mutex::default(),
         commands,
         policy: cfg.codec,
         codecs: cfg.codecs,
@@ -274,6 +274,7 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
     tokio::spawn(notify::serve(app.clone()));
     tokio::spawn(files::sweep(app.clone()));
     tokio::spawn(broadcast::sweep(Arc::downgrade(&app)));
+    tokio::spawn(auth::sweep(Arc::downgrade(&app)));
 
     let router = Router::new()
         .route("/", get(index))
@@ -306,7 +307,9 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
                 .route("/api/notifications", get(api_notifications))
                 .route("/api/notifications/{id}", post(api_notification_action))
                 .route("/api/notifications/{id}/icon", get(api_notification_icon))
-                .route("/api/token/rotate", post(api_token_rotate))
+                .route("/api/tokens", get(auth::list).post(auth::create))
+                .route("/api/tokens/{id}", axum::routing::delete(auth::revoke))
+                .route("/api/me", get(auth::me))
                 .route("/api/clipboard", get(api_clipboard).put(api_set_clipboard))
                 .route("/api/clipboard/state", get(api_clipboard_state))
                 .route("/api/clipboard/files", post(api_clipboard_files))
@@ -408,32 +411,41 @@ async fn window_websocket(ws: WebSocketUpgrade, UrlPath(id): UrlPath<u64>, State
     ws.max_message_size(1 + (1 << 20)).on_upgrade(move |socket| ws::window_session(socket, app, id))
 }
 
-/// `Authorization: Bearer <token>` for everything under /api and /mcp; nothing else (no cookies, no query
-/// strings in logs). Which token it was rides along as a `Key` extension for the handlers and tools.
+/// Bearer authentication creates one live token context for the request and its response body.
 async fn bearer(State(app): State<Arc<App>>, mut req: Request, next: Next) -> Response {
-    match app.key_of(req.headers()) {
-        Some(key) => {
-            req.extensions_mut().insert(key);
-            next.run(req).await
-        }
-        None => StatusCode::UNAUTHORIZED.into_response(),
-    }
-}
-
-/// The viewer token may look but not act.
-fn writable(key: Key) -> Result<(), ApiError> {
-    if key == Key::Control { Ok(()) } else { Err(ApiError::Forbidden) }
+    let key = match app.key_of(req.headers()).await {
+        Ok(Some(key)) => key,
+        Ok(None) => return ApiError::Unauthorized.into_response(),
+        Err(error) => return error.into_response(),
+    };
+    req.extensions_mut().insert(key.clone());
+    let self_revoke = req.method() == axum::http::Method::DELETE
+        && req.uri().path().ends_with(&format!("/api/tokens/{}", key.metadata.id));
+    let response = if self_revoke { next.run(req).await } else { tokio::select! {
+        biased;
+        response = next.run(req) => response,
+        _ = key.ended() => return ApiError::Unauthorized.into_response(),
+    } };
+    let (parts, body) = response.into_parts();
+    use futures_util::StreamExt;
+    let stream = futures_util::stream::unfold((body.into_data_stream(), key), |(mut body, key)| async move {
+        let item = tokio::select! { biased; _ = key.ended() => None, item = body.next() => item };
+        item.map(|item| (item, (body, key)))
+    });
+    Response::from_parts(parts, axum::body::Body::from_stream(stream))
 }
 
 const NO_STORE: [(header::HeaderName, &str); 1] = [(header::CACHE_CONTROL, "no-store")];
 
 /// The codecs this server encodes, in the order Auto prefers them, and whether on the GPU.
-async fn api_codecs(State(app): State<Arc<App>>) -> Response {
+async fn api_codecs(Extension(key): Extension<Key>, State(app): State<Arc<App>>) -> Response {
+    if let Err(e) = key.require(P::DesktopView) { return e.into_response(); }
     let list: Vec<serde_json::Value> = app.codecs.iter().map(|&c| serde_json::json!({ "codec": protocol::codec_name(c), "hardware": !app.software })).collect();
     (NO_STORE, Json(list)).into_response()
 }
 
-async fn api_windows(State(app): State<Arc<App>>) -> Response {
+async fn api_windows(Extension(key): Extension<Key>, State(app): State<Arc<App>>) -> Response {
+    if let Err(e) = key.require(P::DesktopView) { return e.into_response(); }
     (NO_STORE, Json(app.windows())).into_response()
 }
 
@@ -444,26 +456,31 @@ fn png(result: Result<Vec<u8>, ApiError>) -> Response {
     }
 }
 
-async fn api_window_snapshot(UrlPath(id): UrlPath<u64>, Query(sizing): Query<elsewhere_core::SnapshotSizing>, State(app): State<Arc<App>>) -> Response {
+async fn api_window_snapshot(Extension(key): Extension<Key>, UrlPath(id): UrlPath<u64>, Query(sizing): Query<elsewhere_core::SnapshotSizing>, State(app): State<Arc<App>>) -> Response {
+    if let Err(e) = key.require(P::DesktopView) { return e.into_response(); }
     png(app.snapshot(Some(id), sizing).await)
 }
 
-async fn api_screenshot(Query(sizing): Query<elsewhere_core::SnapshotSizing>, State(app): State<Arc<App>>) -> Response {
+async fn api_screenshot(Extension(key): Extension<Key>, Query(sizing): Query<elsewhere_core::SnapshotSizing>, State(app): State<Arc<App>>) -> Response {
+    if let Err(e) = key.require(P::DesktopView) { return e.into_response(); }
     png(app.snapshot(None, sizing).await)
 }
 
-async fn api_applications(State(app): State<Arc<App>>) -> Response {
+async fn api_applications(Extension(key): Extension<Key>, State(app): State<Arc<App>>) -> Response {
+    if let Err(e) = key.require(P::DesktopView) { return e.into_response(); }
     (NO_STORE, Json(app.applications().await)).into_response()
 }
 
-async fn api_application_icon(UrlPath(id): UrlPath<String>, State(app): State<Arc<App>>) -> Response {
+async fn api_application_icon(Extension(key): Extension<Key>, UrlPath(id): UrlPath<String>, State(app): State<Arc<App>>) -> Response {
+    if let Err(e) = key.require(P::DesktopView) { return e.into_response(); }
     match app.application_icon(id).await {
         Ok((bytes, mime)) => ([(header::CONTENT_TYPE, mime), (header::CACHE_CONTROL, "private, max-age=86400")], bytes).into_response(),
         Err(e) => e.into_response(),
     }
 }
 
-async fn api_window_icon(UrlPath(id): UrlPath<u64>, State(app): State<Arc<App>>) -> Response {
+async fn api_window_icon(Extension(key): Extension<Key>, UrlPath(id): UrlPath<u64>, State(app): State<Arc<App>>) -> Response {
+    if let Err(e) = key.require(P::DesktopView) { return e.into_response(); }
     match app.window_icon(id).await {
         Ok((bytes, mime)) => ([(header::CONTENT_TYPE, mime), (header::CACHE_CONTROL, "private, max-age=300")], bytes).into_response(),
         Err(e) => e.into_response(),
@@ -471,28 +488,29 @@ async fn api_window_icon(UrlPath(id): UrlPath<u64>, State(app): State<Arc<App>>)
 }
 
 async fn api_files(Extension(key): Extension<Key>, State(app): State<Arc<App>>, Query(query): Query<files::FileQuery>) -> Response {
-    if let Err(e) = writable(key) { return e.into_response(); }
+    if let Err(e) = key.require(P::FilesBrowse) { return e.into_response(); }
     match app.browse_files(query).await { Ok(list) => (NO_STORE, Json(list)).into_response(), Err(e) => e.into_response() }
 }
 
 async fn api_manage_file(Extension(key): Extension<Key>, State(app): State<Arc<App>>, Json(action): Json<files::FileAction>) -> Response {
-    if let Err(e) = writable(key) { return e.into_response(); }
-    match app.manage_file(action).await { Ok(saved) => (StatusCode::CREATED, NO_STORE, Json(saved)).into_response(), Err(e) => e.into_response() }
+    if let Err(e) = key.require(P::FilesManage) { return e.into_response(); }
+    match app.manage_file(&key, action).await { Ok(saved) => (StatusCode::CREATED, NO_STORE, Json(saved)).into_response(), Err(e) => e.into_response() }
 }
 
 async fn api_put_file(Extension(key): Extension<Key>, UrlPath(name): UrlPath<String>, State(app): State<Arc<App>>, Query(query): Query<files::FileQuery>, req: Request) -> Response {
-    if let Err(e) = writable(key) { return e.into_response(); }
-    match app.upload_file(&query.path, &name, req.into_body()).await {
+    if let Err(e) = key.require(P::FilesUpload) { return e.into_response(); }
+    match app.upload_file(&key, &query.path, &name, req.into_body()).await {
         Ok(saved) => (StatusCode::CREATED, NO_STORE, Json(saved)).into_response(), Err(e) => e.into_response()
     }
 }
 
 /// A file of a drag or a paste, staged in its batch for the application that will take it.
 async fn api_stage_file(Extension(key): Extension<Key>, UrlPath((batch, name)): UrlPath<(String, String)>, State(app): State<Arc<App>>, req: Request) -> Response {
-    if let Err(e) = writable(key) {
+    if let Err(e) = key.require(P::FilesUpload) {
         return e.into_response();
     }
-    stored(app.stage_file(&batch, &name, req.into_body()).await)
+    if !key.has(P::DragdropUpload) && !key.has(P::ClipboardWrite) { return ApiError::Forbidden.into_response(); }
+    stored(app.stage_file(&key, &batch, &name, req.into_body()).await)
 }
 
 fn stored(result: Result<String, api::ApiError>) -> Response {
@@ -518,7 +536,7 @@ fn attachment(name: &str, len: Option<u64>, body: axum::body::Body) -> Response 
 }
 
 async fn api_file(Extension(key): Extension<Key>, UrlPath(name): UrlPath<String>, State(app): State<Arc<App>>, Query(query): Query<files::FileQuery>) -> Response {
-    if let Err(e) = writable(key) { return e.into_response(); }
+    if let Err(e) = key.require(P::FilesDownload) { return e.into_response(); }
     match app.download_file(&query.path, &name).await {
         Ok((len, body)) => attachment(&name, len, body),
         Err(e) => e.into_response(),
@@ -526,8 +544,8 @@ async fn api_file(Extension(key): Extension<Key>, UrlPath(name): UrlPath<String>
 }
 
 async fn api_delete_file(Extension(key): Extension<Key>, UrlPath(name): UrlPath<String>, State(app): State<Arc<App>>, Query(query): Query<files::FileQuery>) -> Response {
-    match writable(key) {
-        Ok(()) => match app.remove_file(&query.path, &name).await {
+    match key.require(P::FilesManage) {
+        Ok(()) => match app.remove_file(&key, &query.path, &name).await {
             Ok(()) => StatusCode::NO_CONTENT.into_response(),
             Err(e) => e.into_response(),
         },
@@ -535,13 +553,14 @@ async fn api_delete_file(Extension(key): Extension<Key>, UrlPath(name): UrlPath<
     }
 }
 
-async fn api_notifications(State(app): State<Arc<App>>) -> Response {
+async fn api_notifications(Extension(key): Extension<Key>, State(app): State<Arc<App>>) -> Response {
+    if let Err(e) = key.require(P::DesktopView) { return e.into_response(); }
     (NO_STORE, Json(app.notifications())).into_response()
 }
 
 /// `{"action": "default" | "<key>"}`, or `{}` to dismiss; `202`, `404` unknown id.
 async fn api_notification_action(Extension(key): Extension<Key>, UrlPath(id): UrlPath<u32>, State(app): State<Arc<App>>, Json(msg): Json<serde_json::Value>) -> Response {
-    match writable(key) {
+    match key.require(P::DesktopControl) {
         Ok(()) => match app.notification_action(id, msg.get("action").and_then(|a| a.as_str())).await {
             Ok(()) => StatusCode::ACCEPTED.into_response(),
             Err(e) => e.into_response(),
@@ -550,14 +569,16 @@ async fn api_notification_action(Extension(key): Extension<Key>, UrlPath(id): Ur
     }
 }
 
-async fn api_notification_icon(UrlPath(id): UrlPath<u32>, State(app): State<Arc<App>>) -> Response {
+async fn api_notification_icon(Extension(key): Extension<Key>, UrlPath(id): UrlPath<u32>, State(app): State<Arc<App>>) -> Response {
+    if let Err(e) = key.require(P::DesktopView) { return e.into_response(); }
     match app.notification_icon(id).await {
         Ok((bytes, mime)) => (NO_STORE, [(header::CONTENT_TYPE, mime)], bytes).into_response(),
         Err(e) => e.into_response(),
     }
 }
 
-async fn api_window_elements(UrlPath(id): UrlPath<u64>, State(app): State<Arc<App>>) -> Response {
+async fn api_window_elements(Extension(key): Extension<Key>, UrlPath(id): UrlPath<u64>, State(app): State<Arc<App>>) -> Response {
+    if let Err(e) = key.require(P::DesktopView) { return e.into_response(); }
     match app.elements(id).await {
         Ok(page) => (NO_STORE, Json(page)).into_response(),
         Err(e) => e.into_response(),
@@ -565,36 +586,28 @@ async fn api_window_elements(UrlPath(id): UrlPath<u64>, State(app): State<Arc<Ap
 }
 
 async fn api_control(Extension(key): Extension<Key>, State(app): State<Arc<App>>, Json(msg): Json<ControlMsg>) -> Response {
-    match writable(key).and_then(|()| app.control(msg)) {
+    match key.with(&[auth::control_permission(&msg)], || app.control(msg)) {
         Ok(()) => StatusCode::ACCEPTED.into_response(),
         Err(e) => e.into_response(),
     }
 }
 
-/// New tokens, both: written to the data directory and returned to the caller;
-/// every viewer is closed with "token rotated" so a leaked link stops working at once.
-async fn api_token_rotate(headers: HeaderMap, State(app): State<Arc<App>>) -> Response {
-    let presented = headers.get(header::AUTHORIZATION).and_then(|a| a.to_str().ok()).and_then(|a| a.strip_prefix("Bearer ")).unwrap_or_default();
-    match app.rotate_tokens(presented) {
-        Ok((token, viewer)) => (NO_STORE, Json(serde_json::json!({ "token": token, "viewer_token": viewer }))).into_response(),
-        Err(e) => e.into_response(),
-    }
-}
-
 async fn api_clipboard_state(Extension(key): Extension<Key>, State(app): State<Arc<App>>) -> Response {
+    if let Err(e) = key.require(P::ClipboardRead) { return e.into_response(); }
     let viewers = app.viewers.lock().unwrap();
-    (NO_STORE, Json(viewers.clipboard.metadata(key, &viewers.clipboard_scope))).into_response()
+    (NO_STORE, Json(viewers.clipboard.metadata(&key, &viewers.clipboard_scope))).into_response()
 }
 
 /// Current clipboard bytes. If-Match binds a preview read to its metadata observation.
 async fn api_clipboard(Extension(key): Extension<Key>, State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    if let Err(e) = key.require(P::ClipboardRead) { return e.into_response(); }
     let (clipboard, scope) = { let viewers = app.viewers.lock().unwrap(); (viewers.clipboard.clone(), viewers.clipboard_scope.clone()) };
     let etag = format!("\"{scope}:{}\"", clipboard.observation);
     if headers.get(header::IF_MATCH).is_some_and(|value| value != etag.as_str()) {
         return (StatusCode::PRECONDITION_FAILED, NO_STORE).into_response();
     }
     match (clipboard.mime, clipboard.data) {
-        (Some(mime), _) if mime == api::URI_LIST && key != Key::Control => ApiError::Forbidden.into_response(),
+        (Some(mime), _) if mime == api::URI_LIST && !key.has(P::FilesDownload) => ApiError::Forbidden.into_response(),
         (Some(mime), Some(data)) => (NO_STORE, [(header::CONTENT_TYPE, match mime.as_str() { api::PNG | api::URI_LIST => mime, _ => "text/plain; charset=utf-8".into() }), (header::ETAG, etag)], data).into_response(),
         (None, _) => (StatusCode::NO_CONTENT, NO_STORE).into_response(),
         _ => (StatusCode::CONFLICT, NO_STORE).into_response(),
@@ -603,16 +616,17 @@ async fn api_clipboard(Extension(key): Extension<Key>, State(app): State<Arc<App
 
 /// The body becomes the desktop clipboard: a PNG with `Content-Type: image/png` (up to 16 MiB), a file list
 /// with `text/uri-list`, else UTF-8 text (up to 1 MiB).
-/// The body is read only for a control token, and only up to its mime's limit.
+/// The body is read only with clipboard write permission, up to its mime limit.
 async fn api_set_clipboard(Extension(key): Extension<Key>, State(app): State<Arc<App>>, req: Request) -> Response {
-    if let Err(e) = writable(key) {
+    if let Err(e) = key.require(P::ClipboardWrite) {
         return e.into_response();
     }
     let content_type = req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or_default();
     let mime = if content_type.starts_with(api::PNG) { api::PNG } else if content_type.starts_with(api::URI_LIST) { api::URI_LIST } else { api::TEXT };
+    if mime == api::URI_LIST && !key.has(P::FilesUpload) { return ApiError::Forbidden.into_response(); }
     let Ok(body) = axum::body::to_bytes(req.into_body(), api::clipboard_limit(mime)).await else { return ApiError::TooLarge.into_response() };
     let body = if mime == api::PNG { body } else { Bytes::from(String::from_utf8_lossy(&body).into_owned()) };
-    match app.queue_clipboard(mime, body) {
+    match key.with(&[P::ClipboardWrite], || { if mime == api::URI_LIST { app.validate_clipboard_uris(&key, &body)?; } app.queue_clipboard(mime, body) }) {
         Ok(operation) => {
             let scope = &app.viewers.lock().unwrap().clipboard_scope;
             (StatusCode::ACCEPTED, NO_STORE, Json(serde_json::json!({ "operation": format!("{scope}:{operation}") }))).into_response()
@@ -626,7 +640,7 @@ async fn api_set_clipboard(Extension(key): Extension<Key>, State(app): State<Arc
 async fn api_clipboard_files(Extension(key): Extension<Key>, State(app): State<Arc<App>>, Json(msg): Json<serde_json::Value>) -> Response {
     let names: Vec<String> = msg.get("names").and_then(|n| n.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default();
     let batch = msg.get("batch").and_then(|v| v.as_str());
-    match writable(key).and_then(|()| app.set_clipboard_files(&names, batch)) {
+    match key.with(&[P::ClipboardWrite, P::FilesUpload], || app.set_clipboard_files(&key, &names, batch)) {
         Ok(()) => StatusCode::ACCEPTED.into_response(),
         Err(e) => e.into_response(),
     }
@@ -635,7 +649,8 @@ async fn api_clipboard_files(Extension(key): Extension<Key>, State(app): State<A
 /// The `index`th file of the URI list on the desktop clipboard, as an attachment; `404` if the clipboard
 /// holds no such list or entry.
 async fn api_clipboard_file(Extension(key): Extension<Key>, UrlPath(index): UrlPath<usize>, State(app): State<Arc<App>>) -> Response {
-    if let Err(e) = writable(key) { return e.into_response(); }
+    if let Err(e) = key.require(P::FilesDownload) { return e.into_response(); }
+    if let Err(e) = key.require(P::ClipboardRead) { return e.into_response(); }
     match app.clipboard_file(index).await {
         Ok((name, len, body)) => attachment(&name, len, body),
         Err(e) => e.into_response(),
@@ -647,94 +662,12 @@ async fn api_input(Extension(key): Extension<Key>, State(app): State<Arc<App>>, 
         InputMsg::Click { window: Some(id), x, y, .. } => app.x11_edge_warning(*id, *x, *y),
         _ => None,
     };
-    match writable(key).and_then(|()| app.input(msg)) {
+    match key.with(&[P::DesktopControl], || app.authorized_input(&key, msg)) {
         Ok(()) => match warning {
             Some(w) => (StatusCode::ACCEPTED, NO_STORE, Json(serde_json::json!({ "warning": w }))).into_response(),
             None => StatusCode::ACCEPTED.into_response(),
         },
         Err(e) => e.into_response(),
-    }
-}
-
-impl App {
-    /// Which token the request carries, if a current one.
-    pub(crate) fn key_of(&self, headers: &HeaderMap) -> Option<Key> {
-        let bearer = headers.get(header::AUTHORIZATION)?.to_str().ok()?.strip_prefix("Bearer ")?;
-        self.key_for(bearer)
-    }
-
-    pub(crate) fn key_for(&self, token: &str) -> Option<Key> {
-        let (control, viewer) = &*self.tokens.read().unwrap();
-        if same(token, control) {
-            Some(Key::Control)
-        } else if same(token, viewer) {
-            Some(Key::Viewer)
-        } else {
-            None
-        }
-    }
-
-    /// Connection URLs and local retrieval instructions contain no token values.
-    fn print_access(&self) {
-        let scheme = if self.tls { "https" } else { "http" };
-        if self.proxy_strips_prefix && !self.url_prefix.is_empty() {
-            println!("Open {}/ through the reverse proxy.", self.url_prefix);
-        } else {
-            for ip in lan_ips() {
-                println!("{scheme}://{ip}:{}{}/", self.port, self.url_prefix);
-            }
-        }
-        println!("Tokens are stored in {}", self.data_dir.display());
-        println!("Run `elsewhere token` for control or `elsewhere token --viewer` for read-only access, using the same user and XDG_CONFIG_HOME as the server.");
-    }
-
-    /// Only the holder of the current control token may rotate, checked again under the write lock so
-    /// two rotations with the same old token can't both go through. Both tokens change.
-    fn rotate_tokens(&self, presented: &str) -> Result<(String, String), ApiError> {
-        let mut current = self.tokens.write().unwrap();
-        if !same(presented, &current.0) {
-            return Err(if same(presented, &current.1) { ApiError::Forbidden } else { ApiError::Unauthorized });
-        }
-        let fresh = (random_hex(32), random_hex(32));
-        for (name, token) in [("token", &fresh.0), ("viewer-token", &fresh.1)] {
-            // written next to the old file and renamed over it, so a crash leaves one whole token or the other
-            let path = self.data_dir.join(name);
-            let tmp = self.data_dir.join(format!("{name}.new"));
-            let _ = fs::remove_file(&tmp);
-            write_private(&tmp, token.as_bytes()).and_then(|()| fs::rename(&tmp, &path)).map_err(|e| ApiError::Internal(format!("token file: {e}")))?;
-        }
-        *current = fresh.clone();
-        drop(current);
-        // every session authenticated with an old token: dropping its senders ends it as "token rotated"
-        {
-            let mut v = self.viewers.lock().unwrap();
-            v.sessions.clear();
-            v.controller = None;
-            v.control_epoch = v.control_epoch.wrapping_add(1);
-            self.mixer_audience(&v);
-        }
-        self.window_viewers.lock().unwrap().clear();
-        let _ = self.commands.send(Command::ReleaseAllInput);
-        println!("tokens rotated");
-        self.print_access();
-        Ok(fresh)
-    }
-}
-
-/// Constant-time string compare, no dependency needed.
-fn same(a: &str, b: &str) -> bool {
-    a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
-}
-
-fn load_or_create(path: &Path, make: impl FnOnce() -> Result<String>) -> Result<String> {
-    match fs::read_to_string(path) {
-        Ok(s) => Ok(s.trim().to_string()),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            let s = make()?;
-            write_private(path, s.as_bytes())?;
-            Ok(s)
-        }
-        Err(e) => Err(e).with_context(|| path.display().to_string()),
     }
 }
 

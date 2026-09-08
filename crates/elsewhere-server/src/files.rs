@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::{fs::{File, OpenOptions}, os::{fd::AsRawFd, unix::fs::OpenOptionsExt}};
 use tokio::io::AsyncWriteExt;
 
-use crate::{App, api::ApiError};
+use crate::{App, Key, tokens::Permission as P, api::ApiError};
 
 /// Browser paths are absolute UTF-8 paths or the exact @home / @transfer shortcuts.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -180,7 +180,7 @@ impl PartialUpload {
     }
 }
 
-async fn upload(path: PathBuf, create: bool, name: String, body: Body) -> Result<SavedFile, ApiError> {
+async fn upload(path: PathBuf, create: bool, name: String, body: Body, key: Key) -> Result<SavedFile, ApiError> {
     entry_name(&name)?;
     let mut partial = blocking(move || {
         if create { std::fs::create_dir_all(&path).map_err(io_error)?; }
@@ -193,7 +193,7 @@ async fn upload(path: PathBuf, create: bool, name: String, body: Body) -> Result
     }
     file.flush().await.map_err(io_error)?;
     let file = file.into_std().await;
-    blocking(move || partial.publish(&file, &name)).await
+    blocking(move || key.with(&[P::FilesUpload], || partial.publish(&file, &name))).await
 }
 
 fn kind(meta: &std::fs::Metadata) -> EntryKind {
@@ -245,8 +245,8 @@ impl App {
         }).await
     }
 
-    pub async fn upload_file(&self, path: &str, name: &str, body: Body) -> Result<SavedFile, ApiError> {
-        upload(self.file_path(path)?, path == "@transfer", name.to_owned(), body).await
+    pub async fn upload_file(&self, key: &Key, path: &str, name: &str, body: Body) -> Result<SavedFile, ApiError> {
+        upload(self.file_path(path)?, path == "@transfer", name.to_owned(), body, key.clone()).await
     }
 
     pub async fn download_file(&self, path: &str, name: &str) -> Result<(Option<u64>, Body), ApiError> {
@@ -255,16 +255,18 @@ impl App {
         blocking(move || { let dir = Directory::open(&dir)?; regular_file(&dir.at(&name), true) }).await.and_then(file_body)
     }
 
-    pub async fn remove_file(&self, path: &str, name: &str) -> Result<(), ApiError> {
+    pub async fn remove_file(&self, key: &Key, path: &str, name: &str) -> Result<(), ApiError> {
         let dir = self.file_path(path)?;
         let name = entry_name(name)?.to_owned();
-        blocking(move || { let dir = Directory::open(&dir)?; std::fs::remove_file(dir.at(&name)).map_err(io_error) }).await
+        let key = key.clone();
+        blocking(move || key.with(&[P::FilesManage], || { let dir = Directory::open(&dir)?; std::fs::remove_file(dir.at(&name)).map_err(io_error) })).await
     }
 
-    pub async fn manage_file(&self, action: FileAction) -> Result<SavedFile, ApiError> {
+    pub async fn manage_file(&self, key: &Key, action: FileAction) -> Result<SavedFile, ApiError> {
         let (path, name) = match &action { FileAction::Mkdir { path, name } | FileAction::Rename { path, name, .. } => (self.file_path(path)?, entry_name(name)?.to_owned()) };
         if let FileAction::Rename { new_name, .. } = &action { entry_name(new_name)?; }
-        blocking(move || {
+        let key = key.clone();
+        blocking(move || key.with(&[P::FilesManage], || {
             let dir = Directory::open(&path)?;
             match action {
                 FileAction::Mkdir { .. } => { std::fs::create_dir(dir.at(&name)).map_err(io_error)?; dir.saved(name) }
@@ -280,7 +282,7 @@ impl App {
                     dir.saved(new_name)
                 }
             }
-        }).await
+        })).await
     }
 }
 
@@ -317,61 +319,94 @@ fn candidates(name: &str) -> impl Iterator<Item = String> + '_ {
 
 impl App {
     /// Write an upload into the batch `batch`, a drag's or a paste's, for the application that will take it.
-    pub async fn stage_file(&self, batch: &str, name: &str, body: Body) -> Result<String, ApiError> {
-        self.store_into(&self.batch_dir(batch)?, name, body).await
+    pub async fn stage_file(&self, key: &Key, batch: &str, name: &str, body: Body) -> Result<String, ApiError> {
+        safe(batch)?;
+        key.with(&[P::FilesUpload], || {
+            let mut batches = self.batches.lock().unwrap();
+            if batches.get(batch).is_some_and(|owner| owner.metadata.id != key.metadata.id) { return Err(ApiError::Forbidden); }
+            batches.insert(batch.to_string(), key.clone());
+            Ok(())
+        })?;
+        self.store_into(key, &self.batch_dir(key, batch)?, name, body).await
     }
 
-    fn batch_dir(&self, batch: &str) -> Result<PathBuf, ApiError> {
-        Ok(self.drops_dir.join(safe(batch)?))
+    pub(crate) fn validate_clipboard_uris(&self, key: &Key, body: &[u8]) -> Result<(), ApiError> {
+        key.require(P::FilesUpload)?;
+        let drops = std::fs::canonicalize(&self.drops_dir).unwrap_or_else(|_| self.drops_dir.clone());
+        for uri in String::from_utf8_lossy(body).lines().filter(|line| !line.trim().is_empty() && !line.starts_with('#')) {
+            let path = uri.strip_prefix("file://").ok_or(ApiError::NoSuchFile)?;
+            let path = std::fs::canonicalize(PathBuf::from(unpercent(path))).map_err(io_error)?;
+            if let Ok(relative) = path.strip_prefix(&drops) {
+                let mut parts = relative.components();
+                let owner = parts.next().and_then(|c| c.as_os_str().to_str()).ok_or(ApiError::NoSuchFile)?;
+                if owner != key.metadata.id.to_string() { return Err(ApiError::Forbidden); }
+                let batch = parts.next().and_then(|c| c.as_os_str().to_str()).ok_or(ApiError::NoSuchFile)?;
+                self.owned_batch(key, batch)?;
+            }
+        }
+        Ok(())
     }
 
-    async fn store_into(&self, dir: &Path, name: &str, body: Body) -> Result<String, ApiError> {
+    fn batch_dir(&self, key: &Key, batch: &str) -> Result<PathBuf, ApiError> {
+        Ok(self.drops_dir.join(key.metadata.id.to_string()).join(safe(batch)?))
+    }
+
+    async fn store_into(&self, key: &Key, dir: &Path, name: &str, body: Body) -> Result<String, ApiError> {
         safe(name)?;
-        Ok(upload(dir.to_owned(), true, name.to_owned(), body).await?.name)
+        Ok(upload(dir.to_owned(), true, name.to_owned(), body, key.clone()).await?.name)
     }
 
     /// Files of the transfer folder, or with `batch` of the batch a paste staged, as the desktop clipboard's
     /// URI list (a file manager's copy).
-    pub fn set_clipboard_files(&self, names: &[String], batch: Option<&str>) -> Result<(), ApiError> {
+    pub fn set_clipboard_files(&self, key: &Key, names: &[String], batch: Option<&str>) -> Result<(), ApiError> {
         let dir = match batch {
-            Some(b) => self.batch_dir(b)?,
+            Some(b) => self.owned_batch(key, b)?,
             None => self.files_dir.clone(),
         };
-        self.set_clipboard(crate::api::URI_LIST, uri_list(&dir, names)?.into())
+        let list = uri_list(&dir, names)?;
+        self.validate_clipboard_uris(key, &list)?;
+        self.set_clipboard(crate::api::URI_LIST, list.into())
     }
 
     /// The browser's drag as a compositor command. A drop names the files of its batch and drops their
     /// URIs; the batch comes back with the desktop's word (`DragEnded`). A name that isn't a plain file
     /// name cancels instead, so the desktop lets go; a cancel that names a batch (a drag whose upload half
     /// failed) sends its files to the transfer folder.
-    pub(crate) fn drag_command(&self, msg: crate::protocol::DragMsg, viewers: &crate::Viewers) -> elsewhere_core::Command {
+    pub(crate) fn drag_command(&self, key: &Key, msg: crate::protocol::DragMsg, viewers: &crate::Viewers) -> elsewhere_core::Command {
         use crate::protocol::DragMsg;
         elsewhere_core::Command::Drag(match msg {
             DragMsg::Start => elsewhere_core::Drag::Start,
-            DragMsg::Drop { batch, names } => match self.batch_dir(&batch).and_then(|dir| uri_list(&dir, &names)) {
+            DragMsg::Drop { batch, names } => match self.owned_batch(key, &batch).and_then(|dir| uri_list(&dir, &names)).and_then(|list| { self.validate_clipboard_uris(key, &list)?; Ok(list) }) {
                 Ok(list) => elsewhere_core::Drag::Drop { list, batch },
                 Err(_) => elsewhere_core::Drag::Cancel,
             },
             DragMsg::Cancel { batch } => {
                 if let Some(b) = batch {
-                    self.rescue_to(&b, viewers.sessions.values().filter(|s| s.key == crate::Key::Control).map(|s| s.events.clone()).collect());
+                    if self.owned_batch(key, &b).is_ok() { self.rescue_to(&b, key.clone(), viewers.sessions.values().filter(|s| s.key.metadata.id == key.metadata.id).map(|s| s.events.clone()).collect()); }
                 }
                 elsewhere_core::Drag::Cancel
             }
         })
     }
 
-    /// Report rescue results to control-token sessions; the originating client recognizes its batch ID.
-    pub fn rescue(&self, batch: &str) -> tokio::task::JoinHandle<bool> {
-        let events = self.viewers.lock().unwrap().sessions.values().filter(|s| s.key == crate::Key::Control).map(|s| s.events.clone()).collect();
-        self.rescue_to(batch, events)
+    fn owned_batch(&self, key: &Key, batch: &str) -> Result<PathBuf, ApiError> {
+        if !self.batches.lock().unwrap().get(batch).is_some_and(|owner| owner.metadata.id == key.metadata.id && owner.live()) { return Err(ApiError::Forbidden); }
+        self.batch_dir(key, batch)
     }
 
-    fn rescue_to(&self, batch: &str, events: Vec<tokio::sync::mpsc::Sender<axum::body::Bytes>>) -> tokio::task::JoinHandle<bool> {
-        let (dir, files_dir) = (self.batch_dir(batch), self.files_dir.clone());
+    /// Report transfer results only to sessions authenticated with the batch's token.
+    pub fn rescue(&self, batch: &str) -> Option<tokio::task::JoinHandle<bool>> {
+        let key = self.batches.lock().unwrap().get(batch)?.clone();
+        let mut events: Vec<_> = self.viewers.lock().unwrap().sessions.values().filter(|s| s.key.metadata.id == key.metadata.id).map(|s| s.events.clone()).collect();
+        events.extend(self.window_viewers.lock().unwrap().values().filter(|s| s.key.metadata.id == key.metadata.id).map(|s| s.events.clone()));
+        Some(self.rescue_to(batch, key, events))
+    }
+
+    fn rescue_to(&self, batch: &str, key: Key, events: Vec<tokio::sync::mpsc::Sender<axum::body::Bytes>>) -> tokio::task::JoinHandle<bool> {
+        let (dir, files_dir) = (self.batch_dir(&key, batch), self.files_dir.clone());
         let batch = batch.to_owned();
         tokio::task::spawn_blocking(move || {
-            let result = dir.and_then(|dir| rescue_files(&dir, &files_dir));
+            let result = key.with(&[P::FilesUpload], || dir.and_then(|dir| rescue_files(&dir, &files_dir)));
             let (saved, failed, error) = match result {
                 Ok((saved, failed)) => (saved, failed, None),
                 Err(e) => { tracing::warn!(error = %e, "file rescue failed"); (vec![], 1, Some(e.to_string())) },
@@ -380,7 +415,7 @@ impl App {
             let mut packet = vec![crate::protocol::FILE_RESULT];
             packet.extend(serde_json::to_vec(&serde_json::json!({ "batch": batch, "saved": saved, "failed": failed, "error": error })).unwrap());
             let packet: axum::body::Bytes = packet.into();
-            for events in events { let _ = events.try_send(packet.clone()); }
+            if key.live() { for events in events { let _ = events.try_send(packet.clone()); } }
             complete
         })
     }
@@ -454,6 +489,7 @@ pub async fn sweep(app: std::sync::Arc<App>) {
             }
         })
         .await;
+        app.batches.lock().unwrap().retain(|batch, key| key.live() && app.batch_dir(key, batch).is_ok_and(|dir| dir.is_dir()));
         tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
     }
 }

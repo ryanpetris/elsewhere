@@ -10,7 +10,7 @@ use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use elsewhere_core::{AxisSource, Bytes, Codec, Command, ControlMsg, ControlOp, EncodingEffort, Event, InputMsg, OutputGeometry, StreamMsg, TouchKind};
 use tokio::sync::mpsc;
 
-use crate::{apps, App, Key, ViewerSession, Viewers, api, protocol::{self, ClientMsg, Preset, Role}};
+use crate::{apps, auth, tokens::Permission as P, App, Key, ViewerSession, Viewers, api, protocol::{self, ClientMsg, Preset, Role}};
 
 /// Close codes the page understands.
 const UNAUTHORIZED: u16 = 4001;
@@ -21,7 +21,7 @@ const GONE: u16 = 4003;
 pub async fn distribute_audio(app: Arc<App>, mut rx: mpsc::Receiver<StreamMsg>) {
     while let Some(msg) = rx.recv().await {
         if let StreamMsg::Audio { pts_us, data } = msg {
-            for s in app.viewers.lock().unwrap().sessions.values_mut() {
+            for s in app.viewers.lock().unwrap().sessions.values_mut().filter(|s| s.key.has(P::AudioListen)) {
                 let seq = s.audio_seq;
                 s.audio_seq = seq.wrapping_add(1);
                 let _ = s.audio.try_send(protocol::audio(pts_us, &data, seq));
@@ -36,7 +36,7 @@ pub async fn distribute_audio(app: Arc<App>, mut rx: mpsc::Receiver<StreamMsg>) 
             if let Ok(permit) = events.reserve().await {
                 let viewers = app.viewers.lock().unwrap();
                 if viewers.sessions.contains_key(&id) {
-                    permit.send(protocol::role(viewers.role_of(id), app.features()));
+                    permit.send(protocol::role(viewers.role_of(id), app.features(&viewers.sessions[&id].key)));
                 }
             }
         });
@@ -89,15 +89,14 @@ pub async fn forward_events(app: Arc<App>, mut rx: mpsc::UnboundedReceiver<Event
                 msg
             }
             Event::DragEnded { taken, target, batch } => {
-                // files nobody took go to the transfer folder; then the controller, if still here, hears how it went
-                let events = v.controller.and_then(|c| v.sessions.get(&c)).map(|s| s.events.clone());
+                // Only the token that staged the batch receives its result.
+                let owner = app.batches.lock().unwrap().get(&batch).cloned();
+                let events: Vec<_> = v.sessions.values().filter(|s| owner.as_ref().is_some_and(|key| key.live() && key.metadata.id == s.key.metadata.id)).map(|s| s.events.clone()).collect();
                 let app = app.clone();
                 tokio::spawn(async move {
-                    if !taken { let _ = app.rescue(&batch).await; return; }
+                    if !taken { if let Some(task) = app.rescue(&batch) { let _ = task.await; } return; }
                     let word = protocol::success(&format!("Copied to {}", target.map_or("the desktop".to_string(), |id| apps::display_name(&id))));
-                    if let Some(events) = events {
-                        let _ = events.try_send(word);
-                    }
+                    if owner.as_ref().is_some_and(|key| key.live()) { for events in events { let _ = events.try_send(word.clone()); } }
                 });
                 continue;
             }
@@ -109,13 +108,13 @@ pub async fn forward_events(app: Arc<App>, mut rx: mpsc::UnboundedReceiver<Event
 
 /// The first message must be AUTH with a token; until then this socket is nobody. A wrong token, or
 /// five seconds of silence, ends it. Returns the token the session came in with and which one it is.
-pub(super) async fn authenticate(socket: &mut WebSocket, app: &App) -> Option<(String, Key)> {
+pub(super) async fn authenticate(socket: &mut WebSocket, app: &App) -> Option<Key> {
     let auth = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match socket.recv().await {
                 Some(Ok(Message::Binary(b))) => {
                     let t = std::str::from_utf8(b.get(1..).unwrap_or_default()).unwrap_or("");
-                    return (b.first() == Some(&protocol::AUTH)).then(|| app.key_for(t).map(|k| (t.to_string(), k))).flatten();
+                    return if b.first() == Some(&protocol::AUTH) { app.key_for(t).await.ok().flatten() } else { None };
                 }
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return None,
                 _ => {}
@@ -157,14 +156,19 @@ async fn close(socket: &mut WebSocket, code: u16, reason: &str) {
 
 /// A send that gives up on a peer that stopped reading, so its session ends (and with it the encoder
 /// waiting on it) instead of sitting on a full socket for good.
-async fn send(socket: &mut WebSocket, msg: Bytes) -> bool {
-    tokio::time::timeout(Duration::from_secs(10), socket.send(Message::Binary(msg))).await.is_ok_and(|r| r.is_ok())
+async fn send(socket: &mut WebSocket, key: &Key, msg: Bytes) -> bool {
+    send_message(socket, key, Message::Binary(msg)).await
+}
+async fn send_message(socket: &mut WebSocket, key: &Key, msg: Message) -> bool {
+    tokio::select! { biased; _ = key.ended() => false,
+        result = tokio::time::timeout(Duration::from_secs(10), socket.send(msg)) => result.is_ok_and(|r| r.is_ok()) }
 }
 
-/// A viewer of the desktop. The first one with a control token controls; the rest watch the same
-/// desktop scaled to their own window, and one with a control token may take control.
+/// A viewer of the desktop. The first one with a token with desktop.control controls; the rest watch the same
+/// desktop scaled to their own window, and one with a token with desktop.control may take control.
 pub async fn session(mut socket: WebSocket, app: Arc<App>) {
-    let Some((token, key)) = authenticate(&mut socket, &app).await else { return };
+    let Some(key) = authenticate(&mut socket, &app).await else { return };
+    if !key.has(P::DesktopView) { return close(&mut socket, UNAUTHORIZED, "desktop.view required").await; }
     let Some((hw, sw, want_codec, preset, effort)) = hello(&mut socket).await else { return };
     let (tx, mut rx) = mpsc::channel::<StreamMsg>(2);
     let (sink, control) = match (app.sinks)(tx) {
@@ -184,50 +188,52 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
     let (atx, mut arx) = mpsc::channel::<Bytes>(4);
     let notifications = protocol::notifications(&app.notifications()); // its own lock: never inside the viewers'
     let (id, replay) = {
-        // registered under the lock a rotation clears, so a session that came in with an old token is
+        // registered under the lock a revocation clears, so a session that came in with an old token is
         // either cleared by it or refused here
         let mut v = app.viewers.lock().unwrap();
-        if app.key_for(&token).is_none() {
+        if !key.live() {
             drop(v);
-            return close(&mut socket, UNAUTHORIZED, "token rotated").await;
+            return close(&mut socket, UNAUTHORIZED, "token revoked or expired").await;
         }
         let id = v.next_id;
         v.next_id += 1;
-        v.sessions.insert(id, ViewerSession { key, events: etx.clone(), audio: atx, audio_seq: 0, size: None, control, hw, sw, want_codec, codec, quality, preset, cam_wait_key: false, mixer_subscribed: false });
-        if key == Key::Control && v.controller.is_none() {
+        v.sessions.insert(id, ViewerSession { key: key.clone(), events: etx.clone(), audio: atx, audio_seq: 0, size: None, control, hw, sw, want_codec, codec, quality, preset, cam_wait_key: false, mixer_subscribed: false });
+        if key.has(P::DesktopControl) && v.controller.is_none() {
             v.controller = Some(id);
             v.control_epoch = v.control_epoch.wrapping_add(1);
         }
         app.mixer_audience(&v);
-        let replay: Vec<Bytes> = [Some(protocol::session(id)), Some(protocol::mixer_state(&app.mixer_state())), v.cursor.clone(), v.windows.clone(), v.locked.then(|| Bytes::from(vec![protocol::POINTER_LOCK, 1])), Some(protocol::role(v.role_of(id), app.features())), Some(notifications.clone())].into_iter().flatten().collect();
+        let replay: Vec<Bytes> = [Some(protocol::session(id)), key.has(P::AudioListen).then(|| protocol::mixer_state(&app.mixer_state())), v.cursor.clone(), v.windows.clone(), v.locked.then(|| Bytes::from(vec![protocol::POINTER_LOCK, 1])), Some(protocol::role(v.role_of(id), app.features(&key))), Some(notifications.clone())].into_iter().flatten().collect();
         (id, replay)
     };
     for msg in replay {
-        let _ = socket.send(Message::Binary(msg)).await;
+        let _ = send(&mut socket, &key, msg).await;
     }
     if let Some(hub) = &app.rtc {
-        let _ = socket.send(Message::Binary(protocol::rtc(&serde_json::json!({ "ice_servers": *hub.ice_servers })))).await; // the page may offer now
+        let _ = send(&mut socket, &key, protocol::rtc(&serde_json::json!({ "ice_servers": *hub.ice_servers }))).await; // the page may offer now
     }
-    let _ = app.commands.send(Command::ViewerStream { key: id, sink: Some(sink) });
+    let _ = key.with(&[P::DesktopView], || { let _ = app.commands.send(Command::ViewerStream { key: id, sink: Some(sink) }); Ok(()) });
 
-    let mut mixer_state = app.mixer.as_ref().map(|m| m.state.clone());
-    let mut mixer_levels = app.mixer.as_ref().map(|m| m.levels.clone());
+    let mut mixer_state = app.mixer.as_ref().filter(|_| key.has(P::AudioListen)).map(|m| m.state.clone());
+    let mut mixer_levels = app.mixer.as_ref().filter(|_| key.has(P::AudioListen)).map(|m| m.levels.clone());
     let mut mixer_subscribed = false;
     let (mut info, mut config, mut ws_config, mut seq, mut failed) = (None::<elsewhere_core::StreamInfo>, Bytes::new(), None, 0u16, false);
     let mut ping = tokio::time::interval(Duration::from_secs(1));
     let (mut unanswered, started) = (0, Instant::now());
     let ended = loop {
         tokio::select! {
+            biased;
+            _ = key.ended() => break Some((UNAUTHORIZED, "token revoked or expired")),
             changed = async { match &mut mixer_state { Some(state) => state.changed().await, None => std::future::pending().await } } => {
-                if app.key_for(&token).is_none() { break Some((UNAUTHORIZED, "token rotated")); }
+                if !key.live() { break Some((UNAUTHORIZED, "token revoked or expired")); }
                 if changed.is_err() { mixer_state = None; }
-                if !send(&mut socket, protocol::mixer_state(&app.mixer_state())).await { break None }
+                if !send(&mut socket, &key, protocol::mixer_state(&app.mixer_state())).await { break None }
             },
             changed = async { match &mut mixer_levels { Some(levels) => levels.changed().await, None => std::future::pending().await } }, if mixer_subscribed => {
-                if app.key_for(&token).is_none() { break Some((UNAUTHORIZED, "token rotated")); }
+                if !key.live() { break Some((UNAUTHORIZED, "token revoked or expired")); }
                 if changed.is_err() { mixer_levels = None; }
                 let levels = app.mixer.as_ref().map(|m| m.levels.borrow().clone()).unwrap_or_default();
-                if !send(&mut socket, protocol::mixer_levels(&levels)).await { break None }
+                if !send(&mut socket, &key, protocol::mixer_levels(&levels)).await { break None }
             },
             msg = rx.recv() => match msg {
                 Some(StreamMsg::Info(i)) => {
@@ -235,8 +241,8 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
                     failed = false;
                     config = protocol::config(&i);
                     info = Some(i);
-                    let Some(state) = app.stream_state(id) else { break Some((UNAUTHORIZED, "token rotated")) };
-                    if !send(&mut socket, state).await { break None }
+                    let Some(state) = app.stream_state(id) else { break Some((UNAUTHORIZED, "token revoked or expired")) };
+                    if !send(&mut socket, &key, state).await { break None }
                 }
                 Some(StreamMsg::Frame(f)) => {
                     if info.as_ref().is_some_and(|i| i.stream_id == f.stream_id) {
@@ -248,18 +254,18 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
                             (Some(hub), Some(_)) => hub.frame(id, config.clone(), protocol::video(&f, seq), auto.quality.bitrate_kbps),
                             _ => {
                                 if ws_config != Some(f.stream_id) {
-                                    if !send(&mut socket, config.clone()).await { break None }
+                                    if !send(&mut socket, &key, config.clone()).await { break None }
                                     ws_config = Some(f.stream_id);
                                 }
-                                if !send(&mut socket, protocol::video(&f, seq)).await { break None }
+                                if !send(&mut socket, &key, protocol::video(&f, seq)).await { break None }
                             },
                         }
                         seq = seq.wrapping_add(1);
                         let (dropped, blocked) = pressure.unwrap_or((0, false));
                         if let Some(q) = auto.frame(backlog > 0 || blocked, dropped, t.elapsed()) {
                             app.set_quality(id, q);
-                            let Some(state) = app.stream_state(id) else { break Some((UNAUTHORIZED, "token rotated")) };
-                            if !send(&mut socket, state).await { break None }
+                            let Some(state) = app.stream_state(id) else { break Some((UNAUTHORIZED, "token revoked or expired")) };
+                            if !send(&mut socket, &key, state).await { break None }
                         }
                     }
                 }
@@ -277,19 +283,19 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
                 Some(StreamMsg::Audio { .. }) => {}
             },
             ev = erx.recv() => match ev {
-                Some(b) => if !send(&mut socket, b).await { break None },
-                None => break Some((UNAUTHORIZED, "token rotated")), // rotate_tokens dropped every session
+                Some(b) => if !send(&mut socket, &key, b).await { break None },
+                None => break Some((UNAUTHORIZED, "token revoked or expired")), // revocation dropped every session
             },
-            Some(b) = arx.recv() => if !send(&mut socket, b).await { break None },
+            Some(b) = arx.recv() => if !send(&mut socket, &key, b).await { break None },
             msg = socket.recv() => match msg {
                 Some(Ok(Message::Binary(b))) => {
-                    if app.key_for(&token).is_none() {
-                        break Some((UNAUTHORIZED, "token rotated")); // a queued command must not get through after a rotation
+                    if !key.live() {
+                        break Some((UNAUTHORIZED, "token revoked or expired")); // a queued command must not get through after a revocation
                     }
                     let decoded = protocol::decode(&b);
-                    if let Some(ClientMsg::Mixer(Ok(elsewhere_core::audio::Command::Subscribe { enabled }))) = &decoded { mixer_subscribed = *enabled; }
+                    if let Some(ClientMsg::Mixer(Ok(elsewhere_core::audio::Command::Subscribe { enabled }))) = &decoded { mixer_subscribed = *enabled && key.has(P::AudioListen); }
                     match decoded {
-                        Some(ClientMsg::Notify(n)) if key == Key::Control => app.spawn_notification_action(n),
+                        Some(ClientMsg::Notify(n)) if key.has(P::DesktopControl) => app.spawn_notification_action(key.clone(), n),
                         Some(ClientMsg::Stream(choice)) => {
                             let (restart, preset) = app.apply_choice(id, &choice);
                             if let Some(preset) = preset {
@@ -298,21 +304,21 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
                             if restart {
                                 let _ = app.commands.send(Command::RequestFullFrame); // supply a full frame for the new encoder
                             }
-                            let Some(state) = app.stream_state(id) else { break Some((UNAUTHORIZED, "token rotated")) };
-                            if !send(&mut socket, state).await { break None }
+                            let Some(state) = app.stream_state(id) else { break Some((UNAUTHORIZED, "token revoked or expired")) };
+                            if !send(&mut socket, &key, state).await { break None }
                         }
                         Some(ClientMsg::Rtc { g, message: v }) => match (&app.rtc, v.get("offer").and_then(|o| o.as_str())) {
-                            (Some(hub), Some(sdp)) => hub.offer(id, sdp.to_string(), g, etx.clone(), v.get("endpoint")).await,
+                            (Some(hub), Some(sdp)) => tokio::select! { biased; _ = key.ended() => {}, _ = hub.offer(id, sdp.to_string(), g, etx.clone(), v.get("endpoint")) => {} },
                             (Some(hub), None) if v.get("close").and_then(|b| b.as_bool()) == Some(true) => {
                                 if hub.close_attempt(id, g).await {
-                                    if !send(&mut socket, protocol::rtc(&serde_json::json!({ "keyframe": true, "g": g }))).await { break None; }
-                                    app.viewer_message(id, key, ClientMsg::RequestKeyframe);
+                                    if !send(&mut socket, &key, protocol::rtc(&serde_json::json!({ "keyframe": true, "g": g }))).await { break None; }
+                                    app.viewer_message(id, &key, ClientMsg::RequestKeyframe);
                                 }
                             }
                             _ => {}
                         },
                         Some(ClientMsg::Report { delay_ms, dropped }) => auto.report(delay_ms, dropped),
-                        Some(m) => app.viewer_message(id, key, m),
+                        Some(m) => app.viewer_message(id, &key, m),
                         None => {}
                     }
                 }
@@ -320,19 +326,19 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
                     unanswered = 0;
                     if let Some(q) = rtt_of(&p, started).and_then(|rtt| auto.rtt(rtt)) {
                         app.set_quality(id, q);
-                        let Some(state) = app.stream_state(id) else { break Some((UNAUTHORIZED, "token rotated")) };
-                        if !send(&mut socket, state).await { break None }
+                        let Some(state) = app.stream_state(id) else { break Some((UNAUTHORIZED, "token revoked or expired")) };
+                        if !send(&mut socket, &key, state).await { break None }
                     }
                 }
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break None,
                 _ => {}
             },
             _ = ping.tick() => {
-                if app.key_for(&token).is_none() {
-                    break Some((UNAUTHORIZED, "token rotated")); // an idle session, which no message would end
+                if !key.live() {
+                    break Some((UNAUTHORIZED, "token revoked or expired")); // an idle session, which no message would end
                 }
                 // the pong comes back behind whatever video is queued in the socket: its time is the backlog's
-                if unanswered >= 10 || socket.send(Message::Ping(ping_payload(started))).await.is_err() {
+                if unanswered >= 10 || !send_message(&mut socket, &key, Message::Ping(ping_payload(started))).await {
                     break None; // dead peer
                 }
                 unanswered += 1;
@@ -343,12 +349,13 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
         let mut v = app.viewers.lock().unwrap();
         v.sessions.remove(&id);
         if v.controller == Some(id) {
-            // the oldest remaining control-token session takes over
-            let next = v.sessions.iter().filter(|(_, s)| s.key == Key::Control).map(|(id, _)| *id).min();
+            // the oldest remaining control-permitted session takes over
+            let next = v.sessions.iter().filter(|(_, s)| s.key.has(P::DesktopControl)).map(|(id, _)| *id).min();
             app.set_controller(&mut v, next);
         }
         app.mixer_audience(&v);
     }
+    app.release_input(&key, id);
     let _ = app.commands.send(Command::ViewerStream { key: id, sink: None });
     if let Some(hub) = &app.rtc {
         hub.close(id).await;
@@ -360,14 +367,15 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
 
 /// One window as its own stream (`/ws/window/{id}`): the same messages as `/ws`, except that pointer
 /// positions are relative to the window's geometry, a Resize resizes the window rather than the
-/// output, there is no audio, and a control token drives regardless of who controls the desktop. Any
+/// output, there is no audio, and a token with desktop.control drives regardless of who controls the desktop. Any
 /// number of these can run; each has its own encoder, which the compositor stops when the session ends
 /// or the window goes away.
 pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
-    let Some((token, key)) = authenticate(&mut socket, &app).await else { return };
+    let Some(key) = authenticate(&mut socket, &app).await else { return };
     if !app.viewers.lock().unwrap().window_list.iter().any(|w| w.id == id) {
         return close(&mut socket, GONE, "no such window").await;
     }
+    if !key.has(P::DesktopView) { return close(&mut socket, UNAUTHORIZED, "desktop.view required").await; }
     let Some((hw, sw, mut want_codec, mut preset, effort)) = hello(&mut socket).await else { return };
     let (tx, mut rx) = mpsc::channel::<StreamMsg>(2);
     let (sink, control) = match (app.sinks)(tx) {
@@ -389,25 +397,25 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
     let (etx, mut erx) = mpsc::channel::<Bytes>(32);
     {
         let mut viewers = app.window_viewers.lock().unwrap();
-        if app.key_for(&token).is_none() {
+        if !key.live() {
             drop(viewers);
-            return close(&mut socket, UNAUTHORIZED, "token rotated").await;
+            return close(&mut socket, UNAUTHORIZED, "token revoked or expired").await;
         }
-        viewers.insert(stream, etx.clone());
+        viewers.insert(stream, crate::WindowViewer { window: id, key: key.clone(), events: etx.clone() });
     }
     let replay: Vec<Bytes> = {
         let v = app.viewers.lock().unwrap();
-        let role = if key == Key::Control { Role::Controller } else { Role::Viewer };
+        let role = if key.has(P::DesktopControl) { Role::Controller } else { Role::Viewer };
         [v.cursor.clone(), v.windows.clone(), v.locked.then(|| Bytes::from(vec![protocol::POINTER_LOCK, 1])), Some(protocol::role(role, 0))].into_iter().flatten().collect()
     };
     for msg in replay {
-        let _ = socket.send(Message::Binary(msg)).await;
+        let _ = send(&mut socket, &key, msg).await;
     }
     let rtc_key = stream | 1 << 63; // the hub's sessions: desktop ids below, window streams above
     if let Some(hub) = &app.rtc {
-        let _ = socket.send(Message::Binary(protocol::rtc(&serde_json::json!({ "ice_servers": *hub.ice_servers })))).await;
+        let _ = send(&mut socket, &key, protocol::rtc(&serde_json::json!({ "ice_servers": *hub.ice_servers }))).await;
     }
-    let _ = app.commands.send(Command::WindowStream { key: stream, window: id, sink: Some(sink) });
+    let _ = key.with(&[P::DesktopView], || { let _ = app.commands.send(Command::WindowStream { key: stream, window: id, sink: Some(sink) }); Ok(()) });
 
     let (mut info, mut config, mut ws_config, mut seq, mut failed) = (None::<elsewhere_core::StreamInfo>, Bytes::new(), None, 0u16, false);
     let mut pointer = None; // the last window-relative position, for the edge notice
@@ -415,13 +423,15 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
     let (mut unanswered, started) = (0, Instant::now());
     let ended = loop {
         tokio::select! {
+            biased;
+            _ = key.ended() => break Some((UNAUTHORIZED, "token revoked or expired")),
             msg = rx.recv() => match msg {
                 Some(StreamMsg::Info(i)) => {
                     seq = 0;
                     failed = false;
                     config = protocol::config(&i);
                     info = Some(i);
-                    if !send(&mut socket, state(codec, quality, want_codec, preset)).await { break None }
+                    if !send(&mut socket, &key, state(codec, quality, want_codec, preset)).await { break None }
                 }
                 Some(StreamMsg::Frame(f)) => {
                     if info.as_ref().is_some_and(|i| i.stream_id == f.stream_id) {
@@ -431,10 +441,10 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                             (Some(hub), Some(_)) => hub.frame(rtc_key, config.clone(), protocol::video(&f, seq), quality.bitrate_kbps),
                             _ => {
                                 if ws_config != Some(f.stream_id) {
-                                    if !send(&mut socket, config.clone()).await { break None }
+                                    if !send(&mut socket, &key, config.clone()).await { break None }
                                     ws_config = Some(f.stream_id);
                                 }
-                                if !send(&mut socket, protocol::video(&f, seq)).await { break None }
+                                if !send(&mut socket, &key, protocol::video(&f, seq)).await { break None }
                             },
                         }
                         seq = seq.wrapping_add(1);
@@ -442,7 +452,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                         if let Some(q) = auto.frame(backlog > 0 || blocked, dropped, t.elapsed()) {
                             quality = q;
                             control.set_quality(q);
-                            if !send(&mut socket, state(codec, quality, want_codec, preset)).await { break None }
+                            if !send(&mut socket, &key, state(codec, quality, want_codec, preset)).await { break None }
                         }
                     }
                 }
@@ -456,13 +466,13 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                 None => break Some((GONE, "window closed")), // the compositor dropped the stream: the window is gone
             },
             ev = erx.recv() => match ev {
-                Some(b) => if !send(&mut socket, b).await { break None },
-                None => break Some((UNAUTHORIZED, "token rotated")),
+                Some(b) => if !send(&mut socket, &key, b).await { break None },
+                None => break Some((UNAUTHORIZED, "token revoked or expired")),
             },
             msg = socket.recv() => match msg {
                 Some(Ok(Message::Binary(b))) => {
-                    if app.key_for(&token).is_none() {
-                        break Some((UNAUTHORIZED, "token rotated"));
+                    if !key.live() {
+                        break Some((UNAUTHORIZED, "token revoked or expired"));
                     }
                     let decoded = protocol::decode(&b);
                     if let Some(ClientMsg::MotionAbs { x, y }) = &decoded {
@@ -471,7 +481,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                     // a press on the part of an X11 window past the output's edge goes nowhere: say so,
                     // through the session's own queue so the press itself isn't held back
                     if let (Some(ClientMsg::Button { pressed: true, .. }), Some((x, y))) = (&decoded, pointer)
-                        && key == Key::Control
+                        && key.has(P::DesktopControl)
                         && let Some(w) = app.x11_edge_warning(id, x, y)
                     {
                         let _ = etx.try_send(protocol::notice(w));
@@ -506,10 +516,10 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                         }
                         Some(ClientMsg::Rtc { g, message: v }) => {
                             match (&app.rtc, v.get("offer").and_then(|o| o.as_str())) {
-                                (Some(hub), Some(sdp)) => hub.offer(rtc_key, sdp.to_string(), g, etx.clone(), v.get("endpoint")).await,
+                                (Some(hub), Some(sdp)) => tokio::select! { biased; _ = key.ended() => {}, _ = hub.offer(rtc_key, sdp.to_string(), g, etx.clone(), v.get("endpoint")) => {} },
                                 (Some(hub), None) if v.get("close").and_then(|b| b.as_bool()) == Some(true) => {
                                     if hub.close_attempt(rtc_key, g).await {
-                                        if !send(&mut socket, protocol::rtc(&serde_json::json!({ "keyframe": true, "g": g }))).await { break None; }
+                                        if !send(&mut socket, &key, protocol::rtc(&serde_json::json!({ "keyframe": true, "g": g }))).await { break None; }
                                         control.request_keyframe();
                                         let _ = app.commands.send(Command::RequestFullFrame);
                                     }
@@ -522,14 +532,15 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                             auto.report(delay_ms, dropped);
                             None
                         }
-                        Some(_) if key != Key::Control => None, // the viewer token watches
-                        Some(ClientMsg::Control(m)) => app.command_for(m).ok(),
+                        Some(ClientMsg::Control(m)) if key.has(auth::control_permission(&m)) => app.command_for(m).ok(),
+                        Some(ClientMsg::SetClipboard(text)) if key.has(P::ClipboardWrite) => Some(Command::SetClipboard { mime: api::TEXT.into(), data: text.into(), operation: None }),
+                        Some(ClientMsg::Control(_) | ClientMsg::SetClipboard(_)) => None,
+                        Some(_) if !key.has(P::DesktopControl) => None,
                         // window-relative, resolved against the live geometry on the compositor thread
                         Some(ClientMsg::MotionAbs { x, y }) => Some(Command::Input(InputMsg::Move { x: x as f64, y: y as f64, window: Some(id) })),
                         Some(ClientMsg::Resize { css_w, css_h, .. }) => Some(Command::Control(ControlMsg { id, op: ControlOp::Resize { w: css_w as i32, h: css_h as i32 } })),
-                        Some(ClientMsg::SetClipboard(text)) => Some(Command::SetClipboard { mime: api::TEXT.into(), data: text.into(), operation: None }),
                         Some(ClientMsg::Notify(n)) => {
-                            app.spawn_notification_action(n);
+                            app.spawn_notification_action(key.clone(), n);
                             None
                         }
                         Some(ClientMsg::Touch { .. }) => None, // tab coordinates aren't the desktop's; the page sends fingers as a pointer here
@@ -537,12 +548,13 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                         None => None,
                     };
                     if let Some(cmd) = cmd {
-                        // under the lock a rotation clears, so nothing slips through behind one
+                        // under the lock a revocation clears, so nothing slips through behind one
+                        let Ok(_admission) = key.admit() else { break Some((UNAUTHORIZED, "token revoked or expired")); };
                         let live = app.window_viewers.lock().unwrap();
                         if !live.contains_key(&stream) {
-                            break Some((UNAUTHORIZED, "token rotated"));
+                            break Some((UNAUTHORIZED, "token revoked or expired"));
                         }
-                        let _ = app.commands.send(cmd);
+                        app.session_command(&key, rtc_key, cmd);
                     }
                 }
                 Some(Ok(Message::Pong(p))) => {
@@ -550,17 +562,17 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                     if let Some(q) = rtt_of(&p, started).and_then(|rtt| auto.rtt(rtt)) {
                         quality = q;
                         control.set_quality(q);
-                        if !send(&mut socket, state(codec, quality, want_codec, preset)).await { break None }
+                        if !send(&mut socket, &key, state(codec, quality, want_codec, preset)).await { break None }
                     }
                 }
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break None,
                 _ => {}
             },
             _ = ping.tick() => {
-                if app.key_for(&token).is_none() {
-                    break Some((UNAUTHORIZED, "token rotated")); // an idle session, which no message would end
+                if !key.live() {
+                    break Some((UNAUTHORIZED, "token revoked or expired")); // an idle session, which no message would end
                 }
-                if unanswered >= 10 || socket.send(Message::Ping(ping_payload(started))).await.is_err() {
+                if unanswered >= 10 || !send_message(&mut socket, &key, Message::Ping(ping_payload(started))).await {
                     break None;
                 }
                 unanswered += 1;
@@ -572,9 +584,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
         hub.close(rtc_key).await;
     }
     let _ = app.commands.send(Command::WindowStream { key: stream, window: id, sink: None });
-    if key == Key::Control {
-        let _ = app.commands.send(Command::ReleaseAllInput);
-    }
+    app.release_input(&key, rtc_key);
     if let Some((code, reason)) = ended {
         close(&mut socket, code, reason).await;
     }
@@ -584,7 +594,7 @@ impl Viewers {
     pub(crate) fn role_of(&self, id: u64) -> Role {
         if self.controller == Some(id) {
             Role::Controller
-        } else if self.sessions.get(&id).is_some_and(|s| s.key == Key::Control) {
+        } else if self.sessions.get(&id).is_some_and(|s| s.key.has(P::DesktopControl)) {
             Role::Participant
         } else {
             Role::Viewer
@@ -594,18 +604,19 @@ impl Viewers {
 
 impl App {
     /// A viewer's click on a notification, answered on the bus in the background.
-    fn spawn_notification_action(self: &Arc<Self>, n: protocol::NotifyMsg) {
+    fn spawn_notification_action(self: &Arc<Self>, key: Key, n: protocol::NotifyMsg) {
         let app = self.clone();
         tokio::spawn(async move {
+            if !key.has(P::DesktopControl) { return; }
             let _ = app.notification_action(n.id, n.action.as_deref()).await;
         });
     }
 
     /// What the desktop takes from the browser (`Role`'s second byte).
-    pub(crate) fn features(&self) -> u8 {
-        let cam = self.cam.is_some() && !self.cam_dead.load(std::sync::atomic::Ordering::Relaxed);
-        let audio = self.audio_available.load(Ordering::Relaxed);
-        (audio && self.mic.as_ref().is_some_and(|tx| !tx.is_closed())) as u8 * protocol::FEATURE_MIC
+    pub(crate) fn features(&self, key: &Key) -> u8 {
+        let cam = key.has(P::CameraSend) && self.cam.is_some() && !self.cam_dead.load(std::sync::atomic::Ordering::Relaxed);
+        let audio = key.has(P::AudioListen) && self.audio_available.load(Ordering::Relaxed);
+        (key.has(P::MicrophoneSend) && self.mic.as_ref().is_some_and(|tx| !tx.is_closed())) as u8 * protocol::FEATURE_MIC
             | (cam as u8) * protocol::FEATURE_CAM | (audio as u8) * protocol::FEATURE_AUDIO
     }
 
@@ -613,10 +624,10 @@ impl App {
     /// ponytail: a session that can't keep up misses a state change (it is dropped after ten seconds anyway)
     pub(crate) fn broadcast(&self, msg: Bytes) {
         for s in self.viewers.lock().unwrap().sessions.values() {
-            let _ = s.events.try_send(msg.clone());
+            if s.key.event_allowed(&msg) { let _ = s.events.try_send(msg.clone()); }
         }
-        for tx in self.window_viewers.lock().unwrap().values() {
-            let _ = tx.try_send(msg.clone());
+        for s in self.window_viewers.lock().unwrap().values() {
+            if s.key.event_allowed(&msg) { let _ = s.events.try_send(msg.clone()); }
         }
     }
 
@@ -663,7 +674,7 @@ impl App {
         (restart, preset)
     }
 
-    /// What a session's encoder does right now, for the page's labels; `None` once a rotation cleared it.
+    /// What a session's encoder does right now, for the page's labels; `None` once a revocation cleared it.
     fn stream_state(&self, id: u64) -> Option<Bytes> {
         let v = self.viewers.lock().unwrap();
         let s = v.sessions.get(&id)?;
@@ -687,11 +698,12 @@ impl App {
 
     /// A message from a viewer session: its size always counts (the output's if it controls, its own
     /// stream's scale otherwise); input only from the controller; window actions and the clipboard
-    /// from any control token.
-    fn viewer_message(&self, id: u64, key: Key, m: ClientMsg) {
+    /// from any token with desktop.control.
+    fn viewer_message(&self, id: u64, key: &Key, m: ClientMsg) {
+        let Ok(_admission) = key.admit() else { return; };
         let mut v = self.viewers.lock().unwrap();
         if !v.sessions.contains_key(&id) {
-            return; // a rotation cleared it under this lock; the session is about to end
+            return; // a revocation cleared it under this lock; the session is about to end
         }
         let controls = v.controller == Some(id);
         let cmd = match m {
@@ -713,13 +725,13 @@ impl App {
                 }
             }
             ClientMsg::TakeControl => {
-                if key == Key::Control {
+                if key.has(P::DesktopControl) {
                     self.set_controller(&mut v, Some(id));
                 }
                 None
             }
             ClientMsg::Handoff(target) => {
-                if controls && key == Key::Control && v.sessions.get(&target).is_some_and(|s| s.key == Key::Control) {
+                if controls && key.has(P::DesktopControl) && v.sessions.get(&target).is_some_and(|s| s.key.has(P::DesktopControl)) {
                     self.set_controller(&mut v, Some(target));
                 }
                 None
@@ -730,18 +742,18 @@ impl App {
                 }
                 Some(Command::RequestFullFrame)
             }
-            ClientMsg::Control(m) if key == Key::Control => self.command_for(m).ok(),
-            ClientMsg::SetClipboard(text) if key == Key::Control => Some(Command::SetClipboard { mime: api::TEXT.into(), data: text.into(), operation: None }),
-            ClientMsg::Drag(d) if controls => Some(self.drag_command(d, &v)),
-            ClientMsg::Input(m) if controls => Some(Command::Input(m)),
-            ClientMsg::Mixer(command) => { self.mixer_message(&mut v, id, command); None },
-            ClientMsg::Mic(packet) if controls => {
+            ClientMsg::Control(m) if key.has(auth::control_permission(&m)) => self.command_for(m).ok(),
+            ClientMsg::SetClipboard(text) if key.has(P::ClipboardWrite) => Some(Command::SetClipboard { mime: api::TEXT.into(), data: text.into(), operation: None }),
+            ClientMsg::Drag(d) if controls && key.has(P::DragdropUpload) && key.has(P::FilesUpload) => Some(self.drag_command(key, d, &v)),
+            ClientMsg::Input(m) if controls && key.has(P::DesktopControl) => Some(Command::Input(m)),
+            ClientMsg::Mixer(command) if key.has(P::AudioListen) => { self.mixer_message(&mut v, id, command); None },
+            ClientMsg::Mic(packet) if controls && key.has(P::MicrophoneSend) => {
                 if let Some(mic) = &self.mic {
                     let _ = mic.try_send(packet); // a full queue drops the packet: the sink is behind anyway
                 }
                 None
             }
-            ClientMsg::Cam(frame) if controls => {
+            ClientMsg::Cam(frame) if controls && key.has(P::CameraSend) => {
                 // a VP8 frame tag's low bit is clear on a keyframe; after a drop only one of those makes sense
                 let key = frame.first().is_some_and(|b| b & 1 == 0);
                 if let (Some(cam), Some(s)) = (&self.cam, v.sessions.get_mut(&id))
@@ -761,18 +773,18 @@ impl App {
                 }
                 None
             }
-            m if controls => input_command(m),
+            m if controls && key.has(P::DesktopControl) => input_command(m),
             _ => None,
         };
         // sent under the lock: a handover's ReleaseAllInput then follows everything the old controller got in
         if let Some(cmd) = cmd {
-            let _ = self.commands.send(cmd);
+            self.session_command(key, id, cmd);
         }
     }
 
     /// Hand control to `next` (none: nobody drives). Unless fixed, the desktop takes the new
     /// controller's size. Every stream is re-fitted, and the two sessions learn their roles.
-    fn set_controller(&self, v: &mut Viewers, next: Option<u64>) {
+    pub(crate) fn set_controller(&self, v: &mut Viewers, next: Option<u64>) {
         let old = v.controller;
         if old == next {
             return;
@@ -781,7 +793,12 @@ impl App {
         v.control_epoch = v.control_epoch.wrapping_add(1);
         self.mixer_audience(v);
         // whatever the old controller held; the application asks for its pointer lock again on the new one's click
-        let _ = self.commands.send(Command::ReleaseAllInput);
+        let mut owner = self.input_owner.lock().unwrap();
+        if owner.is_some_and(|(_, session)| Some(session) == old) {
+            *owner = None;
+            let _ = self.commands.send(Command::ReleaseAllInput);
+        }
+        drop(owner);
         let _ = self.commands.send(Command::ReleasePointerLock);
         // targets first, so the frame the compositor renders for the new size finds them in place
         let size = next.filter(|_| !self.fixed_size).and_then(|id| v.sessions.get(&id)).and_then(|s| s.size);
@@ -794,7 +811,7 @@ impl App {
         }
         for id in [old, next].into_iter().flatten() {
             if let Some(s) = v.sessions.get(&id) {
-                let _ = s.events.try_send(protocol::role(v.role_of(id), self.features()));
+                let _ = s.events.try_send(protocol::role(v.role_of(id), self.features(&s.key)));
             }
         }
     }
@@ -1025,5 +1042,17 @@ mod tests {
         let mut a = AutoRate::new(500);
         assert!(second(&mut a, 1, 1).is_none());
         assert_eq!((a.quality.bitrate_kbps, a.quality.max_fps), (500, 30));
+    }
+}
+
+fn is_input(command: &Command) -> bool {
+    matches!(command, Command::Input(_) | Command::Key { .. } | Command::PointerMotionRelative { .. } | Command::PointerMotionAbsolute { .. } | Command::PointerButton { .. } | Command::PointerAxis { .. } | Command::Touch { .. })
+}
+
+impl App {
+    fn session_command(&self, key: &Key, session: u64, command: Command) {
+        if matches!(command, Command::ReleaseAllInput) { self.release_input(key, session); return; }
+        if is_input(&command) { self.claim_input(key, session); }
+        let _ = self.commands.send(command);
     }
 }
