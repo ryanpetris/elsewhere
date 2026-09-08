@@ -1,4 +1,5 @@
-// Run in the Docker rig with the mounted release binary; optionally pass the Medium ceiling.
+// Run in Docker; optionally pass the Medium ceiling. ELSEWHERE_RENDER_NODE and
+// ELSEWHERE_CODEC select hardware coverage; ELSEWHERE_SOFTWARE_ENCODING keeps GPU rendering.
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
@@ -6,11 +7,16 @@ import { tmpdir } from 'node:os';
 import { chromium } from 'playwright-core';
 
 const medium = Number(process.argv[2] ?? 8000);
+const renderNode = process.env.ELSEWHERE_RENDER_NODE ?? 'none';
+const codec = process.env.ELSEWHERE_CODEC ?? (renderNode === 'none' || process.env.ELSEWHERE_SOFTWARE_ENCODING ? 'vp8' : 'h264');
+const decoderMask = { h264: 1, hevc: 2, vp9: 4, av1: 8, vp8: 16 }[codec];
+assert.ok(decoderMask, 'choose a concrete codec for the quality check');
+const listen = `127.0.0.1:${process.env.ELSEWHERE_TEST_PORT ?? 8089}`;
 const root = await mkdtemp(tmpdir() + '/elsewhere-quality-');
 await mkdir(root + '/home'); await mkdir(root + '/runtime', { mode: 0o700 });
 const log = await open(root + '/desktop.log', 'w');
-const origin = 'http://127.0.0.1:8089';
-const desktop = spawn('/src/target/release/elsewhere', ['--no-audio', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--bitrate', String(medium), '--listen', '127.0.0.1:8089', '--socket-name', 'wayland-quality'], {
+const origin = `http://${listen}`;
+const desktop = spawn(process.env.ELSEWHERE_BINARY ?? '/src/target/release/elsewhere', ['--no-audio', '--no-tls', '--render-node', renderNode, '--codec', codec, ...(process.env.ELSEWHERE_SOFTWARE_ENCODING ? ['--software-encoding'] : []), '--bitrate', String(medium), '--listen', listen, '--socket-name', 'wayland-quality'], {
   env: { ...process.env, HOME: root + '/home', XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime' },
   stdio: ['ignore', log.fd, log.fd],
 });
@@ -175,7 +181,7 @@ try {
       assert.deepEqual(await page.evaluate(() => [elsewhere.store.get().choice.quality, hellos[0][4], qualityStates[0].bitrate_kbps]), ['max', 5, 25000]);
       await page.context().close();
     }
-    for (const hello of [[0x81, 0, 16], [0x81, 0, 16, 0], [0x81, 0, 16, 0, 0], [0x81, 0, 16, 0, 255]]) {
+    for (const hello of [[0x81, 0, decoderMask], [0x81, 0, decoderMask, 0], [0x81, 0, decoderMask, 0, 0], [0x81, 0, decoderMask, 0, 255]]) {
       const ws = new WebSocket(origin.replace('http:', 'ws:') + '/ws' + (id ? '/window/' + id : ''));
       ws.binaryType = 'arraybuffer';
       let state;

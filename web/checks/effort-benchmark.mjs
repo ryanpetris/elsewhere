@@ -1,19 +1,33 @@
 // Docker: real Wayland Chromium scene -> compositor/encoder -> browser canvas.
 // Optional EFFORT_CODECS=vp8,h264 and EFFORT_SECONDS=6 narrow the measurement.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { spawn, execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, open, readFile, writeFile, stat } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
 
 const root = await mkdtemp('/tmp/elsewhere-effort-benchmark-');
+const binary = process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere';
+const [width, height] = (process.env.EFFORT_SIZE || '1280x720').split('x').map(Number);
+const bitrate = Number(process.env.EFFORT_BITRATE || 4000);
+assert.ok(Number.isInteger(width) && Number.isInteger(height) && width >= 800 && height >= 480 && width % 2 === 0 && height % 2 === 0);
+assert.ok(Number.isInteger(bitrate) && bitrate > 0);
+await writeFile(root + '/environment.json', JSON.stringify({
+  binary_sha256: createHash('sha256').update(await readFile(binary)).digest('hex'),
+  ffmpeg: execFileSync('ffmpeg', ['-version'], { encoding: 'utf8' }).split('\n')[0],
+  chromium: execFileSync('chromium', ['--version'], { encoding: 'utf8' }).trim(),
+  width, height, bitrate, preload: process.env.LD_PRELOAD || null,
+  hidden_encoder: process.env.ELSEWHERE_PROBE_HIDE_ENCODER || null,
+  probe_buffer_ms: process.env.ELSEWHERE_PROBE_BUFFER_MS || null,
+}, null, 2));
 await mkdir(root + '/runtime', { mode: 0o700 });
 const log = await open(root + '/server.log', 'w');
 const origin = 'http://127.0.0.1:8094';
-const server = spawn(process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere', [
-  '--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--bitrate', '4000',
-  '--screen-size', '1280x720', '--kiosk', '--listen', '127.0.0.1:8094',
+const server = spawn(binary, [
+  '--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--bitrate', String(bitrate),
+  '--screen-size', `${width}x${height}`, '--kiosk', '--listen', '127.0.0.1:8094',
 ], { cwd: root, env: { ...process.env, HOME: root, XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime',
-  GST_TRACERS: 'latency(flags=element)', GST_DEBUG: 'GST_TRACER:7', GST_DEBUG_NO_COLOR: '1' }, stdio: ['ignore', log.fd, log.fd] });
+  RUST_LOG: 'elsewhere_stream=trace,info', NO_COLOR: '1' }, stdio: ['ignore', log.fd, log.fd] });
 const wait = async predicate => {
   for (let i = 0; i < 400; i++) { if (await predicate()) return; await new Promise(resolve => setTimeout(resolve, 50)); }
   throw new Error('benchmark condition timed out');
@@ -25,7 +39,7 @@ try {
   const token = (await readFile(root + '/config/elsewhere/token', 'utf8')).trim();
   browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: true, args: ['--no-sandbox'] });
   const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
-  await page.addInitScript(() => {
+  await page.addInitScript(({ width, height }) => {
     window.measurement = null;
     window.readMarker = ctx => {
       const pixels = ctx.getImageData(8, 8, 768, 40).data;
@@ -42,14 +56,14 @@ try {
     const draw = CanvasRenderingContext2D.prototype.drawImage;
     CanvasRenderingContext2D.prototype.drawImage = function(source, ...args) {
       const result = draw.call(this, source, ...args);
-      if (source instanceof VideoFrame && measurement && this.canvas.width === 1280 && this.canvas.height === 720) {
+      if (source instanceof VideoFrame && measurement && this.canvas.width === width && this.canvas.height === height) {
         const marker = readMarker(this), age = Date.now() - marker.timestamp;
         if (age >= 0 && age < 10000) {
           measurement.latency.push(age);
           measurement.sequences.push(marker.sequence);
           if (!window.captured && marker.sequence % 60 === 30) {
             window.captured = document.createElement('canvas');
-            captured.width = 1280; captured.height = 720;
+            captured.width = width; captured.height = height;
             captured.getContext('2d').drawImage(this.canvas, 0, 0);
           }
         } else measurement.invalid++;
@@ -76,7 +90,7 @@ try {
         });
       }
     };
-  });
+  }, { width, height });
   await page.goto(origin + '/#token=' + token);
   await page.waitForFunction(() => elsewhere.store.get().role === 'controller');
   await page.evaluate(command => elsewhere.spawn(command), `chromium --no-sandbox --no-first-run --no-default-browser-check --ozone-platform=wayland --user-data-dir=${root}/chromium --remote-debugging-port=9227 --kiosk file:///src/web/checks/effort-scene.html`);
@@ -85,7 +99,7 @@ try {
   const scenePage = remote.contexts()[0].pages()[0];
   await scenePage.waitForFunction(() => typeof window.drawScene === 'function');
   await page.evaluate(() => elsewhere.setChoice({ quality: 'medium' }));
-  await page.waitForFunction(() => elsewhere.store.get().stream?.width === 1280 && elsewhere.store.get().stream?.height === 720);
+  await page.waitForFunction(({ width, height }) => elsewhere.store.get().stream?.width === width && elsewhere.store.get().stream?.height === height, { width, height });
   assert.equal(await page.evaluate(() => elsewhere.store.get().renderer), '2d');
   const available = await page.evaluate(() => elsewhere.store.get().codecs.filter(codec => elsewhere.store.get().decodable.includes(codec.codec)).map(codec => codec.codec));
   const codecs = process.env.EFFORT_CODECS ? process.env.EFFORT_CODECS.split(',') : available;
@@ -99,7 +113,7 @@ try {
     await page.reload(); // each sample starts with its ceiling and fresh delay history
     await page.waitForFunction(({ codec, effort }) => { const state = elsewhere.store.get().streamState; return state?.codec === codec && state.effort.applied === effort; }, { codec, effort });
     await page.waitForTimeout(2500);
-    assert.deepEqual(await scenePage.evaluate(() => [innerWidth, innerHeight, canvas.width, canvas.height]), [1280, 720, 1280, 720], 'source canvas matches encoded output');
+    assert.deepEqual(await scenePage.evaluate(() => [innerWidth, innerHeight, canvas.width, canvas.height]), [width, height, width, height], 'source canvas matches encoded output');
     const beforeLog = (await stat(root + '/server.log')).size;
     const before = await page.evaluate(() => {
       window.captured = null;
@@ -115,37 +129,37 @@ try {
       result.png = captured.toDataURL();
       return result;
     });
-    assert.equal(before.state.bitrate_kbps, 4000, 'fixed encoder target before sample');
-    assert.equal(after.state.bitrate_kbps, 4000, 'fixed encoder target after sample');
-    assert.equal(after.state.ceiling_kbps, 4000);
-    assert.ok(after.measurement.targets.every(target => target === 4000), 'encoder target stays fixed throughout sample');
+    assert.equal(before.state.bitrate_kbps, bitrate, 'fixed encoder target before sample');
+    assert.equal(after.state.bitrate_kbps, bitrate, 'fixed encoder target after sample');
+    assert.equal(after.state.ceiling_kbps, bitrate);
+    assert.ok(after.measurement.targets.every(target => target === bitrate), 'encoder target stays fixed throughout sample');
     assert.ok(after.measurement.latency.length > 10, 'decoded clock markers');
     assert.equal(after.measurement.invalid, 0, 'all clock markers decode');
-    const expected = await scenePage.evaluate(({ marker, scene }) => {
-      const canvas = document.createElement('canvas'); canvas.width = 1280; canvas.height = 720;
+    const expected = await scenePage.evaluate(({ marker, scene, width, height }) => {
+      const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
       drawScene(canvas.getContext('2d'), marker.timestamp, marker.sequence, scene);
       return canvas.toDataURL();
-    }, { marker: after.marker, scene });
-    const psnr = await page.evaluate(async expected => {
+    }, { marker: after.marker, scene, width, height });
+    const psnr = await page.evaluate(async ({ expected, width, height }) => {
       const image = new Image(); image.src = expected; await image.decode();
-      const reference = document.createElement('canvas'); reference.width = 1280; reference.height = 720;
+      const reference = document.createElement('canvas'); reference.width = width; reference.height = height;
       reference.getContext('2d').drawImage(image, 0, 0);
-      const wanted = reference.getContext('2d').getImageData(0, 64, 1280, 656).data;
-      const actual = captured.getContext('2d').getImageData(0, 64, 1280, 656).data;
+      const wanted = reference.getContext('2d').getImageData(0, 64, width, height - 64).data;
+      const actual = captured.getContext('2d').getImageData(0, 64, width, height - 64).data;
       let sum = 0;
       for (let i = 0; i < wanted.length; i += 4) for (let channel = 0; channel < 3; channel++) sum += (wanted[i + channel] - actual[i + channel]) ** 2;
-      const mse = sum / (1280 * 656 * 3);
+      const mse = sum / (width * (height - 64) * 3);
       return mse ? 10 * Math.log10(255 ** 2 / mse) : 100;
-    }, expected);
+    }, { expected, width, height });
     const file = await open(root + '/server.log', 'r');
     const trace = Buffer.alloc((await file.stat()).size - beforeLog);
     await file.read(trace, 0, trace.length, beforeLog); await file.close();
-    const encode = [...trace.toString().matchAll(/element-latency,.*element=\(string\)enc,.*time=\(guint64\)(\d+)/g)].map(match => Number(match[1]) / 1e6);
-    assert.ok(encode.length > 10, 'encoder element latency tracer samples');
+    const encode = [...trace.toString().matchAll(/ffmpeg encoded[^\n]*\bencode_us=(\d+)/g)].map(match => Number(match[1]) / 1000);
+    assert.ok(encode.length > 10, 'FFmpeg conversion and encode timing samples');
     const seconds = (after.at - before.at) / 1000;
     const sequences = after.measurement.sequences, unique = new Set(sequences);
     const span = Math.max(...sequences) - Math.min(...sequences) + 1;
-    const row = { codec, effort, scene, width: 1280, height: 720, compositor_hz: 30, ceiling_kbps: 4000,
+    const row = { codec, effort, scene, width, height, encoder: after.state.effort.encoder, compositor_hz: 30, ceiling_kbps: bitrate,
       source_sequence_fps: span / seconds,
       actual_kbps: after.measurement.bytes * 8 / seconds / 1000, delivered_fps: after.measurement.latency.length / seconds,
       encoder_ms: [percentile(encode, .5), percentile(encode, .95)], end_to_end_ms: [percentile(after.measurement.latency, .5), percentile(after.measurement.latency, .95)],

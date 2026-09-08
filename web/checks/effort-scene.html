@@ -7,7 +7,22 @@
 const canvas = document.querySelector('canvas'), context = canvas.getContext('2d');
 window.scene = 'text';
 window.sequence = 0;
+const detailedTextures = new Map();
+window.sceneAt = (scene, sequence) => scene === 'cycle' ? ['cuts', 'scroll', 'game', 'video'][Math.floor(sequence / 900) % 4] : scene;
+function texture(width, height, variant) {
+  const key = `${width}:${height}:${variant}`;
+  if (detailedTextures.has(key)) return detailedTextures.get(key);
+  const canvas = document.createElement('canvas'); canvas.width = width + 256; canvas.height = height;
+  const ctx = canvas.getContext('2d'); let seed = variant + 1;
+  const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed >>> 24; };
+  for (let y = 0; y < height; y += 4) for (let x = 0; x < canvas.width; x += 4) {
+    ctx.fillStyle = `rgb(${random()},${random()},${random()})`; ctx.fillRect(x, y, 4, 4);
+  }
+  detailedTextures.set(key, canvas);
+  return canvas;
+}
 window.drawScene = (ctx, time, sequence, scene) => {
+  scene = sceneAt(scene, sequence);
   const { width, height } = ctx.canvas;
   ctx.fillStyle = '#eef0f4'; ctx.fillRect(0, 0, width, height);
   ctx.fillStyle = '#18212f'; ctx.fillRect(0, 0, width, 64);
@@ -21,7 +36,51 @@ window.drawScene = (ctx, time, sequence, scene) => {
   ctx.font = '14px monospace'; ctx.fillStyle = '#fff';
   ctx.fillText('Encoding effort: ' + scene, 800, 29);
   time = (sequence % 60) * 1000 / 30;
-  if (scene === 'motion') {
+  ctx.save(); ctx.beginPath(); ctx.rect(0, 64, width, height - 64); ctx.clip();
+  if (scene === 'cuts') {
+    ctx.drawImage(texture(width, height - 64, Math.floor(sequence / 120) % 2), -(sequence * 5 % 256), 64);
+  } else if (scene === 'game') {
+    const phase = sequence / 60;
+    const horizon = height * .48 + Math.sin(phase * 1.7) * 30;
+    const sky = ctx.createLinearGradient(0, 64, 0, horizon);
+    sky.addColorStop(0, '#3677c3'); sky.addColorStop(1, '#d0e7f0');
+    ctx.fillStyle = sky; ctx.fillRect(0, 64, width, horizon - 64);
+    ctx.fillStyle = '#4d6040'; ctx.fillRect(0, horizon, width, height - horizon);
+    const pan = Math.sin(phase * .9) * width * .3;
+    for (let depth = 18; depth >= 1; depth--) {
+      const z = ((depth + phase * 8) % 18 + 1) / 19;
+      const y = horizon + (1 - z) ** 2 * (height - horizon);
+      const spacing = (1 - z) * width * .28 + 8;
+      for (let column = -8; column <= 8; column++) {
+        const x = width / 2 + (column + Math.sin(phase)) * spacing + pan * (1 - z);
+        ctx.fillStyle = (column + depth) % 2 ? '#c5b385' : '#657b5b';
+        ctx.fillRect(x, y, spacing * .85, Math.max(1, (1 - z) * 13));
+      }
+    }
+    for (let i = 0; i < 15; i++) {
+      const x = (i * width / 7 + phase * 180) % (width + 240) - 120;
+      const tall = 40 + (i * 47 % 180);
+      ctx.fillStyle = i % 2 ? '#955741' : '#d3b889'; ctx.fillRect(x, horizon - tall, 65, tall);
+      ctx.fillStyle = '#182a37'; for (let row = 0; row < tall - 15; row += 18) ctx.fillRect(x + 8, horizon - tall + row + 8, 42, 6);
+    }
+    ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.beginPath();
+    ctx.moveTo(width / 2 - 12, height / 2); ctx.lineTo(width / 2 + 12, height / 2);
+    ctx.moveTo(width / 2, height / 2 - 12); ctx.lineTo(width / 2, height / 2 + 12); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = '20px monospace'; ctx.fillText('HEALTH 100   AMMO 030 / 120', 20, height - 25);
+  } else if (scene === 'video') {
+    // The picture advances at 30 fps on a 60 Hz source; the clock marker still updates every frame.
+    const picture = Math.floor(sequence / 2), phase = picture / 30;
+    ctx.drawImage(texture(width, height - 64, 2), -(picture * 2 % 256), 64);
+    ctx.fillStyle = 'rgba(25,60,100,.55)'; ctx.fillRect(0, 64, width, height - 64);
+    for (let i = 0; i < 12; i++) {
+      ctx.fillStyle = `hsl(${(i * 29 + phase * 10) % 360},60%,65%)`;
+      ctx.beginPath(); ctx.arc(width / 2 + Math.sin(phase * .6 + i) * width * .38,
+        64 + (height - 64) / 2 + Math.cos(phase * .8 + i * 2) * height * .3, 35 + i * 7, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.fillStyle = '#111b'; ctx.fillRect(width * .15, height - 100, width * .7, 58);
+    ctx.fillStyle = '#fff'; ctx.font = '24px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('Moving picture with subtitles: AaZz 0123456789', width / 2, height - 64); ctx.textAlign = 'start';
+  } else if (scene === 'motion') {
     const shift = Math.floor(time / 8) % 48;
     for (let y = 64; y < height; y += 24) for (let x = -48; x < width; x += 24) {
       ctx.fillStyle = (x / 24 + (y - 64) / 24) % 2 ? '#3788c1' : '#e1b249';
@@ -46,6 +105,7 @@ window.drawScene = (ctx, time, sequence, scene) => {
     }
     ctx.restore();
   }
+  ctx.restore();
 };
 function frame() {
   if (canvas.width !== innerWidth || canvas.height !== innerHeight) { canvas.width = innerWidth; canvas.height = innerHeight; }

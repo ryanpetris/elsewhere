@@ -6,7 +6,7 @@ same target bitrate, but can also lower frame rate or increase delay. A higher s
 promise a better picture for every scene.
 
 Changes restart that viewer's desktop or window stream immediately. The page shows Applying effort
-until the new pipeline produces its first keyframe, then reports the applied choice or Effort
+until the new encoder produces its first keyframe, then reports the applied choice or Effort
 unavailable.
 The browser remembers the choice for reloads and reconnects, sharing the saved preference across
 desktop and window tabs. Codec changes use the saved effort with
@@ -16,18 +16,18 @@ frames until the encoder produces a keyframe; other attached viewers share that 
 
 ## Encoder mappings
 
-The pipeline sets these properties before entering PLAYING. It checks that the property exists, is
-writable, and accepts the value. Unknown encoders or unavailable properties retain their own defaults
-and report unavailable, with no claim that the requested effort was applied.
+The worker applies these settings before opening the encoder and rejects unused FFmpeg options.
+VA effort uses the actual quality range reported by the selected device. An unavailable setting
+retains the requested preference and reports unavailable, with no claim that it was applied.
 
 | Encoder | Property | Fast | Balanced | High |
 |---|---|---|---|---|
 | VP8, libvpx | `cpu-used` | 8 | 4 | 2 |
 | VP9, libvpx | `cpu-used` | 8 | 6 | 4 |
-| H.264, x264 | `speed-preset` | superfast | fast | medium |
-| HEVC, x265 | `speed-preset` | ultrafast | superfast | fast |
-| AV1, SVT | `preset` | 12 | 10 | 8 |
-| VA hardware encoders | `target-usage` | 7 | 4 | 1 |
+| H.264, x264 | `preset` | superfast | fast | medium |
+| HEVC, x265 | `preset` | ultrafast | superfast | fast |
+| AV1, libaom realtime | `cpu-used` | 8 | 6 | 4 |
+| VA hardware encoders | `compression_level` | driver maximum | ceiling of half maximum | 1 |
 | H.264, OpenH264 | unavailable | encoder default | encoder default | encoder default |
 
 Rate control and low latency settings still apply, including no B-frames and the libvpx real-time
@@ -37,16 +37,22 @@ bitrate and measured encoded throughput can differ, especially on a static pictu
 ## Docker checks
 
 Build the release binary and browser assets in the project Docker build stage. Mount the checkout
-into a runtime image with Chromium, foot and the software GStreamer plugins installed. From `web`,
+into a runtime image with Chromium, foot and FFmpeg installed. From `web`,
 run `npm run check:encoding-effort` and `npm run check:effort-benchmark`. `ELSEWHERE_BINARY` can point to
 a release binary copied from the build image. The selection check covers every codec shared by the
 server and browser, all three effort choices, actual decoded frames, reloads, socket reconnects and
 congestion adaptation for desktop and window streams.
 
-To exercise OpenH264 fallback, set `GST_PLUGIN_SYSTEM_PATH` to a directory of links to the installed
-plugins except `libgstx264.so`, use a fresh `GST_REGISTRY`, clear `GST_PLUGIN_PATH`, and set
-`ELSEWHERE_EXPECT_UNSUPPORTED=1` for the selection check. It checks unavailable status and saved choice
-on both stream types.
+Set `ELSEWHERE_RENDER_NODE` to exercise a GPU, and `ELSEWHERE_SOFTWARE_ENCODING=1` to combine GPU
+rendering with CPU encoding. `ELSEWHERE_CODEC` chooses the initial codec and `ELSEWHERE_TEST_PORT` separates
+concurrent correctness checks. With a build that exposes OpenH264 without x264, set
+`ELSEWHERE_EXPECT_UNSUPPORTED=1` to check unavailable effort status and saved choice on both stream
+types. Encoder discovery can also be masked by an external check shim without changing the application.
+
+For HEVC, run `node checks/hevc-browser.mjs` in the GPU image. The check runs headed Chromium on a
+dedicated Wayland desktop so the browser can use its native hardware decoder. It checks desktop and
+window playback, requested recovery keys and quality/effort changes, decoding each resulting key in a
+fresh WebCodecs decoder. Chromium's headless mode may omit HEVC even when its headed mode supports it.
 
 The benchmark launches a real Wayland Chromium canvas inside the remote desktop. A headless Chromium
 viewer decodes and paints its video over WebSocket. Software rendering uses a 30 Hz compositor clock,
@@ -56,6 +62,8 @@ Fast and High within each codec. The benchmark suppresses browser congestion rep
 does not lower the target; the selection check exercises adaptation separately. Server transport
 pressure can still adapt, so every reported target during the sample must remain at 4 Mbit/s.
 `EFFORT_CODECS=vp8,h264`, `EFFORT_SCENES=motion` and `EFFORT_SECONDS=6` can narrow or lengthen a run.
+`EFFORT_SIZE=1920x1080` changes the source and encoded dimensions; `EFFORT_BITRATE` sets the target
+and ceiling in kbit/s. Results record the actual encoder, binary hash and installed tool versions.
 
 The scene paints a wall clock and frame sequence into each frame. The viewer reads that small stripe
 at paint time to measure source-to-canvas delay and sequence gaps. The source sequence span also
@@ -66,77 +74,57 @@ transport, decode and browser paint submission, plus the same stripe readback fo
 does not include physical display scanout or input-to-response delay. Encoded payload bytes give the
 actual bitrate. Browser counters distinguish transport loss, decoder drops and decode errors.
 
-GStreamer's [latency tracer](https://gstreamer.freedesktop.org/documentation/coretracers/latency.html)
-measures traversal through the encoder element, including internal buffering. This is elapsed
-encoding latency, not CPU time. The 30 Hz frame budget is 33.3 ms. The benchmark retains JSON results,
+The worker's `ffmpeg encoded` trace reports conversion plus encoding time as `encode_us` and time
+from raw submission to packet as `submit_to_packet_us`. These are elapsed times, not CPU time.
+The 30 Hz frame budget is 33.3 ms. The benchmark retains JSON results,
 traces, decoded screenshots and reference images in its printed temporary directory. Screenshot RGB
 PSNR excludes the clock stripe and compares against the scene drawn at the decoded timestamp. It is
 a single-frame measure, including color conversion. Both effort settings capture the same phase of
 the repeating animation, but this still cannot establish a general quality ranking.
 
-## Measurements
+## Software measurements
 
-Docker software rig, GStreamer 1.28.6, Chromium 152, libvpx 1.17.0, x264 revision 3222 and
-SVT-AV1 4.2.0. All rows use the 1280 by 720, nominal 30 Hz, 4000 kbit/s configuration above.
-Each row is one six-second sample. Timing columns show median / 95th percentile in milliseconds.
+These Docker measurements use an Intel Core Ultra 7 155H, FFmpeg 9.0.1, libvpx 1.17.0,
+x264 0.165.3222, libaom 3.15.0 and Chromium 152.0.7977.82. Other test workloads were stopped.
+Each row compares Fast / High in that order, with the six-second samples, software rendering,
+WebSocket transport and fixed 4 Mbit/s target described above. These are short effort comparisons;
+[stream reliability](stream-reliability.md) describes the longer network tests.
 
-| Codec | Effort | Scene | Actual kbit/s | Painted fps | Encoder ms | Source-to-canvas ms | PSNR dB |
-|---|---|---|---:|---:|---:|---:|---:|
-| vp8 | fast | text | 562 | 27.3 | 3.7 / 4.7 | 127 / 132 | 36.0 |
-| vp8 | high | text | 595 | 27.3 | 3.5 / 4.5 | 127 / 131 | 35.9 |
-| vp8 | fast | scroll | 2954 | 27.3 | 5.5 / 7.8 | 130 / 135 | 38.4 |
-| vp8 | high | scroll | 2987 | 27.5 | 5.6 / 7.6 | 130 / 134 | 38.2 |
-| vp8 | fast | motion | 3727 | 27.5 | 5.9 / 7.8 | 129 / 134 | 22.4 |
-| vp8 | high | motion | 3720 | 27.3 | 5.9 / 8.6 | 131 / 135 | 22.4 |
-| h264 | fast | text | 717 | 27.3 | 1.8 / 2.9 | 125 / 130 | 36.6 |
-| h264 | high | text | 91 | 27.3 | 3.4 / 4.5 | 127 / 130 | 36.6 |
-| h264 | fast | scroll | 3288 | 27.5 | 2.3 / 3.6 | 127 / 130 | 39.3 |
-| h264 | high | scroll | 1321 | 27.5 | 7.0 / 8.6 | 130 / 134 | 39.6 |
-| h264 | fast | motion | 3606 | 27.3 | 2.3 / 3.4 | 127 / 132 | 22.4 |
-| h264 | high | motion | 3481 | 27.3 | 6.3 / 8.4 | 130 / 135 | 22.3 |
-| vp9 | fast | text | 3974 | 27.5 | 3.4 / 5.2 | 127 / 131 | 36.3 |
-| vp9 | high | text | 3906 | 27.5 | 3.8 / 5.6 | 127 / 132 | 36.3 |
-| vp9 | fast | scroll | 3812 | 27.5 | 4.1 / 6.7 | 129 / 133 | 38.9 |
-| vp9 | high | scroll | 4147 | 27.3 | 5.4 / 8.2 | 130 / 135 | 38.8 |
-| vp9 | fast | motion | 3813 | 27.5 | 5.5 / 7.7 | 129 / 134 | 22.4 |
-| vp9 | high | motion | 3831 | 27.5 | 6.2 / 9.2 | 130 / 135 | 22.4 |
-| av1 | fast | text | 16 | 27.3 | 396.9 / 403.7 | 521 / 530 | 25.2 |
-| av1 | high | text | 12 | 27.3 | 396.5 / 401.5 | 520 / 526 | 30.7 |
-| av1 | fast | scroll | 34 | 27.7 | 397.1 / 404.7 | 523 / 533 | 28.8 |
-| av1 | high | scroll | 22 | 27.3 | 396.5 / 401.4 | 519 / 526 | 33.5 |
-| av1 | fast | motion | 143 | 27.3 | 397.3 / 404.1 | 525 / 532 | 19.9 |
-| av1 | high | motion | 116 | 27.3 | 396.3 / 401.1 | 521 / 527 | 19.9 |
+At 1280 by 720:
 
-All 24 samples reported zero transport loss, decoder drops and decode errors. Paint rates were
-27.3 to 27.7 fps, below the nominal 30 Hz clock, with no throughput penalty from High in
-these short runs. The rate inferred from the decoded source-sequence span matched the paint count;
-these share the same decoded samples and are not independent rate measurements. VP8, x264 and VP9 had no missing, repeated or regressing source markers. AV1 Fast
-text had two missing and two repeated markers with two regressions; scrolling had three missing and
-three repeated markers. Its visibly softened marker makes those counts unsuitable as proof of
-transport or decoder loss. The browser counters stayed zero, and the remaining AV1 rows had no marker
-gaps or repeats.
+| Codec / scene | Actual kbit/s | Painted fps | Encode p95, ms | Paint age p95, ms | PSNR, dB |
+|---|---:|---:|---:|---:|---:|
+| VP8 / text | 2215 / 3221 | 27.6 / 27.6 | 7.7 / 8.0 | 96 / 126 | 37.7 / 37.6 |
+| VP8 / scroll | 3790 / 3824 | 27.8 / 27.7 | 10.9 / 12.0 | 129 / 132 | 39.5 / 39.6 |
+| VP8 / motion | 4023 / 4018 | 27.6 / 27.6 | 11.4 / 10.8 | 130 / 129 | 22.6 / 22.6 |
+| H.264 / text | 982 / 65 | 27.6 / 27.8 | 6.2 / 8.7 | 124 / 124 | 37.9 / 38.0 |
+| H.264 / scroll | 2986 / 2655 | 27.8 / 27.6 | 7.4 / 11.2 | 126 / 128 | 40.0 / 40.2 |
+| H.264 / motion | 3231 / 3282 | 27.6 / 27.8 | 6.9 / 11.3 | 126 / 127 | 22.7 / 22.7 |
+| VP9 / text | 3815 / 3695 | 27.7 / 27.7 | 8.7 / 10.3 | 126 / 127 | 37.5 / 37.5 |
+| VP9 / scroll | 3832 / 4632 | 27.6 / 27.6 | 9.6 / 11.3 | 127 / 129 | 40.0 / 40.0 |
+| VP9 / motion | 3964 / 3924 | 27.8 / 27.6 | 12.1 / 14.0 | 130 / 132 | 22.7 / 22.7 |
+| AV1 / text | 2637 / 121 | 27.5 / 27.6 | 15.5 / 16.2 | 137 / 132 | 37.8 / 38.1 |
+| AV1 / scroll | 1809 / 2090 | 27.7 / 27.3 | 15.7 / 37.8 | 140 / 165 | 39.7 / 40.1 |
+| AV1 / motion | 3591 / 2311 | 27.6 / 19.2 | 18.0 / 72.4 | 141 / 218 | 22.7 / 22.7 |
 
-VP8, x264 and VP9 met the 33.3 ms encoder traversal budget at both efforts in every scene, including
-the 95th percentile. High added about 5 ms to median x264 scrolling encode time and about 4 ms for
-motion, with a few milliseconds more source-to-canvas delay. VP8 and VP9 showed smaller timing costs.
-AV1 did not meet the latency budget at either effort: roughly 400 ms inside the encoder and 520 ms to
-the canvas despite steady throughput. Internal buffering dominates these AV1 timings, so they do not
-show how much CPU work each preset uses. These figures apply to this software rig and these scenes,
-not to other resolutions, machines or hardware encoders.
+At 1920 by 1080, software AV1 uses libaom:
 
-The x264 text and scrolling captures were legible at both efforts. High's scrolling screenshot had a
-higher PSNR, 39.6 versus 39.3 dB, while using about 1.3 rather than 3.3 Mbit/s. Its text sample used
-91 rather than 717 kbit/s at the same rounded 36.6 dB score. VP8 and VP9 text stayed
-legible without a consistent benefit from High. In motion, the larger shapes remained distinct with
-VP8, x264 and VP9, while fine checkerboard detail suffered; High did not improve those PSNR snapshots.
-AV1 High made text visibly cleaner than Fast, which smeared glyphs and thin lines. Text PSNR rose
-from 25.2 to 30.7 dB and scrolling from 28.8 to 33.5 dB while using fewer bits, with no measured
-latency increase because buffering dominated. Both AV1 motion
-captures were visibly softened, with no improvement in High's single-frame score.
+| Codec / scene | Actual kbit/s | Painted fps | Encode p95, ms | Paint age p95, ms | PSNR, dB |
+|---|---:|---:|---:|---:|---:|
+| AV1 / text | 919 / 809 | 26.6 / 26.5 | 15.7 / 15.7 | 144 / 161 | 38.9 / 39.0 |
+| AV1 / scroll | 2028 / 2610 | 26.3 / 26.3 | 22.0 / 23.2 | 169 / 174 | 40.3 / 40.8 |
+| AV1 / motion | 3440 / 3402 | 26.0 / 25.8 | 35.9 / 44.6 | 192 / 201 | 22.7 / 22.7 |
 
-Actual AV1 throughput was far below its configured ceiling in these short samples, 12 to 143 kbit/s.
-The comparison therefore demonstrates effort at the same configured target, not equal actual output
-rates or proof that rate control spends its whole budget. Constant-quality mode remains separate.
-HEVC was not decodable in this browser rig and VA hardware was unavailable, so their mappings are
-not performance claims. Balanced was checked for application and playback, but this table compares
-only Fast with High.
+The source produced about 27.6 fps at 720p and 26 fps at 1080p despite its nominal 30 Hz clock.
+All samples had zero invalid markers and no repeated or regressing source sequences. Browser
+transport-loss, decoder-drop and decode-error counters stayed zero. AV1 High at 720p motion had 49 source-sequence gaps
+and painted 19.2 fps; its p95 encode time exceeded the 33.3 ms frame budget. Other samples had no
+source-sequence gaps. At 1080p, both AV1 motion settings exceeded that frame budget at p95.
+
+The inspected AV1 text and H.264 scrolling captures remain readable. H.264 High used fewer bits for
+static text and scrolling, with a small screenshot-score improvement and more encode time.
+AV1 High substantially reduced static-text traffic at 720p, but its motion sample lost throughput
+without a useful screenshot-score gain. VP8 and VP9 showed little consistent benefit from High.
+VP9 High scrolling averaged 4.63 Mbit/s despite its 4 Mbit/s target, so that row is not an equal-output-rate
+quality comparison. Fast remains the default; higher effort can trade frame rate for compression,
+and these samples do not establish a general quality ranking.
