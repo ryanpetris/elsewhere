@@ -392,7 +392,10 @@ export function createViewer() {
         // A client locked the pointer (a game, say): lock the browser's too and send raw deltas.
         wantLock = dv.getUint8(1) !== 0;
         if (wantLock && driving() && (WINDOW || !state().captureOnClick || state().locked)) requestLock();
-        else if (document.pointerLockElement && (WINDOW || !state().captureOnClick)) document.exitPointerLock();
+        else if (document.pointerLockElement === canvas && (WINDOW || !state().captureOnClick)) {
+          applicationUnlock = true;
+          document.exitPointerLock();
+        }
         drawCapturedCursor();
         break;
       case AUDIO:
@@ -571,30 +574,32 @@ export function createViewer() {
     });
   }
   function requestLock() {
-    if (document.pointerLockElement) return;
+    if (document.pointerLockElement || lockReleased || disposed || state().status !== 'connected' || !driving()) return;
     lockRequests++;
     canvas.requestPointerLock({ unadjustedMovement: true })?.catch?.(e => {
       lockError = String(e);
-      if (e.name !== 'NotSupportedError') return;
+      if (e.name !== 'NotSupportedError' || lockReleased || disposed || state().status !== 'connected' || !driving()) return;
       canvas.requestPointerLock()?.catch?.(e2 => { lockError += ' / ' + e2; });
     });
   }
   const lockFailure = PIP ? 'Pointer capture failed. Return to the main viewer to try again.' : 'Mouse capture failed. Click the desktop to try again.';
   document.addEventListener('pointerlockerror', () => notice(lockFailure));
   document.addEventListener('pointerlockchange', () => {
-    if (document.pointerLockElement === canvas && (disposed || state().status !== 'connected' || !driving() || (!wantLock && (WINDOW || !state().captureOnClick)))) {
+    if (document.pointerLockElement === canvas && (lockReleased || disposed || state().status !== 'connected' || !driving() || (!wantLock && (WINDOW || !state().captureOnClick)))) {
+      if (!wantLock && (WINDOW || !state().captureOnClick)) applicationUnlock = true;
       document.exitPointerLock();
       return;
     }
     if (document.pointerLockElement && state().notice?.text === lockFailure) store.set({ notice: null });
     const captured = !state().locked && document.pointerLockElement === canvas;
     const released = state().locked && document.pointerLockElement !== canvas;
+    if (document.pointerLockElement === canvas) applicationUnlock = false;
+    else if (!applicationUnlock) lockReleased = true;
     store.set({ locked: document.pointerLockElement === canvas });
     if (captured) send(POINTER_LOCK_GAINED, 0);
     drawCapturedCursor();
     if (released || (!document.pointerLockElement && wantLock)) { wantLock = false; send(POINTER_LOCK_LOST, 0); }
     if (released) {
-      releaseKeys.clear();
       releaseInput();
     }
   });
@@ -759,6 +764,8 @@ export function createViewer() {
     if (disposed) return;
     viewer.pip?.dispose();
     disposed = true;
+    releaseKeyboard();
+    unsubscribeKeyboard();
     if (document.pointerLockElement === canvas) document.exitPointerLock();
     capturedCursor?.remove();
     uploadAbort?.abort();
@@ -846,12 +853,15 @@ export function createViewer() {
     flushClipboard();
   }
   let captureClick = null;
+  let lockReleased = false;
+  let applicationUnlock = false;
   function onPointerButton(e) {
     const btn = BTN[e.button];
     if (btn === undefined) return;
     if (e.type === 'pointerup' && captureClick === e.button) { captureClick = null; return; }
     if (e.type === 'pointerdown') {
       gesture(e);
+      lockReleased = false;
       if (!WINDOW && state().captureOnClick && driving() && document.pointerLockElement !== canvas) {
         pointerPosition = toDesktop(e);
         captureClick = e.button;
@@ -1103,7 +1113,6 @@ export function createViewer() {
 
   // Keys go to the desktop from anywhere in the page except its own controls (a focused button keeps Enter and Space).
   const isFormField = t => t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLButtonElement || t instanceof HTMLSelectElement;
-  const releaseKeys = new Set();
   function onKey(e) {
     if (isFormField(e.target)) return;
     if (e.type === 'keydown' && !e.repeat && isPasteKey(e) && e.target === canvas
@@ -1114,18 +1123,6 @@ export function createViewer() {
       pasteTimer = setTimeout(flushPaste, 150);
     }
     if (!driving()) return;
-    if (e.type === 'keyup') releaseKeys.delete(e.code);
-    else if (e.code === 'ControlLeft' || e.code === 'AltLeft') releaseKeys.add(e.code);
-    if (e.type === 'keydown' && !e.repeat && releaseKeys.has('ControlLeft') && releaseKeys.has('AltLeft')
-        && !e.shiftKey && !e.metaKey && (document.pointerLockElement === canvas || document.fullscreenElement)) {
-      e.preventDefault();
-      releaseKeys.clear();
-      releaseInput(); // release the first modifier and any other held input on the desktop
-      if (wantLock) { wantLock = false; send(POINTER_LOCK_LOST, 0); }
-      navigator.keyboard?.unlock?.();
-      if (document.pointerLockElement === canvas) document.exitPointerLock();
-      return;
-    }
     const code = KEYCODES[e.code];
     if (!code || e.repeat) return; // clients repeat keys themselves (wl_keyboard.repeat_info)
     if (e.type === 'keydown' && isPasteKey(e)) {
@@ -1149,7 +1146,7 @@ export function createViewer() {
   // a deferred paste chord must not fire after its modifier was released; no key is held during a native
   // drag, and the release would let go of the drag while its files are still uploading
   const releaseInput = () => { pendingPaste = null; clearTimeout(pasteTimer); clearPasteTarget(); send(BLUR, 0); };
-  const blur = () => { releaseKeys.clear(); pendingPaste = null; if (!dragging) releaseInput(); };
+  const blur = () => { if (keyboardPending) releaseKeyboard(); pendingPaste = null; if (!dragging) releaseInput(); };
   window.addEventListener('blur', blur);
   document.addEventListener('visibilitychange', () => { if (document.hidden) blur(); });
   if (WINDOW) window.addEventListener('focus', () => sendControl({ id: +WINDOW, op: 'activate' })); // keyboard focus follows the tab
@@ -1157,11 +1154,50 @@ export function createViewer() {
   // --- fullscreen ------------------------------------------------------------------------------
   // Fullscreen (of the stage, the canvas's parent, so the chrome goes away and the output takes the
   // screen) + Keyboard Lock: Ctrl+W, Ctrl+T, Alt+Tab… reach the Wayland clients instead of the browser.
-  async function fullscreen() {
-    await canvas.parentElement.requestFullscreen();
-    navigator.keyboard?.lock?.();
+  let keyboardEpoch = 0, keyboardWanted = false, keyboardPending = false, nativeKeyboard = false;
+  const ownFullscreen = () => !!canvas?.parentElement && document.fullscreenElement === canvas.parentElement;
+  const keyboardSession = () => !disposed && state().status === 'connected' && driving();
+  const keyboardEligible = () => keyboardSession() && document.hasFocus() && !document.hidden;
+  function releaseKeyboard() {
+    keyboardEpoch++;
+    if (keyboardWanted) navigator.keyboard?.unlock?.();
+    keyboardWanted = false;
+    keyboardPending = false;
+    if (nativeKeyboard && ownFullscreen()) document.exitFullscreen().catch(() => {});
+    nativeKeyboard = false;
   }
-  document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) navigator.keyboard?.unlock?.(); });
+  const unsubscribeKeyboard = store.subscribe(() => { if (keyboardWanted && !keyboardSession()) releaseKeyboard(); });
+  async function fullscreen() {
+    const target = canvas?.parentElement;
+    if (!target || disposed) return;
+    const epoch = ++keyboardEpoch;
+    keyboardWanted = keyboardEligible();
+    nativeKeyboard = keyboardWanted && !navigator.keyboard?.lock;
+    keyboardPending = keyboardWanted;
+    try {
+      try {
+        await target.requestFullscreen(nativeKeyboard ? { keyboardLock: 'browser' } : undefined);
+      } catch (error) {
+        if (!nativeKeyboard || epoch !== keyboardEpoch || !keyboardEligible()) throw error;
+        nativeKeyboard = false;
+        await target.requestFullscreen();
+      }
+      if (epoch === keyboardEpoch && keyboardWanted && !keyboardEligible()) releaseKeyboard();
+      if (epoch !== keyboardEpoch || keyboardWanted && !keyboardEligible()) {
+        if (document.fullscreenElement === target && !keyboardWanted) await document.exitFullscreen();
+        return;
+      }
+      if (keyboardWanted && ownFullscreen() && navigator.keyboard?.lock) {
+        await navigator.keyboard.lock();
+        if (!keyboardWanted || !keyboardEligible() || !ownFullscreen()) navigator.keyboard.unlock();
+      }
+    } catch (error) {
+      console.debug('Fullscreen keyboard capture:', error);
+    } finally {
+      if (epoch === keyboardEpoch) keyboardPending = false;
+    }
+  }
+  document.addEventListener('fullscreenchange', () => { if (!ownFullscreen()) releaseKeyboard(); });
 
   // --- elements --------------------------------------------------------------------------------
   // The focused window's elements, fetched again when anything the answer depends on changed: the focus,
@@ -1224,7 +1260,7 @@ export function createViewer() {
     retryRtc,
     setStage,
     fullscreen,
-    isFullscreen: () => !!document.fullscreenElement && document.fullscreenElement === canvas?.parentElement,
+    isFullscreen: ownFullscreen,
     control: sendControl,
     snapshot,
     elements: elementsOf,

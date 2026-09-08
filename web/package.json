@@ -13,6 +13,7 @@
     "check:encoding-effort": "node checks/encoding-effort.mjs",
     "check:viewer-lifecycle": "node checks/viewer-lifecycle.mjs",
     "check:rtc-stream": "node checks/rtc-stream.mjs",
+    "check:fullscreen-capture": "node checks/fullscreen-capture.mjs",
     "check:effort-benchmark": "node checks/effort-benchmark.mjs",
     "check:reliability": "node checks/reliability.mjs"
   },

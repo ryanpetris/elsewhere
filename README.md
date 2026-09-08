@@ -193,10 +193,11 @@ rotated"; the tokens change with the data directory, e.g. a fresh container with
 
 In Settings, enable **Capture mouse on click** for games that use edge scrolling. The first click
 captures the mouse; movement, clicks, and the mouse wheel reach the desktop only while captured.
-Press **Left Ctrl + Left Alt** to release capture. The remote cursor stays where you left it.
-A highlighted capture hint appears in the status bar, or over the picture in fullscreen. The setting
-is remembered in your browser and starts off. Games that request pointer lock still capture automatically.
-Browsers may also release capture through their own Escape gesture.
+Use the application's fullscreen button to send normal Escape presses to the remote application
+while keeping the mouse captured in supported browsers. Hold Escape to use the browser's release
+gesture. Outside supported fullscreen, normal Escape may release capture; browser-only F11 fullscreen
+does not enable this behavior. The setting is remembered in your browser and starts off.
+Games that request pointer lock still capture automatically; after the browser releases capture, click to resume.
 
 ## Reverse proxies
 
@@ -415,7 +416,8 @@ this machine encodes: AV1, then HEVC, VP9, H.264 on the GPU; VP8 first on the CP
 lists them all.
 
 Games and other clients that lock the pointer get raw mouse deltas: the page mirrors the lock with the
-Pointer Lock API; Escape releases it.
+Pointer Lock API. In supported application fullscreen, normal Escape reaches the client and holding
+Escape releases capture through the browser.
 
 Certificate and tokens live in `$XDG_CONFIG_HOME/elsewhere/`; delete them to regenerate.
 

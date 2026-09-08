@@ -1,5 +1,5 @@
 // Viewer statistics, media controls, and this viewer's codec, quality and effort choices.
-import { Activity, Camera, CameraOff, ClipboardCheck, Download, Lock, Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
+import { Activity, Camera, CameraOff, ClipboardCheck, Download, Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
 import { useStore } from '../store.js';
 import { EFFORTS, PRESETS, TRANSPORTS } from '../protocol.js';
 import { codecName } from './ui.jsx';
@@ -79,7 +79,6 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
   // Fixed readout widths keep live statistics from resizing the stage.
   return (
     <footer className="relative flex min-h-7 shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-zinc-800 bg-zinc-900 px-3 py-0.5 font-mono text-[11px] text-zinc-500">
-      <MouseCaptureHint viewer={viewer} className="absolute inset-0 z-20 flex" />
       <span className="flex w-[10ch] shrink-0 items-center gap-1.5 overflow-hidden whitespace-nowrap" title={`${s.fps} fps`}><Activity className="size-3" /> {s.fps} fps</span>
       <span className="w-[17ch] shrink-0 truncate" title={`Measured video throughput: ${s.mbps.toFixed(1)} Mbit/s`}>{s.mbps.toFixed(1)} Mbit/s</span>
       <span className="hidden w-[10ch] shrink-0 truncate sm:inline" title={`Input to the next painted frame: ${s.latencyMs.toFixed(0)} ms`}>{s.latencyMs.toFixed(0)} ms</span>
@@ -114,12 +113,4 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
       </span>
     </footer>
   );
-}
-
-export function MouseCaptureHint({ viewer, className = '' }) {
-  const locked = useStore(viewer.store, s => s.locked);
-  if (!locked) return null;
-  return <div role="status" className={`mouse-capture-hint pointer-events-none items-center justify-center gap-2 bg-amber-300 px-3 py-1 font-sans text-sm font-semibold text-zinc-950 ${className}`}>
-    <Lock className="size-4 shrink-0" /> Press Left Ctrl + Left Alt to release mouse
-  </div>;
 }

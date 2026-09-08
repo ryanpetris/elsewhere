@@ -43,7 +43,7 @@ export function Settings({ viewer, borders, onBorders, elements, onElements, onC
       <label className={label}>
         <input type="checkbox" aria-label="Capture mouse on click" checked={captureOnClick} onChange={event => viewer.setCaptureOnClick(event.target.checked)} className={checkbox} aria-describedby="capture-description" />
         <span><span className="block text-sm text-zinc-100">Capture mouse on click</span>
-          <span id="capture-description" className="mt-1 block text-xs text-zinc-400">Keep the mouse inside the desktop. Press Left Ctrl + Left Alt to release.</span>
+          <span id="capture-description" className="mt-1 block text-xs text-zinc-400">Keep the mouse inside the desktop.</span>
         </span>
       </label>
     </Popover>

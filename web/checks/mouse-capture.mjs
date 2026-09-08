@@ -66,9 +66,8 @@ try {
   await canvas.click(); await captured();
   assert.equal(await page.evaluate(type => sent.filter(p => p[0] === type).length, POINTER_LOCK_GAINED), 1, 'successful capture notifies the desktop once');
   assert.equal((await mousePackets()).filter(p => p[0] === BUTTON).length, 0, 'capture click is not sent to the game');
-  assert(await page.locator('footer [role=status]').isVisible());
-  assert.equal(await page.locator('footer [role=status]').innerText(), 'Press Left Ctrl + Left Alt to release mouse');
-  assert.deepEqual(await canvas.boundingBox(), before, 'capture hint does not resize the desktop');
+  assert.equal(await page.locator('.mouse-capture-hint').count(), 0);
+  assert.deepEqual(await canvas.boundingBox(), before, 'capture does not resize the desktop');
   assert(await page.locator('[data-captured-cursor]').isVisible());
   const clicks = async () => {
     await page.evaluate(() => { sent.length = 0; });
@@ -102,7 +101,8 @@ try {
   await captured(); assert(await page.locator('[data-captured-cursor]').isVisible());
   await page.keyboard.press('ControlLeft+AltRight'); await captured();
   await page.evaluate(() => { sent.length = 0; });
-  await page.keyboard.press('ControlLeft+AltLeft'); await released();
+  await page.keyboard.press('ControlLeft+AltLeft'); await captured();
+  await page.evaluate(() => document.exitPointerLock()); await released();
   assert.deepEqual(await mousePackets(), [], 'release leaves the remote pointer in place');
   assert.deepEqual(await page.evaluate(type => sent.filter(p => p[0] === type), POINTER_LOCK_LOST), [[POINTER_LOCK_LOST]], 'release notifies the desktop even without an application lock acknowledgement');
   // Responses to capture can arrive after the user has already released it.
@@ -143,13 +143,13 @@ try {
   await page.getByRole('button', { name: /fullscreen/i }).click();
   await page.waitForFunction(() => !!document.fullscreenElement);
   await canvas.click(); await captured();
-  assert(await page.locator('.viewer-stage .mouse-capture-hint').isVisible());
+  assert.equal(await page.locator('.mouse-capture-hint').count(), 0);
   await page.evaluate(() => { sent.length = 0; });
   await page.evaluate(() => {
     const c = document.querySelector('canvas.stage');
     c.dispatchEvent(new KeyboardEvent('keydown', { code: 'ControlLeft', ctrlKey: true, bubbles: true }));
     c.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV', ctrlKey: true, bubbles: true }));
-    c.dispatchEvent(new KeyboardEvent('keydown', { code: 'AltLeft', ctrlKey: true, altKey: true, bubbles: true }));
+    document.exitPointerLock();
   });
   await released(); await page.waitForTimeout(250);
   assert.equal(await page.evaluate(KEY => sent.some(p => p[0] === KEY && p[1] === 47 && p[3] === 1), KEY), false, 'release cancels deferred paste');
@@ -177,7 +177,7 @@ try {
   assert.equal(await page.evaluate(() => window.lateExits), 3);
   assert.equal(await page.evaluate(type => sent.filter(p => p[0] === type).length, POINTER_LOCK_GAINED), 0, 'rejected grants do not resume application locks');
   assert.deepEqual(errors, []);
-  console.log('mouse capture: preference, real lock, edge clamping, cursor, game lock, release shortcut, role loss, disconnect and fullscreen passed');
+  console.log('mouse capture: preference, real lock, edge clamping, cursor, game lock, input cleanup, role loss, disconnect and fullscreen passed');
 } finally {
   await browser.close(); await new Promise(resolve => server.close(resolve));
   await rm(root, { recursive: true, force: true });

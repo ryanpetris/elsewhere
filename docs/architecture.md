@@ -152,6 +152,11 @@ on the next tick, or at once after an idle one. content-type-v1 is recorded per 
 auto-repeats (clients do, via `repeat_info`) and ignores repeats. Pointer motion hit-tests overlay/top
 layers, then windows, then bottom/background layers. Pointer locks (relative-pointer + pointer-
 constraints) are mirrored to the browser's Pointer Lock API; the browser then sends raw deltas.
+The application's fullscreen button requests keyboard capture for the active driving viewer.
+In supported fullscreen sessions, normal Escape reaches the remote application and holding Escape
+invokes the browser's release gesture. Ordinary pointer release does not end fullscreen keyboard
+capture. Outside supported fullscreen, including browser-only F11 fullscreen, normal Escape may
+release the pointer. Capture resumes through a deliberate click after the browser releases it.
 
 **Xwayland.** Started at boot; its `DISPLAY` is printed and passed to `--exec` children. X11 windows
 are ordinary space elements; clipboard and primary selection are bridged both ways; `WM_CHANGE_STATE`
