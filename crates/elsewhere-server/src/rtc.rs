@@ -193,15 +193,36 @@ struct Peer {
     queue: VecDeque<Bytes>,
     sent: usize,
     front_since: Instant,
+    progress: SendProgress,
     /// The session's socket and the offer's number, for the word that the channel is given up.
     reply: mpsc::Sender<Bytes>,
     g: u64,
     close_reason: &'static str,
 }
 
-/// A frame at the front of the queue this long, moving or not, is too slow for a desktop: the channel
-/// is given up and the socket takes the video.
+/// A frame waiting this long, or pending SCTP bytes without acknowledgements this long, gives the
+/// video back to the socket.
 const STALL: Duration = Duration::from_secs(3);
+
+#[derive(Default)]
+struct SendProgress {
+    buffered: usize,
+    since: Option<Instant>,
+}
+
+impl SendProgress {
+    /// str0m's reliable SCTP buffer releases bytes on acknowledgement. Appending or replacing
+    /// application frames cannot prove transport progress, including a new encoder's keyframe.
+    fn observe(&mut self, buffered: usize, queued: bool, now: Instant) {
+        if buffered < self.buffered { self.since = Some(now); }
+        if buffered != 0 || queued {
+            self.since.get_or_insert(now);
+        } else {
+            self.since = None;
+        }
+        self.buffered = buffered;
+    }
+}
 
 /// Frames a channel's queue holds before a new one is dropped: half a second at 60 fps.
 // ponytail: a cap; blocking the session as the socket does if a viewer wants the latency bounded tighter
@@ -239,12 +260,15 @@ async fn run(sockets: HashMap<SocketAddr, Arc<UdpSocket>>, mut rx: mpsc::Receive
         // a frame waiting for room in the send buffer goes on first (acknowledgements came in as datagrams)
         let mut deadline = Instant::now() + Duration::from_secs(1);
         for (id, peer) in peers.iter_mut() {
-            if !peer.queue.is_empty() && peer.front_since.elapsed() > STALL {
-                tracing::info!(session = id, "WebRTC: a frame {STALL:?} at the queue's front; the socket takes the video");
+            flush(peer, &open, *id);
+            if (!peer.queue.is_empty() && peer.front_since.elapsed() >= STALL)
+                || peer.progress.since.is_some_and(|since| since.elapsed() >= STALL)
+            {
+                tracing::info!(session = id, "WebRTC: video delivery stalled for {STALL:?}; the socket takes the video");
                 peer.close_reason = "Server queue stalled";
                 peer.rtc.disconnect(); // and the peer goes below, with its channel's claim on the frames
             }
-            flush(peer, &open, *id);
+            if let Some(since) = peer.progress.since { deadline = deadline.min(since + STALL); }
             loop {
                 match peer.rtc.poll_output() {
                     Ok(Output::Timeout(t)) => {
@@ -354,7 +378,7 @@ fn answer(sdp: &str, g: u64, addrs: &[SocketAddr], reply: mpsc::Sender<Bytes>, e
         None => answer,
     };
     let _ = reply.try_send(protocol::rtc(&serde_json::json!({ "answer": answer, "g": g })));
-    Ok(Peer { rtc, channel: None, frame_id: 0, queue: VecDeque::new(), sent: 0, front_since: Instant::now(), reply, g, close_reason: "Peer connection closed" })
+    Ok(Peer { rtc, channel: None, frame_id: 0, queue: VecDeque::new(), sent: 0, front_since: Instant::now(), progress: SendProgress::default(), reply, g, close_reason: "Peer connection closed" })
 }
 
 fn event(session: u64, peer: &mut Peer, e: Event, open: &Open) {
@@ -392,6 +416,8 @@ fn dropped(open: &Open, session: u64, count: u32) {
 /// as far as the send buffer takes them; the rest waits for the next round. The depth left is the
 /// session's to see.
 fn flush(peer: &mut Peer, open: &Open, session: u64) {
+    let buffered = peer.channel.and_then(|cid| peer.rtc.channel(cid)).map_or(0, |mut channel| channel.buffered_amount());
+    peer.progress.observe(buffered, !peer.queue.is_empty(), Instant::now());
     let mut msg = Vec::with_capacity(FRAGMENT + 9);
     'frames: while let (Some(cid), Some(data)) = (peer.channel, peer.queue.front()) {
         let count = data.chunks(FRAGMENT).count();
@@ -415,6 +441,8 @@ fn flush(peer: &mut Peer, open: &Open, session: u64) {
         peer.front_since = Instant::now();
         peer.frame_id = peer.frame_id.wrapping_add(1);
     }
+    let buffered = peer.channel.and_then(|cid| peer.rtc.channel(cid)).map_or(0, |mut channel| channel.buffered_amount());
+    peer.progress.observe(buffered, !peer.queue.is_empty(), Instant::now());
     if let Some(claim) = open.lock().unwrap().get_mut(&session) {
         claim.queued = peer.queue.len();
     }
@@ -422,12 +450,37 @@ fn flush(peer: &mut Peer, open: &Open, session: u64) {
         queued_bytes = peer.queue.iter().map(|frame| frame.len()).sum::<usize>(),
         sent_bytes = peer.queue.front().map_or(0, |frame| (peer.sent * FRAGMENT).min(frame.len())),
         front_age_ms = if peer.queue.is_empty() { 0 } else { peer.front_since.elapsed().as_millis() as u64 },
+        transport_pending_bytes = buffered,
+        progress_age_ms = peer.progress.since.map_or(0, |since| since.elapsed().as_millis() as u64),
         "RTC output queue");
 }
 
 #[cfg(test)]
 mod endpoint_tests {
     use super::*;
+
+    #[test]
+    fn pending_transport_deadline_survives_replacement_and_idle_frames() {
+        let now = Instant::now();
+        let mut progress = SendProgress::default();
+        progress.observe(0, false, now);
+        assert_eq!(progress.since, None);
+        progress.observe(100, false, now + Duration::from_secs(10));
+        let started = progress.since;
+        // New/replacement keys and additional SCTP writes do not acknowledge the first frame.
+        progress.observe(100, true, now + Duration::from_secs(11));
+        progress.observe(200, false, now + Duration::from_secs(12));
+        progress.observe(200, true, now + Duration::from_secs(13));
+        assert_eq!(progress.since, started);
+        assert!(now + Duration::from_secs(13) >= progress.since.unwrap() + STALL);
+        // Acknowledgements make progress; subsequent healthy idle time is not a stall.
+        progress.observe(50, true, now + Duration::from_secs(14));
+        assert_eq!(progress.since, Some(now + Duration::from_secs(14)));
+        progress.observe(0, false, now + Duration::from_secs(15));
+        assert_eq!(progress.since, None);
+        progress.observe(0, true, now + Duration::from_secs(100));
+        assert_eq!(progress.since, Some(now + Duration::from_secs(100)));
+    }
 
     #[tokio::test]
     async fn endpoint_failure_does_not_wait_on_full_events_and_override_skips_dns() {

@@ -251,10 +251,26 @@ try {
   await main.waitForTimeout(500);
   const statesBeforeStall = await main.evaluate(() => rtcTest.states.length);
   block();
-  await main.waitForFunction(n => rtcTest.states.slice(n).some(r => r.reason === 'Server queue stalled'), statesBeforeStall);
+  const stallStart = Date.now();
+  await main.evaluate(() => {
+    rtcTest.stallStreams = new Set([elsewhere.store.get().stream.streamId]);
+    rtcTest.stallTimer = setInterval(() => {
+      rtcTest.stallStreams.add(elsewhere.store.get().stream.streamId);
+      elsewhere.setChoice({ effort: elsewhere.store.get().choice.effort === 'fast' ? 'balanced' : 'fast' });
+    }, 400);
+  });
+  try {
+    await main.waitForFunction(n => rtcTest.states.slice(n).some(r => r.reason === 'Server queue stalled'), statesBeforeStall, { timeout: 4500 });
+    assert(Date.now() - stallStart < 4500, 'encoder restarts cannot postpone blocked transport fallback');
+    assert(await main.evaluate(() => rtcTest.stallStreams.size >= 3), 'multiple actual encoder streams during UDP block');
+  } finally { await main.evaluate(() => clearInterval(rtcTest.stallTimer)); }
+  const socketBeforeFallback = await main.evaluate(() => ({ received: rtcTest.socketFrames, painted: elsewhere.store.get().stats.frames }));
+  await main.waitForFunction(({ received, painted }) => rtcTest.socketFrames > received
+    && elsewhere.store.get().videoVia === 'websocket' && elsewhere.store.get().stats.frames > painted,
+  socketBeforeFallback, { timeout: 1500 });
   unblock(); await active(main);
   await main.evaluate(id => elsewhere.control({ id, op: 'close' }), motion);
-  console.log('real blocked-UDP server queue stall and recovery passed');
+  console.log('real blocked-UDP fallback survives repeated encoder restarts and restores socket video');
 
   // A new socket retries with fresh capabilities; callbacks from the old socket are inert.
   await main.evaluate(() => { rtcTest.oldSocket = rtcTest.socket; rtcTest.oldClose = rtcTest.socket.onclose; rtcTest.oldMessage = rtcTest.socket.onmessage; rtcTest.socket.close(); });
@@ -284,6 +300,8 @@ try {
   await congestion.context().close();
   console.log('failed attempts preserve the socket congestion baseline');
   const bounded = await connect();
+  await bounded.waitForFunction(() => elsewhere.store.get().streamState?.preset === 'low'
+    && !elsewhere.store.get().streamState.effort.pending && !elsewhere().awaitingKey && elsewhere.store.get().stats.frames > 0);
   await bounded.clock.install();
   const initialKeyframes = await bounded.evaluate(() => rtcTest.sent.filter(t => t === 0x88).length);
   await bounded.evaluate(() => { rtcTest.failOffers = 100; elsewhere.setTransport('webrtc'); });
