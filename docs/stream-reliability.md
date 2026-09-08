@@ -42,8 +42,10 @@ controlled-link timing gate applies to the default 8000 kbit/s ceiling.
 
 For a separate consumer-isolation run, set `RELIABILITY_PROFILE=clean`, `RELIABILITY_VIEWERS=3`
 and `RELIABILITY_BLOCKED_CONSUMERS=2`. Real browser viewers continue decoding while the TCP consumers
-stop reading with a 4096-byte receive-window clamp. Each consumer waits 20 seconds, checks whether
-the server closed after its send deadline, then reconnects. Consumer events and every viewer's
+stop reading with a 4096-byte receive-window clamp. Consumers alternate between Very Low with a
+30 fps cap and Medium with no frame cap. Each verifies its selected target and cap, waits 30 or 20
+seconds respectively, checks whether the server closed after its send deadline, then reconnects.
+Use a 90-second sample to exercise repeated closure at both rates. Consumer events and every viewer's
 paint progress are recorded. Samples of 60 seconds or more require every blocked consumer to remain
 alive, observe at least two server closures and reconnect at least twice. Every real viewer must
 paint without a one-second gap. Short correctness samples report the closure gate as unexercised.
@@ -82,3 +84,6 @@ queue maxima may miss shorter peaks; trace logging and marker readback in every 
 measurement overhead.
 PSNR and text pixel error accompany the screenshots and do not replace visual inspection. Run timed
 comparisons with other builds, browser checks and fixture workloads stopped.
+Each picture records its source sequence, source timestamp, capture time and observed StreamState target.
+That reported target can briefly precede the encoder's new stream. The text capture requires a source
+timestamp after the text switch and at least 60 source frames in that phase.

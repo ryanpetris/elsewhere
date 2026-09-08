@@ -19,6 +19,7 @@ const ceiling = Number(process.env.RELIABILITY_BITRATE ?? 8000);
 const linkRate = Number(process.env.RELIABILITY_LINK_MBPS ?? 12);
 const scenes = (process.env.RELIABILITY_SCENES ?? process.env.RELIABILITY_SCENE ?? 'cuts,scroll,game,video').split(',');
 const viewerCount = Number(process.env.RELIABILITY_VIEWERS ?? 1), blockedCount = Number(process.env.RELIABILITY_BLOCKED_CONSUMERS ?? 0);
+const consumerPresets = Array.from({ length: blockedCount }, (_, index) => index % 2 ? 'medium' : 'very-low');
 const port = Number(process.env.ELSEWHERE_TEST_PORT ?? 8096), debugPort = port + 1000;
 const renderNode = process.env.ELSEWHERE_RENDER_NODE ?? '/dev/dri/renderD128';
 const binary = process.env.ELSEWHERE_BINARY ?? '/src/target/release/elsewhere';
@@ -90,7 +91,7 @@ try {
   const driverPackages = archDrivers.length ? archDrivers : ['libva2', 'intel-media-va-driver', 'intel-media-va-driver-non-free', 'mesa-va-drivers', 'libgl1-mesa-dri']
     .map(name => optionalCommand('dpkg-query', ['-W', '-f=${Package} ${Version}\n', name])).filter(Boolean);
   await writeFile(root + '/environment.json', JSON.stringify({ profile, binary, binary_version: command(binary, ['--version']).trim(),
-    binary_sha256: createHash('sha256').update(await readFile(binary)).digest('hex'), renderNode, codecs, sizes, repeats, seconds, warmup, scenes, ceiling_kbps: ceiling, link_mbps: profile === 'clean' ? null : linkRate, viewers: viewerCount, blocked_consumers: blockedCount,
+    binary_sha256: createHash('sha256').update(await readFile(binary)).digest('hex'), renderNode, codecs, sizes, repeats, seconds, warmup, scenes, ceiling_kbps: ceiling, link_mbps: profile === 'clean' ? null : linkRate, viewers: viewerCount, blocked_consumers: blockedCount, blocked_consumer_presets: consumerPresets,
     link: JSON.parse(command('ip', ['-j', 'link', 'show', 'lo'])), offloads: command('ethtool', ['-k', 'lo']), qdisc: qdiscs(),
     ffmpeg: command('ffmpeg', ['-version']).trim(), chromium: command('chromium', ['--version']).trim(), kernel: command('uname', ['-sr']).trim(),
     cpu: { model: /^(?:model name|Hardware)\s*:\s*(.+)$/m.exec(cpuInfo)?.[1] ?? null, logical_processors: (cpuInfo.match(/^processor\s*:/gm) ?? []).length },
@@ -136,6 +137,7 @@ try {
           const result = draw.call(this, source, ...args);
           if (source instanceof VideoFrame && measurement && this.canvas.width === width && this.canvas.height === height) {
             const marker = readMarker(this), age = Date.now() - marker.timestamp;
+            if (measurement.text && (marker.timestamp <= measurement.textStarted || marker.sequence < 60)) return result;
             const kind = measurement.text ? 'text' : measurement.scene === 'cycle' ? ['cuts', 'scroll', 'game', 'video'][Math.floor(marker.sequence / 900) % 4] : measurement.scene;
             measurement.paints.push({ at: performance.now(), age, sequence: marker.sequence, scene: kind });
             if (age < 0 || age >= 30000) measurement.invalid++;
@@ -144,7 +146,8 @@ try {
                 marker.sequence % 60 >= 25 && marker.sequence % 60 <= 35 ? kind : null;
               if (capture && !captures[capture]) {
                 const image = document.createElement('canvas'); image.width = width; image.height = height;
-                image.getContext('2d').drawImage(this.canvas, 0, 0); captures[capture] = { image, marker };
+                image.getContext('2d').drawImage(this.canvas, 0, 0);
+                captures[capture] = { image, marker, captured_at: Date.now(), observed_target_kbps: elsewhere.store.get().streamState?.bitrate_kbps ?? null };
               }
             }
           }
@@ -233,7 +236,7 @@ try {
         for (let index = 0; index < blockedCount; index++) {
           const path = `${directory}/${codec}-${selectedScene}-${repeat}-consumer-${index}.log`;
           const file = await open(path, 'w'); consumerLogs.push(file); consumerFiles.push(path);
-          consumers.push(spawn('python3', [fileURLToPath(new URL('./reliability-consumer.py', import.meta.url)), String(port), directory + '/config/elsewhere/token', codec], { stdio: ['ignore', file.fd, file.fd] }));
+          consumers.push(spawn('python3', [fileURLToPath(new URL('./reliability-consumer.py', import.meta.url)), String(port), directory + '/config/elsewhere/token', codec, consumerPresets[index]], { stdio: ['ignore', file.fd, file.fd] }));
         }
         await wait(async () => (await Promise.all(consumerFiles.map(path => readFile(path, 'utf8')))).every(text => text.includes('\"blocked\"')));
         await page.waitForTimeout(warmup * 1000);
@@ -311,6 +314,7 @@ try {
         });
         const sequences = valid.map(paint => paint.sequence), span = Math.max(...sequences) - Math.min(...sequences) + 1;
         const row = { codec, width, height, repeat, profile, scene: selectedScene, seconds: duration, ceiling_kbps: ceiling, link_mbps: profile === 'clean' ? null : linkRate, viewers: viewerCount, blocked_consumers: blockedCount,
+          blocked_consumer_presets: consumerPresets,
           primary_session: primarySession, primary_stream_ids: [...streamIds], capacity_changes: events.filter(event => event.change === 'capacity'), effort: after.state.streamState.effort,
           start_target_kbps: before.state.streamState.bitrate_kbps, end_target_kbps: after.state.streamState.bitrate_kbps,
           target_kbps: distribution(ticks.map(tick => tick.target)), target_kbps_min: Math.min(...ticks.map(tick => tick.target)),
@@ -342,11 +346,11 @@ try {
             decode_errors: state.stats.decodeErrors - otherBefore[index].state.stats.decodeErrors, end_target_kbps: state.streamState.bitrate_kbps })),
           scenes: Object.fromEntries(['cuts', 'scroll', 'game', 'video', 'text'].map(kind => [kind, { frames: valid.filter(paint => paint.scene === kind).length, age_ms: distribution(valid.filter(paint => paint.scene === kind).map(paint => paint.age)) }])) };
         // Static text gets a settled picture and a matching source reference outside the timing sample.
-        await scene.evaluate(() => { window.scene = 'text'; window.sequence = 0; });
+        const textStarted = await scene.evaluate(() => { window.scene = 'text'; window.sequence = 0; return Date.now(); });
         await page.waitForTimeout(1000);
-        await page.evaluate(() => { window.measurement = { text: true, paints: [], arrivals: [], frames: [], configs: [], invalid: 0, partialBytes: 0, keyRequests: 0 }; });
+        await page.evaluate(textStarted => { delete captures.text; window.measurement = { text: true, textStarted, paints: [], arrivals: [], frames: [], configs: [], invalid: 0, partialBytes: 0, keyRequests: 0 }; }, textStarted);
         await page.waitForFunction(() => !!captures.text);
-        const screenshots = await page.evaluate(() => { measurement = null; return Object.entries(captures).map(([scene, { image, marker }]) => ({ scene, marker, png: image.toDataURL() })); });
+        const screenshots = await page.evaluate(() => { measurement = null; return Object.entries(captures).map(([scene, { image, ...metadata }]) => ({ scene, ...metadata, png: image.toDataURL() })); });
         row.quality = {};
         const name = `${codec}-${selectedScene}-${profile}-${repeat}`;
         for (const capture of screenshots) {
@@ -354,7 +358,8 @@ try {
             const image = document.createElement('canvas'); image.width = width; image.height = height;
             drawScene(image.getContext('2d'), marker.timestamp, marker.sequence, scene === 'cuts-first' ? 'cuts' : scene); return image.toDataURL();
           }, { width, height, ...capture });
-          row.quality[capture.scene] = { source_sequence: capture.marker.sequence, ...await page.evaluate(async ({ reference, kind, width, height }) => {
+          row.quality[capture.scene] = { source_sequence: capture.marker.sequence, source_timestamp: capture.marker.timestamp,
+            ...(capture.scene === 'text' ? { text_started_at: textStarted } : {}), captured_at: capture.captured_at, observed_target_kbps: capture.observed_target_kbps, ...await page.evaluate(async ({ reference, kind, width, height }) => {
             const image = new Image(); image.src = reference; await image.decode();
             const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
             canvas.getContext('2d').drawImage(image, 0, 0);
@@ -383,6 +388,13 @@ try {
             server_queue_empties_every_second: queueSessions.some(queue => queue.session === primarySession && queue.longest_without_empty_ms < 1000)
           } : null,
           consumers: blockedCount ? { formal_sample: formal, alive_until_sample_end: consumersAlive,
+            requested_states_observed: consumerEvents.every((events, index) => {
+              const blocked = events.filter(event => event.phase === 'blocked'), preset = consumerPresets[index];
+              const target = preset === 'very-low' ? 2000 : ceiling;
+              return blocked.length > 0 && blocked.every(event => event.stream_state?.preset === preset
+                && event.stream_state.bitrate_kbps === target && event.stream_state.ceiling_kbps === target
+                && event.stream_state.max_fps === (target < 3000 ? 30 : 0));
+            }),
             repeated_closures: consumerEvents.every(events => events.filter(event => event.phase === 'replaced' && event.at >= before.at && event.at <= after.at && event.server_closed).length >= 2),
             repeated_blocks: consumerEvents.every(events => events.filter(event => event.phase === 'blocked').length >= 3),
             all_observed_replacements_closed: consumerEvents.every(events => events.filter(event => event.phase === 'replaced').every(event => event.server_closed)) } : null,
@@ -407,6 +419,7 @@ try {
         if (row.acceptance.primary_isolation_progress !== null) assert.ok(row.acceptance.primary_isolation_progress, 'the primary viewer paints continuously during consumer isolation');
         if (blockedCount) {
           assert.ok(consumersAlive, 'blocked consumers remain alive until the sample ends');
+          assert.ok(row.acceptance.consumers.requested_states_observed, 'each blocked consumer reports its requested bitrate and frame cap before stopping reads');
           assert.ok(row.acceptance.consumers.all_observed_replacements_closed, 'the server closes blocked consumers');
           if (formal) assert.ok(row.acceptance.consumers.repeated_closures && row.acceptance.consumers.repeated_blocks, 'each blocked consumer is closed and replaced at least twice');
         }
