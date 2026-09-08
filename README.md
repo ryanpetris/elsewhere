@@ -10,10 +10,11 @@ Design notes: [docs/architecture.md](docs/architecture.md), [docs/protocol.md](d
 
 ## Install
 
-Releases (made from `vX.Y.Z` tags; the tag is the version) carry a Debian package built on Debian
-stable that also installs on Ubuntu 24.04 and later, an Arch package, and a tarball with the binary.
-Building from source needs Rust stable, Node 24 (for the viewer) and the development packages for
-GStreamer (core and base), libgbm, libEGL and libxkbcommon; `make` builds the viewer and then
+Releases made from `vX.Y.Z` tags carry separate native packages and tarballs for Debian stable,
+Ubuntu 24.04 and current Ubuntu, plus an Arch package. Choose the artifact for your distribution;
+FFmpeg shared-library ABIs differ between releases.
+Building from source needs Rust stable, Node 24 for the viewer, Clang, pkg-config and the development
+packages for FFmpeg, libva, PipeWire, libgbm, libEGL and libxkbcommon; `make` builds the viewer and then
 `target/release/elsewhere`. `make version` reports the nearest reachable `vX.Y.Z` release tag,
 adding `.N` for commits since that tag and `-dirty` for tracked changes or untracked files.
 For example, three commits after `v0.1.2` produce `v0.1.2.3`, or `v0.1.2.3-dirty` with local changes.
@@ -23,7 +24,7 @@ shallow checkouts and checkouts with no reachable release tag cannot derive a ve
 
 `make package-deb`, `make package-tar` and `make package-arch` build into `dist`. Debian needs
 `cargo-deb` and the Debian packaging tools; Arch needs `makepkg` and a non-root build user. The release
-workflow uses these same targets on their native distributions. Tarball filenames and the binary's
+workflow uses these same targets on their native distributions. Tarball filenames include the build distribution. They and the binary's
 `--version` retain the Git version. Debian and Arch metadata and package filenames omit `v`, spell
 `-dirty` as `.dirty`, and add package revision `-1`, so `v0.1.2.3-dirty` becomes
 `0.1.2.3.dirty-1` in both packages and their filenames.
@@ -35,11 +36,12 @@ with Python 3 and Git; run it in the Docker rig.
 
 - Linux, with a GPU render node (`/dev/dri/renderD128`) and Mesa for hardware rendering and encoding, or
   none at all (Mesa's llvmpipe renders and the CPU encodes; see below).
-- GStreamer 1.24+ with the VA plugin: `gst-plugin-va` on Arch (`vapostproc`, `vah264enc`), for
-  hardware encoding; or `--software-encoding` with the vpx (good), x264 (ugly), x265 or svtav1 (bad)
-  plugins, which encodes on the CPU (the desktop then runs at 30 Hz) for machines without a usable GPU encoder.
+- FFmpeg 6.1 or later, with VAAPI support for hardware encoding. `--software-encoding` uses
+  libvpx, x264 or OpenH264, x265, and libaom or SVT-AV1, according to the installed FFmpeg build.
+  Software encoding runs the desktop at 30 Hz. Standard distribution FFmpeg packages supply these
+  libraries; codec availability is checked by opening an encoder and producing a keyframe.
 - `xorg-xwayland` for X11 clients. Audio requires PipeWire 1.4.2+, its Pulse compatibility service,
-  WirePlumber 0.5.6+, the native GStreamer PipeWire plugin and `pactl`. See [session audio](docs/session-audio.md)
+  WirePlumber 0.5.6+ and `pactl`. See [session audio](docs/session-audio.md)
   for packages and host-service compatibility. `--no-audio` needs no audio services; the native PipeWire client library remains a runtime dependency.
 - Rust stable and Node 24 to build. The browser needs WebCodecs (Chromium, Firefox 130+, Safari 26+).
 
@@ -91,7 +93,7 @@ at the same bitrate. Changes restart the viewer's stream immediately and are rem
 unsupported encoder controls show unavailable. See [encoding effort](docs/encoding-effort.md) for
 mappings and measured tradeoffs.
 `GET /api/codecs` lists the server's codecs. After the picture stops changing one more frame
-goes out, at four times the bitrate with the software encoders, so text left rough by motion sharpens.
+encodes the settled picture at the current target so text left rough by motion can sharpen.
 Frames are painted on a 2D canvas. `?renderer=webgpu` in the URL uses a WebGPU external-texture path
 instead; it is opt-in because Chromium on Linux occasionally presents a blank frame that way, which looks like flicker.
 
@@ -115,7 +117,7 @@ session. Muting the session microphone does not stop browser capture. With multi
 the mixer also offers routing and default selection through WirePlumber.
 
 `--no-audio` starts no audio services. Audio startup or service failure leaves the desktop running with
-audio unavailable. Shutdown stops the audio pipelines before the private services. For clients launched
+audio unavailable. Shutdown stops the audio workers before the private services. For clients launched
 separately, use the connection variables printed in the log. See [session audio](docs/session-audio.md)
 for the device names, environment and lifecycle.
 

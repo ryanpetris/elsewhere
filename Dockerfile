@@ -38,25 +38,30 @@ RUN npm run build
 
 FROM archlinux:latest AS build
 RUN pacman -Sy --noconfirm archlinux-keyring \
-    && pacman -Syu --noconfirm --needed rust pkgconf clang libpipewire gstreamer gst-plugins-base mesa libxkbcommon \
+    && pacman -Syu --noconfirm --needed rust pkgconf clang libpipewire ffmpeg libva mesa libxkbcommon \
     && rm -rf /var/cache/pacman/pkg/*
 WORKDIR /src
 COPY . .
 COPY --from=web /src/web/dist web/dist
 RUN cargo build --release --locked
 
-FROM archlinux:latest
+FROM archlinux:latest AS media-runtime
 RUN pacman -Sy --noconfirm archlinux-keyring \
     && pacman -Syu --noconfirm --needed \
-        gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-plugin-va \
+        ffmpeg \
         mesa vulkan-intel vulkan-radeon libva intel-media-driver libva-mesa-driver xorg-xwayland \
-        mesa-utils mesa-demos vulkan-tools \
-        dbus pipewire pipewire-pulse pipewire-alsa wireplumber libpulse gst-plugin-pipewire \
-        xfce4 firefox chromium ttf-dejavu \
-        guvcview audacity gimp mpv ristretto pavucontrol nano sudo \
+        dbus pipewire pipewire-pulse pipewire-alsa wireplumber libpulse \
+        ttf-dejavu \
     && rm -rf /var/cache/pacman/pkg/*
 COPY --from=build /src/target/release/elsewhere /usr/local/bin/
 COPY --from=web /src/web/dist/THIRD_PARTY.txt /usr/share/licenses/elsewhere/THIRD_PARTY.txt
+COPY docs/native-dependencies.md /usr/share/licenses/elsewhere/native-dependencies.md
+
+FROM media-runtime AS desktop
+RUN pacman -Syu --noconfirm --needed \
+        mesa-utils mesa-demos vulkan-tools xfce4 firefox chromium \
+        guvcview audacity gimp mpv ristretto pavucontrol nano sudo \
+    && rm -rf /var/cache/pacman/pkg/*
 # GTK hides menu icons unless told otherwise, and on Wayland it takes the title-bar buttons of
 # client-decorated windows (GTK apps, Firefox, Chromium) from GSettings, where GNOME's default keeps
 # only Close. On a real Xfce session xfsettingsd provides both.

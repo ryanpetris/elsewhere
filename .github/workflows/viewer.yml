@@ -9,7 +9,7 @@ jobs:
       - name: Browser rig dependencies
         run: |
           pacman -Sy --noconfirm archlinux-keyring
-          pacman -Syu --noconfirm --needed nodejs npm chromium make rust pkgconf gstreamer gst-plugins-base mesa libxkbcommon
+          pacman -Syu --noconfirm --needed nodejs npm chromium make rust pkgconf mesa libxkbcommon
       - name: Viewer build and checks
         run: |
           cd web

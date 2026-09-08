@@ -10,14 +10,13 @@ pkgdesc="Headless Wayland compositor whose screen is a browser tab"
 arch=('x86_64')
 url="https://github.com/ryanpetris/elsewhere"
 license=('MIT' 'AGPL-3.0-or-later')
-depends=('gstreamer' 'gst-plugins-base' 'gst-plugins-good' 'gst-plugins-bad' 'gst-plugin-va' 'mesa' 'libxkbcommon' 'libpipewire')
+depends=('ffmpeg' 'libva' 'mesa' 'libxkbcommon' 'libpipewire')
 makedepends=('cargo' 'nodejs' 'npm' 'clang' 'git' 'make')
 optdepends=('xorg-xwayland: X11 clients'
             'ttf-dejavu: titles on the window decorations the compositor draws'
             'pipewire: private native audio services (PipeWire 1.4.2 or later)'
             'pipewire-pulse: Pulse client compatibility in the private session'
             'wireplumber>=0.5.6: private audio routing policy'
-            'gst-plugin-pipewire: native audio capture and microphone playback'
             'libpulse: Pulse readiness probe (pactl)'
             'intel-media-driver: VA-API on Intel GPUs'
             'libva-mesa-driver: VA-API on AMD GPUs')
@@ -32,6 +31,7 @@ package() {
     cd "$startdir/../.."
     install -Dm755 target/release/elsewhere "$pkgdir/usr/bin/elsewhere"
     install -Dm644 web/dist/THIRD_PARTY.txt "$pkgdir/usr/share/licenses/$pkgname/THIRD_PARTY.txt"
+    install -Dm644 docs/native-dependencies.md "$pkgdir/usr/share/licenses/$pkgname/native-dependencies.md"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
     install -Dm644 docs/audio-visualiser.md "$pkgdir/usr/share/doc/$pkgname/audio-visualiser.md"
     install -Dm644 docs/session-audio.md "$pkgdir/usr/share/doc/$pkgname/session-audio.md"

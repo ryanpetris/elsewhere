@@ -8,7 +8,8 @@ edition.workspace = true
 license.workspace = true
 
 # `cargo deb -p elsewhere --deb-version <tag>-1` (see .github/workflows/build.yml). $auto = library
-# dependencies from dpkg-shlibdeps; the GStreamer plugin packages are loaded at runtime, so they are listed by hand.
+# dependencies from dpkg-shlibdeps, resolved against this distribution's native libraries.
+# EGL and its Mesa driver are loaded dynamically by the renderer.
 [package.metadata.deb]
 section = "graphics"
 priority = "optional"
@@ -17,11 +18,12 @@ extended-description = """\
 A headless Wayland compositor whose output is hardware-encoded (VA-API) and shown in a browser tab \
 over a WebSocket with WebCodecs; mouse, keyboard and audio travel the same way. Runs Wayland and \
 X11 clients, layer-shell panels and taskbars, and exposes a window-management HTTP API."""
-depends = "$auto, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad"
-recommends = "xwayland, pipewire (>= 1.4.2), pipewire-pulse (>= 1.4.2), wireplumber (>= 0.5.6), gstreamer1.0-pipewire (>= 1.4.2), pulseaudio-utils, va-driver-all, fonts-dejavu-core"
+depends = "$auto, libegl1, libegl-mesa0, libgl1-mesa-dri"
+recommends = "xwayland, pipewire (>= 1.4.2), pipewire-pulse (>= 1.4.2), wireplumber (>= 0.5.6), pulseaudio-utils, va-driver-all, fonts-dejavu-core"
 assets = [
     ["target/release/elsewhere", "usr/bin/", "755"],
     ["../../web/dist/THIRD_PARTY.txt", "usr/share/doc/elsewhere/", "644"],
+    ["../../docs/native-dependencies.md", "usr/share/doc/elsewhere/", "644"],
     ["../../docs/audio-visualiser.md", "usr/share/doc/elsewhere/", "644"],
     ["../../docs/session-audio.md", "usr/share/doc/elsewhere/", "644"],
     ["../../README.md", "usr/share/doc/elsewhere/", "644"],

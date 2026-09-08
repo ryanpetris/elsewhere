@@ -1,6 +1,6 @@
 # Release builds, made only from a vX.Y.Z tag pushed by hand; the tag is the version everywhere.
-# Produces a Debian package (built on Debian stable, verified to install on Debian and Ubuntu), a
-# generic tarball from the same binary, and an Arch package, and attaches them to a GitHub release.
+# Produces native Debian/Ubuntu packages and tarballs, plus an Arch package.
+# Every artifact is installed and checked on the distribution that supplied its shared libraries.
 name: release
 
 on:
@@ -29,47 +29,68 @@ jobs:
           test "$(make -s version)" = "$GITHUB_REF_NAME"
           echo "version=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
 
-  debian:
+  native:
     needs: version
     runs-on: ubuntu-latest
-    container: rust:1-trixie
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: debian-trixie
+            image: debian:trixie
+          - name: ubuntu-24.04
+            image: ubuntu:24.04
+          - name: ubuntu-current
+            image: ubuntu:latest
+    container: ${{ matrix.image }}
     steps:
+      - name: Build dependencies
+        id: native
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential curl ca-certificates git pkg-config cmake \
+            libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev \
+            libva-dev libpipewire-0.3-dev libclang-dev libgbm-dev libegl-dev libxkbcommon-dev
+          native_versions=$(pkg-config --modversion libavcodec libavformat libavutil libavdevice libavfilter libswscale libswresample libva libpipewire-0.3 gbm egl xkbcommon)
+          echo "abi=$(printf '%s\n' "$native_versions" | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Trust checkout in the build container
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - name: Build dependencies
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends pkg-config cmake libgstreamer1.0-dev \
-            libgstreamer-plugins-base1.0-dev libpipewire-0.3-dev libclang-dev libgbm-dev libegl-dev libxkbcommon-dev
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.name }}-${{ steps.native.outputs.abi }}
       - uses: actions/setup-node@v6
         with:
           node-version: 24
       - uses: cargo-bins/cargo-binstall@v1.22.0
       - run: cargo binstall -y cargo-deb
-      - name: Debian package and tarball
+      - name: Native package and tarball
         run: |
           make package-deb package-tar
           test "$(target/release/elsewhere --version)" = "elsewhere ${{ needs.version.outputs.version }}"
       - uses: actions/upload-artifact@v7
         with:
-          name: debian
+          name: ${{ matrix.name }}
           path: |
             dist/*.deb
             dist/*.tar.gz
 
-  # The .deb built on Debian stable must install and start on Debian and on the Ubuntu releases we
-  # care about (glibc and GStreamer versions differ).
   install-test:
-    needs: [version, debian]
+    needs: [version, native]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        image: ['debian:trixie', 'ubuntu:24.04', 'ubuntu:latest']
+        include:
+          - name: debian-trixie
+            image: debian:trixie
+          - name: ubuntu-24.04
+            image: ubuntu:24.04
+          - name: ubuntu-current
+            image: ubuntu:latest
     container: ${{ matrix.image }}
     env:
       ELSEWHERE_VERSION: ${{ needs.version.outputs.version }}
@@ -77,10 +98,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
-          name: debian
+          name: ${{ matrix.name }}
       - run: |
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y ./elsewhere_*.deb curl
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ./elsewhere_*.deb curl python3 ffmpeg
           sh scripts/check-release.sh "$ELSEWHERE_VERSION"
 
   arch:
@@ -89,29 +110,37 @@ jobs:
     container: archlinux:base-devel
     steps:
       - name: Dependencies
+        id: native
         run: |
           pacman -Sy --noconfirm archlinux-keyring
-          pacman -Syu --noconfirm --needed cargo nodejs npm gstreamer gst-plugins-base gst-plugins-good \
-            gst-plugins-bad gst-plugin-va mesa libxkbcommon libpipewire clang git
+          pacman -Syu --noconfirm --needed cargo nodejs npm ffmpeg libva mesa libxkbcommon libpipewire clang git curl python
+          native_versions=$(pkg-config --modversion libavcodec libavformat libavutil libavdevice libavfilter libswscale libswresample libva libpipewire-0.3 gbm egl xkbcommon)
+          echo "abi=$(printf '%s\n' "$native_versions" | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
           useradd -m builder
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: arch-${{ steps.native.outputs.abi }}
       - name: makepkg
         env:
           PACKAGER: Ryan Petris <ryan@petris.net>
         run: |
           chown -R builder .
-          su builder -c 'PACKAGER="$PACKAGER" make package-arch'
+          su builder -c 'make package-arch'
           test "$(target/release/elsewhere --version)" = "elsewhere ${{ needs.version.outputs.version }}"
+      - name: Install and verify
+        run: |
+          pacman -U --noconfirm dist/*.pkg.tar*
+          sh scripts/check-release.sh "${{ needs.version.outputs.version }}"
       - uses: actions/upload-artifact@v7
         with:
           name: arch
           path: dist/*.pkg.tar*
 
   release:
-    needs: [debian, install-test, arch]
+    needs: [native, install-test, arch]
     runs-on: ubuntu-latest
     permissions:
       contents: write

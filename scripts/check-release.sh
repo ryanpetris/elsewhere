@@ -1,5 +1,5 @@
 #!/bin/sh
-# Check the installed release and render a frame without GPU or audio services.
+# Check the installed release and encode/decode viewer video without GPU or audio services.
 set -eu
 
 expected="elsewhere ${1:?expected release version}"
@@ -32,7 +32,12 @@ for _ in $(seq 1 30); do
             -H "Authorization: Bearer $(cat "$XDG_CONFIG_HOME/elsewhere/token")" \
             http://127.0.0.1:18443/api/screenshot.png -o "$work/frame.png"; then
         test -s "$work/frame.png"
-        printf 'Release version and software-rendered screenshot verified\n'
+        python3 scripts/check-release-video.py 18443 "$XDG_CONFIG_HOME/elsewhere/token"
+        if grep -Eqi 'libgst|gstreamer' "/proc/$pid/maps"; then
+            echo 'Unexpected GStreamer library in the release process' >&2
+            exit 1
+        fi
+        printf 'Release version, screenshot, and encoded viewer video verified\n'
         exit 0
     fi
     sleep 1

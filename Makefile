@@ -8,7 +8,7 @@
 #   make version     the Git-derived build version
 #   make check-version test version derivation (Python 3 and Git)
 #   make package-deb Debian package (cargo-deb and dpkg required)
-#   make package-tar generic Linux tarball
+#   make package-tar tarball for the current distribution
 #   make package-arch Arch package (makepkg, run as a non-root user)
 #   make clean
 
