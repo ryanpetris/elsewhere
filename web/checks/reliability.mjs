@@ -17,6 +17,8 @@ const repeats = Number(process.env.RELIABILITY_REPEATS ?? 3), seconds = Number(p
 const warmup = Number(process.env.RELIABILITY_WARMUP ?? 6);
 const ceiling = Number(process.env.RELIABILITY_BITRATE ?? 8000);
 const linkRate = Number(process.env.RELIABILITY_LINK_MBPS ?? 12);
+// Delayed packets share this capacity; scale it with the initial rate, then keep it fixed.
+const queueLimit = Math.ceil(100 * linkRate / 12);
 const scenes = (process.env.RELIABILITY_SCENES ?? process.env.RELIABILITY_SCENE ?? 'cuts,scroll,game,video').split(',');
 const viewerCount = Number(process.env.RELIABILITY_VIEWERS ?? 1), blockedCount = Number(process.env.RELIABILITY_BLOCKED_CONSUMERS ?? 0);
 const consumerPresets = Array.from({ length: blockedCount }, (_, index) => index % 2 ? 'medium' : 'very-low');
@@ -49,7 +51,7 @@ function shape() {
   command('ip', ['link', 'set', 'dev', 'lo', 'mtu', '1500']);
   command('ethtool', ['-K', 'lo', 'tso', 'off', 'gso', 'off', 'gro', 'off']);
   tc('qdisc', 'add', 'dev', 'lo', 'root', 'handle', '1:', 'prio', 'priomap', ...Array(16).fill('0')); shaped = true;
-  tc('qdisc', 'add', 'dev', 'lo', 'parent', '1:3', 'handle', '30:', 'netem', 'limit', '100', 'delay', '20ms',
+  tc('qdisc', 'add', 'dev', 'lo', 'parent', '1:3', 'handle', '30:', 'netem', 'limit', String(queueLimit), 'delay', '20ms',
     'rate', `${linkRate}mbit`, 'loss', ...(profile === 'burst-loss' ? ['gemodel', '0.125%', '25%', '100%', '0%'] : [profile === 'loss' ? '0.5%' : '0%']), 'seed', '42');
   for (const [protocol, priority] of [['tcp', '10'], ['udp', '20']]) {
     tc('filter', 'add', 'dev', 'lo', 'protocol', 'ip', 'parent', '1:', 'prio', priority, 'flower', 'ip_proto', protocol,
@@ -58,7 +60,7 @@ function shape() {
   if (profile === 'fallback') tc('qdisc', 'add', 'dev', 'lo', 'parent', '1:2', 'handle', '20:', 'netem', 'loss', '100%');
 }
 function capacity(rate) {
-  tc('qdisc', 'change', 'dev', 'lo', 'parent', '1:3', 'handle', '30:', 'netem', 'limit', '100', 'delay', '20ms', 'rate', rate, 'loss', '0%', 'seed', '42');
+  tc('qdisc', 'change', 'dev', 'lo', 'parent', '1:3', 'handle', '30:', 'netem', 'limit', String(queueLimit), 'delay', '20ms', 'rate', rate, 'loss', '0%', 'seed', '42');
 }
 function blockUdp(block) {
   if (block) tc('filter', 'add', 'dev', 'lo', 'protocol', 'ip', 'parent', '1:', 'prio', '1', 'flower',
@@ -92,6 +94,7 @@ try {
     .map(name => optionalCommand('dpkg-query', ['-W', '-f=${Package} ${Version}\n', name])).filter(Boolean);
   await writeFile(root + '/environment.json', JSON.stringify({ profile, binary, binary_version: command(binary, ['--version']).trim(),
     binary_sha256: createHash('sha256').update(await readFile(binary)).digest('hex'), renderNode, codecs, sizes, repeats, seconds, warmup, scenes, ceiling_kbps: ceiling, link_mbps: profile === 'clean' ? null : linkRate, viewers: viewerCount, blocked_consumers: blockedCount, blocked_consumer_presets: consumerPresets,
+    queue_limit_packets: profile === 'clean' ? null : queueLimit,
     link: JSON.parse(command('ip', ['-j', 'link', 'show', 'lo'])), offloads: command('ethtool', ['-k', 'lo']), qdisc: qdiscs(),
     ffmpeg: command('ffmpeg', ['-version']).trim(), chromium: command('chromium', ['--version']).trim(), kernel: command('uname', ['-sr']).trim(),
     cpu: { model: /^(?:model name|Hardware)\s*:\s*(.+)$/m.exec(cpuInfo)?.[1] ?? null, logical_processors: (cpuInfo.match(/^processor\s*:/gm) ?? []).length },
@@ -314,6 +317,7 @@ try {
         });
         const sequences = valid.map(paint => paint.sequence), span = Math.max(...sequences) - Math.min(...sequences) + 1;
         const row = { codec, width, height, repeat, profile, scene: selectedScene, seconds: duration, ceiling_kbps: ceiling, link_mbps: profile === 'clean' ? null : linkRate, viewers: viewerCount, blocked_consumers: blockedCount,
+          queue_limit_packets: profile === 'clean' ? null : queueLimit,
           blocked_consumer_presets: consumerPresets,
           primary_session: primarySession, primary_stream_ids: [...streamIds], capacity_changes: events.filter(event => event.change === 'capacity'), effort: after.state.streamState.effort,
           start_target_kbps: before.state.streamState.bitrate_kbps, end_target_kbps: after.state.streamState.bitrate_kbps,

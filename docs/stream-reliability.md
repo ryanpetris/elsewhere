@@ -7,9 +7,13 @@ each of the four scenes. Allow about 50 minutes for the complete matrix.
 The 12 Mbit/s link and 20 ms one-way delay are configured before connecting RTC, followed by six
 seconds of warmup. Quality uses an 8 Mbit/s ceiling with normal adaptation enabled. Results include
 minimum target and time at the ceiling so a bitrate reduction remains visible.
-The shaper holds at most 100 packets. Even with zero configured random loss, bursts can overflow
-that queue; per-sample counters report both total and deliberately injected drops. Such overflow
-and SCTP recovery are part of the reliability diagnosis.
+The shaper holds at most 100 packets at 12 Mbit/s. `RELIABILITY_LINK_MBPS` scales that capacity in
+proportion to the starting rate, rounded up, so 36 Mbit/s uses 300 packets. This keeps a full queue's
+approximate transmission time the same for comparable packet sizes. [Netem](https://man7.org/linux/man-pages/man8/tc-netem.8.html)
+counts packets held for the 20 ms delay against the same limit. Capacity changes during a sample keep
+the initial packet limit. Even with zero configured random loss, bursts can overflow the queue;
+per-sample counters report both total and deliberately injected drops. Such overflow and SCTP recovery
+are part of the reliability diagnosis.
 
 The shared `effort-scene.html` renderer provides detailed scene cuts, scrolling text, camera-like
 motion and a synthetic moving picture. The optional exploratory `cycle` mode changes every 900
@@ -52,8 +56,9 @@ paint without a one-second gap. Short correctness samples report the closure gat
 The default matrix has one real viewer and no blocked consumers.
 
 Repeat the scene/codec/resolution matrix with `RELIABILITY_VIEWERS=3 RELIABILITY_LINK_MBPS=36`.
-The shaper provides one shared 36 Mbit/s link with 20 ms delay and an 8 Mbit/s ceiling per viewer.
-This preserves the single-viewer bandwidth headroom ratio while measuring simultaneous encoding.
+The shaper provides one shared 36 Mbit/s link with 20 ms delay, a 300-packet limit and an 8 Mbit/s
+ceiling per viewer. This preserves the single-viewer bandwidth headroom ratio and approximate queue
+transmission time while measuring simultaneous encoding.
 It does not simulate three independent links. A separate three-viewer run at the default 12 Mbit/s
 tests competition for shared capacity and is expected to reduce individual targets.
 
