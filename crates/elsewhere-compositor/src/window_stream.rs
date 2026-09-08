@@ -48,7 +48,7 @@ impl State {
     }
 
     pub fn stop_window_stream(&mut self, key: u64) {
-        self.window_streams.retain(|s| s.key != key); // dropping the sink stops its pipeline
+        self.window_streams.retain(|s| s.key != key); // dropping the sink stops its worker
     }
 
     /// Called after the output's frame: every stream whose window changed gets a frame (every stream, if `force`).
@@ -136,6 +136,7 @@ impl State {
         s.seq += 1;
         let buffer = match target {
             Target::Slot { slot, dmabuf } => {
+                crate::gpu::ensure_single_plane(&dmabuf)?;
                 if let Targets::Dmabuf(sc) = &mut s.targets {
                     sc.submitted(&slot);
                 }

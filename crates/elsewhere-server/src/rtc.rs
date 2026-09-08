@@ -418,6 +418,11 @@ fn flush(peer: &mut Peer, open: &Open, session: u64) {
     if let Some(claim) = open.lock().unwrap().get_mut(&session) {
         claim.queued = peer.queue.len();
     }
+    tracing::trace!(session, queued_frames = peer.queue.len(),
+        queued_bytes = peer.queue.iter().map(|frame| frame.len()).sum::<usize>(),
+        sent_bytes = peer.queue.front().map_or(0, |frame| (peer.sent * FRAGMENT).min(frame.len())),
+        front_age_ms = if peer.queue.is_empty() { 0 } else { peer.front_since.elapsed().as_millis() as u64 },
+        "RTC output queue");
 }
 
 #[cfg(test)]

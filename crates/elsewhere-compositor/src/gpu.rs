@@ -1,22 +1,22 @@
 //! The renderer and what it renders into: a render node's GBM device with dmabuf swapchains the encoders
 //! import, or, without a GPU, Mesa's surfaceless platform (llvmpipe) with a texture read back into memory.
 
-use std::{fs::OpenOptions, os::fd::OwnedFd, path::Path};
+use std::{fs::OpenOptions, os::fd::{AsFd, OwnedFd}, path::Path, time::Duration};
 
 use anyhow::{Context, Result};
-use elsewhere_core::OutputGeometry;
+use elsewhere_core::{Frame, FrameBuffer, OutputGeometry};
 use smithay::{
     backend::{
         allocator::{
-            Format, Fourcc, Modifier, Slot, Swapchain,
+            Buffer as _, Fourcc, Modifier, Slot, Swapchain,
             dmabuf::{Dmabuf, DmabufAllocator},
             gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
         },
         drm::{DrmDeviceFd, DrmNode},
         egl::{EGLContext, EGLDisplay, native::EGLSurfacelessDisplay},
-        renderer::{Bind, ExportMem, Offscreen, TextureMapping, gles::{GlesRenderer, GlesTarget, GlesTexture}},
+        renderer::{Bind, ExportMem, Frame as _, Offscreen, Renderer, TextureMapping, gles::{GlesRenderer, GlesTarget, GlesTexture}},
     },
-    utils::{Buffer, Rectangle, Size},
+    utils::{Buffer, Rectangle, Size, Transform},
 };
 
 pub type DmabufSwapchain = Swapchain<DmabufAllocator<GbmAllocator<DrmDeviceFd>>>;
@@ -35,6 +35,8 @@ pub struct Gpu {
     pub targets: Targets,
     pub fourcc: Fourcc,
     pub modifier: Modifier,
+    /// GBM can export Invalid for an allocation requested with the LINEAR flag.
+    allocation_modifier: Modifier,
     /// The first buffer of each swapchain is checked against `modifier` (see `render_frame`).
     pub modifier_verified: bool,
 }
@@ -54,16 +56,16 @@ pub enum Target {
 }
 
 impl Gpu {
-    /// `accepted` is what the encoder can import; we pick a format both sides support. Without a render
-    /// node the encoders are the software ones, which take the pixels as read back (BGRx).
-    pub fn new(render_node: Option<&Path>, geo: &OutputGeometry, accepted: &[(u32, u64)]) -> Result<Gpu> {
+    /// Trial renderer allocations through the encoder. Without a render node, software encoders
+    /// take the pixels as read back (BGRx).
+    pub fn new(render_node: Option<&Path>, geo: &OutputGeometry, software: bool, validate: &dyn Fn(Frame) -> Result<()>) -> Result<Gpu> {
         let Some(render_node) = render_node else {
             // Safety: the display is only used from this thread and outlives the renderer through the context.
             let renderer = unsafe { EGLDisplay::new(EGLSurfacelessDisplay).and_then(|egl| EGLContext::new(&egl)).map_err(anyhow::Error::from).and_then(|ctx| Ok(GlesRenderer::new(ctx)?)) }
                 .context("Mesa's surfaceless EGL platform (no render node; LIBGL_ALWAYS_SOFTWARE=1 forces llvmpipe)")?;
             tracing::info!("no GPU: rendering with Mesa's surfaceless platform, frames read back into memory");
             let targets = Targets::Texture { texture: None, size: (geo.width_px as i32, geo.height_px as i32).into() };
-            return Ok(Gpu { device: None, renderer, targets, fourcc: Fourcc::Xrgb8888, modifier: Modifier::Linear, modifier_verified: false });
+            return Ok(Gpu { device: None, renderer, targets, fourcc: Fourcc::Xrgb8888, modifier: Modifier::Linear, allocation_modifier: Modifier::Linear, modifier_verified: false });
         };
         let node = DrmNode::from_path(render_node)?;
         let file = OpenOptions::new().read(true).write(true).open(render_node)?;
@@ -71,28 +73,59 @@ impl Gpu {
         let gbm = GbmDevice::new(fd.clone())?;
         // Safety: the display is only used from this thread and outlives the renderer through the context.
         let egl = unsafe { EGLDisplay::new(gbm.clone())? };
-        let renderer = unsafe { GlesRenderer::new(EGLContext::new(&egl)?)? };
+        let mut renderer = unsafe { GlesRenderer::new(EGLContext::new(&egl)?)? };
 
         let renderable = Bind::<Dmabuf>::supported_formats(&renderer).unwrap_or_default();
-        let (fourcc, modifier) = accepted
+        let mut candidates: Vec<_> = renderable
             .iter()
-            .filter_map(|&(f, m)| {
-                let format = Format { code: Fourcc::try_from(f).ok()?, modifier: Modifier::from(m) };
-                renderable.contains(&format).then_some((format.code, format.modifier))
-            })
-            // Prefer the alpha-less/opaque-friendly ARGB layout the encoder likes, and tiled over linear.
-            .max_by_key(|&(f, m)| (f == Fourcc::Argb8888, m != Modifier::Linear))
-            .with_context(|| format!("no dmabuf format shared by renderer and encoder; encoder accepts {accepted:x?}"))?;
-        tracing::info!(?fourcc, ?modifier, "render target format");
-
-        let targets = Targets::Dmabuf(swapchain(&gbm, fourcc, modifier, geo.width_px, geo.height_px));
-        Ok(Gpu { device: Some(Device { node, drm: fd, gbm }), renderer, targets, fourcc, modifier, modifier_verified: false })
+            .filter(|format| matches!(format.code, Fourcc::Argb8888 | Fourcc::Xrgb8888) && (!software || format.modifier == Modifier::Linear))
+            .map(|format| (format.code, format.modifier))
+            .collect();
+        candidates.sort_by_key(|&(fourcc, modifier)| {
+            (modifier != Modifier::Linear && modifier != Modifier::Invalid, fourcc == Fourcc::Argb8888, u64::from(modifier))
+        });
+        let mut selected = None;
+        for (fourcc, modifier) in candidates.into_iter().rev() {
+            let attempt = (|| -> Result<_> {
+                let mut targets = swapchain(&gbm, fourcc, modifier, geo.width_px, geo.height_px);
+                let slot = targets.acquire()?.context("no initial render target")?;
+                let mut dmabuf = (*slot).clone();
+                ensure_single_plane(&dmabuf)?;
+                let actual = dmabuf.format().modifier;
+                let sync = {
+                    let mut target = renderer.bind(&mut dmabuf)?;
+                    let size = (geo.width_px as i32, geo.height_px as i32).into();
+                    let mut frame = renderer.render(&mut target, size, Transform::Normal)?;
+                    frame.clear([0.12, 0.12, 0.14, 1.0].into(), &[Rectangle::from_size(size)])?;
+                    frame.finish()?
+                };
+                while sync.wait().is_err() {}
+                let fd = dmabuf.handles().next().context("DMA-buf has no plane")?.as_fd().try_clone_to_owned()?;
+                validate(Frame {
+                    width: geo.width_px, height: geo.height_px, fourcc: fourcc as u32,
+                    pts: Duration::ZERO, seq: 0, refine: false,
+                    buffer: FrameBuffer::Dmabuf {
+                        fd, modifier: u64::from(actual), stride: dmabuf.strides().next().unwrap(), offset: dmabuf.offsets().next().unwrap(),
+                        slot_id: 0, lease: Box::new(slot),
+                    },
+                })?;
+                Ok((Targets::Dmabuf(targets), fourcc, actual, modifier))
+            })();
+            match attempt {
+                Ok(candidate) => { selected = Some(candidate); break; }
+                Err(error) => tracing::debug!(?fourcc, ?modifier, "render target trial: {error:#}"),
+            }
+        }
+        let (targets, fourcc, modifier, allocation_modifier) = selected
+            .context("no packed RGB DMA-buf layout shared by the renderer and encoder")?;
+        tracing::info!(?fourcc, ?modifier, "verified render target format");
+        Ok(Gpu { device: Some(Device { node, drm: fd, gbm }), renderer, targets, fourcc, modifier, allocation_modifier, modifier_verified: false })
     }
 
     /// Targets for a window stream of `width`×`height`.
     pub fn targets(&self, width: u32, height: u32) -> Targets {
         match &self.device {
-            Some(d) => Targets::Dmabuf(swapchain(&d.gbm, self.fourcc, self.modifier, width, height)),
+            Some(d) => Targets::Dmabuf(swapchain(&d.gbm, self.fourcc, self.allocation_modifier, width, height)),
             None => Targets::Texture { texture: None, size: (width as i32, height as i32).into() },
         }
     }
@@ -148,6 +181,12 @@ pub fn read_pixels(renderer: &mut GlesRenderer, fb: &GlesTarget<'_>, size: Size<
         out[y * stride..(y + 1) * stride].copy_from_slice(&data[src * stride..(src + 1) * stride]);
     }
     Ok(out)
+}
+
+/// The core frame handoff describes exactly one packed RGB plane.
+pub(crate) fn ensure_single_plane(dmabuf: &Dmabuf) -> Result<()> {
+    anyhow::ensure!(dmabuf.handles().count() == 1 && dmabuf.strides().count() == 1 && dmabuf.offsets().count() == 1, "encoder requires a single-plane DMA-buf");
+    Ok(())
 }
 
 fn swapchain(gbm: &GbmDevice<DrmDeviceFd>, fourcc: Fourcc, modifier: Modifier, width: u32, height: u32) -> DmabufSwapchain {

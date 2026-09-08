@@ -7,9 +7,8 @@ license.workspace = true
 [dependencies]
 elsewhere-core = { path = "../elsewhere-core" }
 anyhow.workspace = true
-tokio = { workspace = true, features = ["sync", "rt", "macros"] }
+tokio = { workspace = true, features = ["sync", "rt", "macros", "time"] }
 tracing.workspace = true
-gstreamer = { version = "0.25", features = ["v1_24"] }
-gstreamer-app = { version = "0.25", features = ["v1_24"] }
-gstreamer-video = { version = "0.25", features = ["v1_24"] }
-gstreamer-allocators = { version = "0.25", features = ["v1_24"] }
+ffmpeg-next = "9"
+libc = "0.2"
+pipewire = { version = "0.10.1", features = ["v0_3_65"] }

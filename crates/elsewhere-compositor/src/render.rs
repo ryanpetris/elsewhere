@@ -118,15 +118,13 @@ impl State {
         let age = if self.force_full_frame || broadcast_only { 0 } else { age };
 
         if let (false, Target::Slot { dmabuf, .. }) = (self.gpu.modifier_verified, &target) {
-            // The allocator was asked for exactly the negotiated modifier, but GBM can fall back to another
-            // (or an implicit one); the encoder would then copy every frame through system memory, silently.
+            // GBM can return an implicit modifier. Publish the actual layout before importing it.
             self.gpu.modifier_verified = true;
             let got = dmabuf.format().modifier;
             if got == self.gpu.modifier {
                 tracing::debug!(modifier = ?got, "swapchain buffer modifier matches the encoder's");
             } else {
-                // The encoder was told the negotiated modifier and would read these buffers with the wrong
-                // layout. Tell it the real one; if it can't take it, the pipeline fails visibly.
+                // Reopen conversion for the actual layout; unsupported imports fail visibly.
                 tracing::warn!(?got, negotiated = ?self.gpu.modifier, "swapchain buffer modifier is not the negotiated one; rebuilding the encoders for it");
                 self.gpu.modifier = got;
                 for (_, sink) in &mut self.viewer_sinks {
@@ -198,6 +196,7 @@ impl State {
         // of the lease, so the slot is free again when the last of them is done with it; memory is copied
         let buffer: Box<dyn Fn() -> Result<FrameBuffer>> = match target {
             Target::Slot { slot, dmabuf } => {
+                crate::gpu::ensure_single_plane(&dmabuf)?;
                 if let Targets::Dmabuf(s) = &mut self.gpu.targets {
                     s.submitted(&slot);
                 }

@@ -1,5 +1,5 @@
 //! Types shared between the compositor, the encoder and the web server.
-//! Nothing here depends on Smithay or GStreamer.
+//! Shared types independent of rendering and media libraries.
 
 pub mod audio;
 pub mod broadcast;
@@ -438,7 +438,7 @@ pub enum StreamMsg {
     /// A (re)started stream; always followed by a keyframe.
     Info(StreamInfo),
     Frame(EncodedFrame),
-    /// The pipeline died and was dropped; the next frame submitted builds a new one.
+    /// Encoding failed; a keyframe request restarts the worker's encoder.
     Failed,
     /// One 20 ms Opus packet from the clients' audio sink.
     Audio { pts_us: u64, data: Bytes },

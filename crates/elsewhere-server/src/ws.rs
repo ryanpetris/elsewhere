@@ -123,7 +123,7 @@ pub(super) async fn authenticate(socket: &mut WebSocket, app: &App) -> Option<(S
     auth
 }
 
-/// Hello, which picks the codec, before the pipeline exists; five seconds of silence ends the socket.
+/// Hello, which picks the codec, before the encoder exists; five seconds of silence ends the socket.
 async fn hello(socket: &mut WebSocket) -> Option<(u8, u8, Option<Codec>, Preset, EncodingEffort)> {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -158,7 +158,7 @@ async fn send(socket: &mut WebSocket, msg: Bytes) -> bool {
 pub async fn session(mut socket: WebSocket, app: Arc<App>) {
     let Some((token, key)) = authenticate(&mut socket, &app).await else { return };
     let Some((hw, sw, want_codec, preset, effort)) = hello(&mut socket).await else { return };
-    let (tx, mut rx) = mpsc::channel::<StreamMsg>(16);
+    let (tx, mut rx) = mpsc::channel::<StreamMsg>(2);
     let (sink, control) = match (app.sinks)(tx) {
         Ok(x) => x,
         Err(e) => {
@@ -232,8 +232,7 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
                 }
                 Some(StreamMsg::Frame(f)) => {
                     if info.as_ref().is_some_and(|i| i.stream_id == f.stream_id) {
-                        // sent in order, waiting for the socket: the pipeline drops raw frames upstream of the encoder
-                        // while we do, so nothing goes missing between encoder and page (no keyframe dance)
+                        // Sent in reference order; the worker refuses raw input while output is blocked.
                         let (backlog, pressure) = (rx.len(), app.rtc.as_ref().and_then(|hub| hub.pressure(id))); // the channel's drops and queue are congestion too
                         let t = Instant::now();
                         match (&app.rtc, pressure) {
@@ -243,20 +242,20 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
                         }
                         seq = seq.wrapping_add(1);
                         let (dropped, queued) = pressure.unwrap_or((0, 0));
-                        if let Some(q) = auto.frame(backlog + queued, dropped, t.elapsed()) {
+                        if let Some(q) = auto.frame(backlog > 0 || queued >= 2, dropped, t.elapsed()) {
                             app.set_quality(id, q);
                             let Some(state) = app.stream_state(id) else { break Some((UNAUTHORIZED, "token rotated")) };
                             if !send(&mut socket, state).await { break None }
                         }
                     }
                 }
-                // a dead pipeline is dropped and the next frame builds a new one; a rebuild that fails too
+                // a keyframe request restarts a failed encoder; a restart that fails too
                 // ends the session instead of looping, and the page reconnects
                 Some(StreamMsg::Failed) if failed => break None,
                 Some(StreamMsg::Failed) => {
                     failed = true;
                     if let Some(s) = app.viewers.lock().unwrap().sessions.get(&id) {
-                        s.control.request_keyframe(); // drops the dead pipeline, and with it the leases the frame needs
+                        s.control.request_keyframe(); // restarts the failed encoder
                     }
                     let _ = app.commands.send(Command::RequestFullFrame);
                 }
@@ -283,7 +282,7 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
                                 auto = AutoRate::new(preset.quality(app.bitrate_kbps).bitrate_kbps);
                             }
                             if restart {
-                                let _ = app.commands.send(Command::RequestFullFrame); // the new pipeline starts with a frame
+                                let _ = app.commands.send(Command::RequestFullFrame); // supply a full frame for the new encoder
                             }
                             let Some(state) = app.stream_state(id) else { break Some((UNAUTHORIZED, "token rotated")) };
                             if !send(&mut socket, state).await { break None }
@@ -356,7 +355,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
         return close(&mut socket, GONE, "no such window").await;
     }
     let Some((hw, sw, mut want_codec, mut preset, effort)) = hello(&mut socket).await else { return };
-    let (tx, mut rx) = mpsc::channel::<StreamMsg>(16);
+    let (tx, mut rx) = mpsc::channel::<StreamMsg>(2);
     let (sink, control) = match (app.sinks)(tx) {
         Ok(x) => x,
         Err(e) => {
@@ -405,6 +404,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
             msg = rx.recv() => match msg {
                 Some(StreamMsg::Info(i)) => {
                     seq = 0;
+                    failed = false;
                     if !send(&mut socket, protocol::config(&i)).await { break None }
                     info = Some(i);
                     if !send(&mut socket, state(codec, quality, want_codec, preset)).await { break None }
@@ -419,7 +419,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                         }
                         seq = seq.wrapping_add(1);
                         let (dropped, queued) = pressure.unwrap_or((0, 0));
-                        if let Some(q) = auto.frame(backlog + queued, dropped, t.elapsed()) {
+                        if let Some(q) = auto.frame(backlog > 0 || queued >= 2, dropped, t.elapsed()) {
                             quality = q;
                             control.set_quality(q);
                             if !send(&mut socket, state(codec, quality, want_codec, preset)).await { break None }
@@ -466,7 +466,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                             if let Some(c) = &choice.codec {
                                 want_codec = protocol::codec_named(c);
                                 if let Some(picked) = app.pick_codec(want_codec, hw, sw) {
-                                    cmd = (picked != codec).then_some(Command::RequestFullFrame); // the new pipeline starts with a frame
+                                    cmd = (picked != codec).then_some(Command::RequestFullFrame); // supply a full frame for the new encoder
                                     codec = picked;
                                     control.set_codec(codec);
                                 }
@@ -498,6 +498,10 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                             }
                             None
                         }
+                        Some(ClientMsg::Report { delay_ms, dropped }) => {
+                            auto.report(delay_ms, dropped);
+                            None
+                        }
                         Some(_) if key != Key::Control => None, // the viewer token watches
                         Some(ClientMsg::Control(m)) => app.command_for(m).ok(),
                         // window-relative, resolved against the live geometry on the compositor thread
@@ -509,10 +513,6 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                             None
                         }
                         Some(ClientMsg::Touch { .. }) => None, // tab coordinates aren't the desktop's; the page sends fingers as a pointer here
-                        Some(ClientMsg::Report { delay_ms, dropped }) => {
-                            auto.report(delay_ms, dropped);
-                            None
-                        }
                         Some(m) => input_command(m),
                         None => None,
                     };
@@ -731,7 +731,7 @@ impl App {
                         Ok(()) => s.cam_wait_key = false,
                         Err(mpsc::error::TrySendError::Full(_)) => s.cam_wait_key = true,
                         Err(mpsc::error::TrySendError::Closed(_)) => {
-                            // the pipeline died (the log says why); nobody gets the button any more, this
+                            // the webcam worker failed; nobody gets the button any more, this
                             // session hears why its camera does nothing
                             if !self.cam_dead.swap(true, std::sync::atomic::Ordering::Relaxed) {
                                 let _ = s.events.try_send(protocol::notice("the webcam device stopped taking frames; see the server's log"));
@@ -781,8 +781,6 @@ impl App {
 
     /// Viewers' encoders scale the output to their windows. The controller receives native frames
     /// and the browser scales the canvas to fit, preserving exact logical input coordinates.
-    // ponytail: set_size takes the sink's lock, which the compositor holds while it builds a pipeline
-    // (~100 ms), under the viewers lock; hand the controls out as Arcs and call past the lock if that shows
     fn retarget(&self, v: &Viewers) {
         for (id, s) in &v.sessions {
             if let Some(size) = s.size {
@@ -841,7 +839,7 @@ fn bit(c: Codec) -> u8 {
 }
 
 /// The rate controller: a viewer's quality is a ceiling, and the bitrate lives under it by what the link
-/// and the browser show. A second with a third of its frames congested (two waiting behind one, a channel
+/// and the browser show. A second with a third of its frames congested (encoder or RTC queue pressure, a channel
 /// drop or a channel queue, a slow send), a pong 200 ms over the link's best, or the page reporting frames
 /// a hundred milliseconds later than they were or its decoder dropping some, halves the bitrate, which then
 /// holds two seconds; five clean seconds raise it by a quarter. Every change is a keyframe with the VA
@@ -865,10 +863,10 @@ impl AutoRate {
         AutoRate { ceiling, quality: elsewhere_core::Quality { bitrate_kbps: ceiling, max_fps: if ceiling < 3000 { 30 } else { 0 } }, frames: 0, congested: 0, slow: 0, best_rtt: Duration::MAX, clean_secs: 0, hold: 0, window: Instant::now() }
     }
 
-    /// One frame went out; `backlog` frames were waiting behind it and the send took `took`.
-    fn frame(&mut self, backlog: usize, dropped: u32, took: Duration) -> Option<elsewhere_core::Quality> {
+    /// One frame went out; `queued` reports encoder or RTC pressure and the send took `took`.
+    fn frame(&mut self, queued: bool, dropped: u32, took: Duration) -> Option<elsewhere_core::Quality> {
         self.frames += 1;
-        if backlog >= 2 || dropped > 0 || took > Duration::from_millis(33) {
+        if queued || dropped > 0 || took > Duration::from_millis(33) {
             self.congested += 1;
         }
         self.evaluate()
@@ -947,7 +945,7 @@ mod tests {
             if i == n - 1 {
                 a.window = Instant::now() - Duration::from_secs(2); // the window is over with this frame
             }
-            changed = a.frame(if i < bad { 2 } else { 0 }, 0, Duration::ZERO).or(changed);
+            changed = a.frame(i < bad, 0, Duration::ZERO).or(changed);
         }
         changed
     }

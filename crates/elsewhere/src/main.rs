@@ -14,6 +14,8 @@ struct Cli {
     command: Option<Operation>,
     #[arg(long, hide = true)]
     audio_worker: bool,
+    #[arg(long, hide = true)]
+    broadcast_output_worker: bool,
     /// Address to serve the viewer on.
     #[arg(long, default_value = "0.0.0.0:8443")]
     listen: SocketAddr,
@@ -113,6 +115,7 @@ fn parse_screen_size(value: &str) -> std::result::Result<(u32, u32), String> {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    if cli.broadcast_output_worker { return elsewhere_stream::broadcast::output_worker(); }
     if let Some(Operation::Token { viewer }) = cli.command {
         let path = elsewhere_server::Config::default_data_dir()?.join(if viewer { "viewer-token" } else { "token" });
         let token = std::fs::read_to_string(&path).with_context(|| format!("read saved token from {}; start Elsewhere once with this configuration to create tokens", path.display()))?;
@@ -157,14 +160,9 @@ fn main() -> Result<()> {
     if render_node.is_none() {
         tracing::info!("no GPU ({}): rendering in software, encoding in software", cli.render_node.display());
     }
-    let va = elsewhere_stream::va_prefix(&cli.render_node);
     let software = cli.software_encoding || render_node.is_none();
-    let codecs = elsewhere_stream::codecs(&va, software);
-    if software {
-        anyhow::ensure!(!codecs.is_empty(), "no software video encoder found (GStreamer's vpx, x264, x265 or svtav1 plugins)");
-    } else {
-        anyhow::ensure!(!codecs.is_empty(), "no VA-API video encoder found for {} (gst-plugin-va and a driver for this GPU are needed; --software-encoding encodes on the CPU)", cli.render_node.display());
-    }
+    let encoders = elsewhere_stream::Encoders::probe(if software { None } else { render_node.as_deref() })?;
+    let codecs = encoders.codecs();
     anyhow::ensure!(codec.is_none_or(|c| codecs.contains(&c)), "no {codec:?} encoder here; available: {codecs:?}");
     tracing::info!(?codecs, software, "video encoders");
     let (audio_tx, audio_rx) = mpsc::channel(16);
@@ -181,7 +179,7 @@ fn main() -> Result<()> {
     };
     if stopping.load(std::sync::atomic::Ordering::Relaxed) { return Ok(()); }
 
-    let mut cam = None; // the browser's webcam: its playback pipeline and the frames' way in
+    let mut cam = None; // the browser's webcam: its playback worker and the frames' way in
     if let Some(device) = &cli.webcam {
         let (cam_tx, cam_rx) = mpsc::channel(16);
         match elsewhere_stream::video_sink(device, cam_rx) {
@@ -193,13 +191,6 @@ fn main() -> Result<()> {
         }
     }
 
-    // one encoder per viewer and per window stream, made when the session starts
-    let bitrate = cli.bitrate;
-    let va_for_sinks = va.clone();
-    let sinks: elsewhere_server::SinkFactory = Box::new(move |tx| {
-        let sink = elsewhere_stream::GstSink::new(bitrate, &va_for_sinks, software, tx)?;
-        Ok((Box::new(sink.clone()) as Box<dyn FrameSink>, Box::new(sink.control()) as Box<dyn StreamControl>))
-    });
     let broadcast_socket = audio.as_ref().and_then(|s| s.client_env().into_iter().find(|(k, _)| k == "PIPEWIRE_REMOTE").map(|(_, v)| std::path::PathBuf::from(v)));
     let capabilities_socket = broadcast_socket.clone();
     let broadcast = elsewhere_server::broadcast::Backend {
@@ -215,8 +206,11 @@ fn main() -> Result<()> {
         // GTK always publishes its tree; Firefox and Qt only when asked. (Chromium needs --force-renderer-accessibility.)
         exec_env.extend([("GNOME_ACCESSIBILITY", "1"), ("QT_LINUX_ACCESSIBILITY_ALWAYS_ON", "1")].map(|(k, v)| (k.to_string(), v.to_string())));
     }
-    let accepted_formats = elsewhere_stream::accepted_formats(&va, software);
-    tracing::info!(?accepted_formats, "render target formats the encoders take (fourcc, modifier)");
+    let probe_node = render_node.clone();
+    let validate_format = Box::new(move |frame| {
+        if software { elsewhere_stream::validate_software_frame(frame) }
+        else { elsewhere_stream::gpu::probe(probe_node.as_deref().context("missing encoder render node")?, frame) }
+    });
     let data_dir = elsewhere_server::Config::default_data_dir()?;
     let files_dir = std::path::absolute(cli.files_dir.unwrap_or_else(elsewhere_server::files::default_dir))?;
     let mut initial = elsewhere_core::OutputGeometry {
@@ -237,11 +231,22 @@ fn main() -> Result<()> {
             exec: cli.exec.clone(),
             exec_env,
             kiosk: cli.kiosk,
-            accepted_formats,
+            software_encoding: software,
+            validate_format,
         },
         events_tx,
     )?;
     tracing::info!(socket = %socket_name, x11_display = ?x11_display.map(|d| format!(":{d}")), "compositor ready");
+    let bitrate = cli.bitrate;
+    let redraw_commands = commands.clone();
+    let redraw: std::sync::Arc<dyn Fn() + Send + Sync> = std::sync::Arc::new(move || {
+        let _ = redraw_commands.send(elsewhere_core::Command::RequestFullFrame);
+    });
+    let sinks: elsewhere_server::SinkFactory = Box::new(move |tx| {
+        let sink = elsewhere_stream::FfmpegSink::new(bitrate, encoders.clone(), tx, redraw.clone())?;
+        let control = sink.control();
+        Ok((Box::new(sink) as Box<dyn FrameSink>, Box::new(control) as Box<dyn StreamControl>))
+    });
     // the compositor ends on Quit (the API, the viewer's power menu) or when it panics
     let (exited_tx, mut exited_rx) = tokio::sync::oneshot::channel();
     std::thread::spawn(move || {
@@ -257,7 +262,7 @@ fn main() -> Result<()> {
     });
     let server = elsewhere_server::Config { listen: cli.listen, tls: !cli.no_tls, url_prefix: cli.url_prefix, proxy_strips_prefix: cli.proxy_strips_prefix, codec, codecs, software, bitrate_kbps: cli.bitrate, initial, fixed_size: cli.screen_size.is_some(), data_dir, elements: cli.elements, files_dir, version: env!("ELSEWHERE_VERSION"), sinks, broadcast, audio_available: audio.is_some(), mixer: audio.as_mut().and_then(|session| session.mixer.take()), mic: audio.as_ref().map(|session| session.mic.clone()), cam: cam.as_ref().map(|(_, tx)| tx.clone()), rtc };
     // Ctrl+C and SIGTERM (`docker stop`, a service manager) return here so the audio devices get unloaded
-    // and the pipelines stopped.
+    // and the media workers stopped.
     let result = runtime.block_on(async {
         let mut health = tokio::time::interval(std::time::Duration::from_millis(100));
         let server = elsewhere_server::run(server, commands.clone(), audio_rx, events_rx);

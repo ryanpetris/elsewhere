@@ -89,8 +89,10 @@ pub struct Config {
     pub exec_env: Vec<(String, String)>,
     /// Every new window is fullscreened (for running a nested desktop).
     pub kiosk: bool,
-    /// `(fourcc, modifier)` pairs the encoders import zero-copy: what the output is rendered into.
-    pub accepted_formats: Vec<(u32, u64)>,
+    /// Software encoders need linear render targets they can map.
+    pub software_encoding: bool,
+    /// Verify a real renderer allocation through the selected encoder's conversion path.
+    pub validate_format: Box<dyn Fn(elsewhere_core::Frame) -> Result<()> + Send>,
 }
 
 pub struct CompositorHandle {
@@ -263,7 +265,7 @@ impl State {
         handle.insert_source(pinged, |_, _, state| state.drag_settle())?;
         let dh = display.handle();
 
-        let gpu = gpu::Gpu::new(cfg.render_node.as_deref(), &cfg.initial, &cfg.accepted_formats)?;
+        let gpu = gpu::Gpu::new(cfg.render_node.as_deref(), &cfg.initial, cfg.software_encoding, &*cfg.validate_format)?;
 
         let output = Output::new(
             "ELSEWHERE-1".into(),
@@ -638,7 +640,7 @@ impl State {
     }
 
     pub fn stop_viewer_stream(&mut self, key: u64) {
-        self.viewer_sinks.retain(|(k, _)| *k != key); // dropping the sink stops its pipeline
+        self.viewer_sinks.retain(|(k, _)| *k != key); // dropping the sink stops its worker
     }
 
     /// Re-arrange the panels; re-fit the windows if that moved the work area.

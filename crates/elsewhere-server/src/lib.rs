@@ -45,7 +45,7 @@ use tokio::sync::mpsc;
 /// `None` = automatic: the first of the available codecs (best first) the browser decodes in hardware, else at all.
 pub type CodecPolicy = Option<Codec>;
 /// Makes an encoder for one viewer or window stream: the sink the compositor feeds and a control
-/// handle that must not keep the pipeline alive (the stream ends when the compositor drops the sink).
+/// handle that must not keep the encoder worker alive (the stream ends when the compositor drops the sink).
 pub type SinkFactory = Box<dyn Fn(mpsc::Sender<StreamMsg>) -> Result<(Box<dyn FrameSink>, Box<dyn StreamControl>)> + Send + Sync>;
 
 /// Which token a request came with.
@@ -127,7 +127,7 @@ pub struct App {
     mic: Option<mpsc::Sender<Bytes>>,
     cam: Option<mpsc::Sender<Bytes>>,
     rtc: Option<rtc::Hub>,
-    /// The webcam pipeline died (the device refused the frames; the log says why): the feature is withdrawn.
+    /// The webcam worker failed; withdraw the feature.
     cam_dead: std::sync::atomic::AtomicBool,
     /// Event senders of the window-stream sessions (cursor, clipboard, window list go to them too).
     window_viewers: Mutex<HashMap<u64, mpsc::Sender<Bytes>>>,

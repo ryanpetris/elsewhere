@@ -207,7 +207,7 @@ mod tests {
     }
 }
 
-// Field order stops the pipeline process before its devices and services.
+// Field order stops the media process before its devices and services.
 pub struct Session {
     worker: Worker,
     services: Services,
@@ -314,10 +314,10 @@ impl Session {
             worker_alive(&mut worker, stopping)?;
             match ready_rx.try_recv() {
                 Ok(()) => break,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => bail!("audio pipeline initialization failed; see audio worker error"),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => bail!("audio worker initialization failed; see audio worker error"),
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
             }
-            ensure!(Instant::now() < deadline, "native audio pipeline startup timed out");
+            ensure!(Instant::now() < deadline, "native audio worker startup timed out");
             std::thread::sleep(Duration::from_millis(10));
         }
         Ok(Self { worker, services, mic, mixer: Some(elsewhere_server::Mixer { commands: mixer_commands, audience, epoch, state, levels, errors: Some(errors) }) })
@@ -325,7 +325,7 @@ impl Session {
 
     pub fn check(&mut self) -> Result<()> {
         self.services.check()?;
-        ensure!(self.worker.child.try_wait()?.is_none(), "audio pipeline process exited");
+        ensure!(self.worker.child.try_wait()?.is_none(), "audio media process exited");
         ensure!(!self.mic.is_closed(), "microphone transport ended");
         ensure!(!self.worker.reader.as_ref().is_some_and(|reader| reader.is_finished()), "audio output transport ended");
         Ok(())
@@ -336,7 +336,7 @@ impl Session {
 
 fn worker_alive(worker: &mut Worker, stopping: &AtomicBool) -> Result<()> {
     ensure!(!stopping.load(Ordering::Relaxed), "audio startup cancelled");
-    ensure!(worker.child.try_wait()?.is_none(), "audio pipeline process exited during startup");
+    ensure!(worker.child.try_wait()?.is_none(), "audio media process exited during startup");
     Ok(())
 }
 
@@ -463,7 +463,7 @@ pub fn worker() -> Result<()> {
                     if ended.load(Ordering::Relaxed) { return Ok(()); }
                     output.check()?;
                     microphone.check()?;
-                    ensure!(!mic_health.is_closed(), "microphone pipeline ended");
+                    ensure!(!mic_health.is_closed(), "microphone worker ended");
                     if ready && !mixer_failed && mixer_thread.thread.as_ref().is_some_and(|thread| thread.is_finished()) {
                         mixer_failed = true;
                         write_mixer(&mut stdout, &elsewhere_core::audio::Event::State(elsewhere_core::audio::Snapshot { error: Some("Session mixer stopped.".into()), ..Default::default() }))?;
