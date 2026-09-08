@@ -483,8 +483,15 @@ try {
   });
   await p.waitForFunction(() => elsewhere.store.get().notice?.text.startsWith(
                               '1 file could not be saved'));
-  await p.evaluate(cmd => elsewhere.spawn(cmd),
-                   'stdbuf -oL wev > ' + root + '/wev.log');
+  inputLog = await open(root + '/wev.log', 'w');
+  inputClient = spawn('stdbuf', ['-oL', 'wev'], {
+    env : {...process.env, XDG_RUNTIME_DIR : root + '/runtime', WAYLAND_DISPLAY : 'wayland-files-check'},
+    stdio : ['ignore', inputLog.fd, inputLog.fd]
+  });
+  await new Promise((resolve, reject) => {
+    inputClient.once('spawn', resolve);
+    inputClient.once('error', reject);
+  });
   await p.waitForFunction(
       () => elsewhere.store.get().windows.some(w => w.app_id === 'wev'));
   await p.evaluate(
@@ -529,7 +536,13 @@ try {
   console.log(
       'Two-client destinations, late batches, local mutation refresh, no reopen/focus refresh, and stale responses passed');
 } finally {
-  inputClient?.kill('SIGTERM');
+  if (inputClient?.pid && inputClient.exitCode === null && inputClient.signalCode === null) {
+    const exited = new Promise(resolve => inputClient.once('exit', resolve));
+    inputClient.kill('SIGTERM');
+    const timeout = setTimeout(() => inputClient.kill('SIGKILL'), 2000);
+    await exited;
+    clearTimeout(timeout);
+  }
   await inputLog?.close();
   await browser?.close();
   server.kill('SIGTERM');
