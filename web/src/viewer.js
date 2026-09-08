@@ -97,7 +97,12 @@ export function createViewer() {
   }
   function paintNow(frame) {
     const pts = frame.timestamp; // before draw() closes the frame
-    try { draw(frame); frames++; windowFrames++; } catch (e) { console.error(e); frame.close(); }
+    try {
+      // Keep the previous picture until its replacement can be painted in this turn.
+      if (canvas.width !== frame.displayWidth) canvas.width = frame.displayWidth;
+      if (canvas.height !== frame.displayHeight) canvas.height = frame.displayHeight;
+      draw(frame); frames++; windowFrames++;
+    } catch (e) { console.error(e); frame.close(); }
     if (lastInput) { latencyMs = performance.now() - lastInput; lastInput = 0; } // input -> next painted frame
     if (!state().statsOn) { inflight.clear(); return; }
     const t = performance.now(), rec = inflight.get(pts);
@@ -355,8 +360,6 @@ export function createViewer() {
         videoSeq = -1; // a new stream counts from 0
         delayBase = []; delaySec = Infinity; lastPts = 0; // measure the new stream against a fresh lateness baseline
         if (pendingFrame) { pendingFrame.close(); pendingFrame = null; }
-        canvas.width = stream.width;
-        canvas.height = stream.height;
         fitCanvas();
         resync();
         store.set({ stream, status: 'connected' });

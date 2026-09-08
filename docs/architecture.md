@@ -222,6 +222,8 @@ configurations for the same stream on that connection leave the browser decoder 
 WebSocket video while RTC is active; a new WebSocket configuration closes that RTC attempt before
 changing the decoder. Bytes accepted by SCTP remain subject to the ordered data channel's
 retransmission behavior.
+The viewer keeps the last painted picture while waiting for a new stream's keyframe. Canvas dimensions
+change only when the next decoded picture is ready to paint, so decoder restarts leave the picture visible.
 Each peer admits one 16 KiB fragment at a time, with spacing derived from its current stream target.
 The rate allows 25% headroom and charges 10% for wire overhead. Idle time accumulates no send credit;
 keyframes, encoder restarts and target changes preserve the next fragment's existing deadline.
