@@ -34,10 +34,10 @@ impl Default for Sessions {
 }
 
 impl Sessions {
-    fn acquire(self: &Arc<Self>, id: &str, key: &Key) -> Result<Lease, ApiError> {
+    fn acquire(self: &Arc<Self>, id: &str, key: &Key) -> Result<Lease, StatusCode> {
         let mut owners = self.owners.lock().unwrap();
-        let owner = owners.get_mut(id).ok_or(ApiError::Forbidden)?;
-        if owner.key.metadata.id != key.metadata.id || !owner.key.live() { return Err(ApiError::Forbidden); }
+        let owner = owners.get_mut(id).ok_or(StatusCode::NOT_FOUND)?;
+        if owner.key.metadata.id != key.metadata.id || !owner.key.live() { return Err(StatusCode::FORBIDDEN); }
         owner.active += 1;
         Ok(Lease { sessions: self.clone(), id: id.into() })
     }
@@ -60,13 +60,18 @@ impl Sessions {
     }
 
     async fn reap(&self, now: Instant) {
-        let _initializing = self.initializing.write().await;
-        let mut sessions = self.manager.sessions.write().await;
-        let mut owners = self.owners.lock().unwrap();
-        owners.retain(|id, owner| sessions.contains_key(id.as_str()) && owner.key.live()
-            && (owner.active > 0 || now.saturating_duration_since(owner.idle_since) < IDLE_TIMEOUT));
-        // Dropping the last handle closes the worker's event channel, releasing its transport and caches.
-        sessions.retain(|id, _| owners.contains_key(id.as_ref()));
+        let handles: Vec<_> = {
+            let _initializing = self.initializing.write().await;
+            let mut sessions = self.manager.sessions.write().await;
+            let mut owners = self.owners.lock().unwrap();
+            owners.retain(|id, owner| sessions.contains_key(id.as_str()) && owner.key.live()
+                && (owner.active > 0 || now.saturating_duration_since(owner.idle_since) < IDLE_TIMEOUT));
+            sessions.extract_if(|id, _| !owners.contains_key(id.as_ref())).map(|(_, handle)| handle).collect()
+        };
+        // Normal expiry closes gracefully. If a worker stalls, dropping its handle closes the event channel.
+        let _ = tokio::time::timeout(Duration::from_secs(1), async {
+            for handle in &handles { let _ = handle.close().await; }
+        }).await;
     }
 }
 
@@ -88,15 +93,21 @@ impl Drop for Lease {
 pub(crate) async fn bind(State(sessions): State<Arc<Sessions>>, Extension(key): Extension<Key>, request: Request, next: Next) -> Response {
     let id = request.headers().get("mcp-session-id").and_then(|h| h.to_str().ok()).map(str::to_owned);
     let deleting = request.method() == Method::DELETE;
-    let (response, lease) = if let Some(id) = id {
-        let lease = match sessions.acquire(&id, &key) {
-            Ok(lease) => lease,
+    let lease = if let Some(id) = &id {
+        match sessions.acquire(id, &key) {
+            Ok(lease) => Some(lease),
             Err(error) => return error.into_response(),
-        };
+        }
+    } else { None };
+    let (request, initializing) = match super::validate_capture_body(request).await {
+        Ok(validated) => validated,
+        Err(response) => return response,
+    };
+    let (response, lease) = if let Some(id) = id {
         let response = next.run(request).await;
         if deleting && response.status().is_success() { sessions.owners.lock().unwrap().remove(&id); }
-        (response, Some(lease))
-    } else {
+        (response, lease)
+    } else if initializing {
         let _initializing = sessions.initializing.read().await;
         let response = match tokio::time::timeout(INIT_TIMEOUT, next.run(request)).await {
             Ok(response) => response,
@@ -109,6 +120,8 @@ pub(crate) async fn bind(State(sessions): State<Arc<Sessions>>, Extension(key): 
             }
         } else { None };
         (response, lease)
+    } else {
+        return next.run(request).await;
     };
     let (parts, body) = response.into_parts();
     let stream = futures_util::stream::unfold((body.into_data_stream(), lease), |(mut body, lease)| async move {
@@ -294,7 +307,7 @@ mod tests {
         sessions.reap(Instant::now()).await;
         assert!(sessions.manager.sessions.read().await.is_empty());
         assert!(sessions.owners.lock().unwrap().is_empty());
-        assert_eq!(router.oneshot(resume(&owner)).await.unwrap().status(), StatusCode::FORBIDDEN);
+        assert_eq!(router.oneshot(resume(&owner)).await.unwrap().status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test(start_paused = true)]
@@ -371,5 +384,40 @@ mod tests {
         drop(response);
         assert!(sessions.manager.sessions.read().await.is_empty());
         assert!(sessions.owners.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn sessionless_operations_do_not_block_cleanup_or_take_the_initialization_deadline() {
+        let sessions = Arc::new(Sessions::default());
+        let (started, mut ready) = tokio::sync::mpsc::unbounded_channel();
+        let router = Router::new().fallback(move || {
+            let started = started.clone();
+            async move { started.send(()).unwrap(); std::future::pending::<Response>().await }
+        }).layer(middleware::from_fn_with_state(sessions.clone(), bind));
+        let task = tokio::spawn(router.oneshot(request(&key(), None, Method::POST,
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)));
+        ready.recv().await.unwrap();
+        assert!(sessions.initializing.try_write().is_ok());
+        sessions.reap(Instant::now()).await;
+        tokio::time::advance(INIT_TIMEOUT + Duration::from_secs(1)).await;
+        assert!(!task.is_finished());
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn a_dead_owner_cannot_pin_an_active_session() {
+        let sessions = Arc::new(Sessions::default());
+        let owner = key();
+        let (id, _transport) = sessions.manager.create_session().await.unwrap();
+        let lease = sessions.register(&id, owner.clone()).unwrap();
+        let mut expired = owner.metadata.clone();
+        expired.expires_at_ms = Some(0);
+        sessions.owners.lock().unwrap().get_mut(id.as_ref()).unwrap().key = Arc::new(crate::auth::Access::new(expired));
+        assert!(matches!(sessions.acquire(&id, &owner), Err(StatusCode::FORBIDDEN)));
+        sessions.reap(Instant::now()).await;
+        assert!(sessions.manager.sessions.read().await.is_empty());
+        assert!(sessions.owners.lock().unwrap().is_empty());
+        drop(lease);
     }
 }

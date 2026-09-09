@@ -163,7 +163,7 @@ with tempfile.TemporaryDirectory(prefix='elsewhere-tokens-') as directory:
             assert b'"jsonrpc"' not in stream.read()
             stream_connection.close()
             connection, response = mcp(admin, session=session, method='GET', event='0')
-            assert response.status == 403
+            assert response.status == 404
             response.read()
             connection.close()
             assert request('/api/me', victim['token'])[0] == 401

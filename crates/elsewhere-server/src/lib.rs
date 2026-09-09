@@ -319,7 +319,7 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
                 .route("/api/clipboard/state", get(api_clipboard_state))
                 .route("/api/clipboard/files", post(api_clipboard_files))
                 .route("/api/clipboard/files/{index}", get(api_clipboard_file))
-                .nest("/mcp", Router::new().fallback_service(mcp_service(app.clone())).layer(middleware::from_fn(mcp::validate_capture_body)).layer(middleware::from_fn_with_state(app.mcp_sessions.clone(), mcp::sessions::bind)))
+                .nest("/mcp", Router::new().fallback_service(mcp_service(app.clone())).layer(middleware::from_fn_with_state(app.mcp_sessions.clone(), mcp::sessions::bind)))
                 .layer(middleware::from_fn_with_state(app.clone(), bearer)),
         )
         .route("/skill/SKILL.md", get(|| async { markdown(mcp::SKILL) }))

@@ -31,13 +31,13 @@ fn duplicate_arguments<T: serde::de::DeserializeOwned>(raw: &str) -> bool {
 }
 
 // MCP uses single requests with object parameters; revisit this guard if rmcp adds batches.
-pub async fn validate_capture_body(request: axum::extract::Request, next: axum::middleware::Next) -> axum::response::Response {
+pub(super) async fn validate_capture_body(request: axum::extract::Request) -> Result<(axum::extract::Request, bool), axum::response::Response> {
     use axum::response::IntoResponse;
-    if request.method() != axum::http::Method::POST { return next.run(request).await; }
+    if request.method() != axum::http::Method::POST { return Ok((request, false)); }
     let (parts, body) = request.into_parts();
     let bytes = match axum::body::to_bytes(body, 4 << 20).await {
         Ok(bytes) => bytes,
-        Err(_) => return ApiError::TooLarge.into_response(),
+        Err(_) => return Err(ApiError::TooLarge.into_response()),
     };
     #[derive(Deserialize)]
     struct Call { method: Option<String>, params: Option<Args> }
@@ -45,8 +45,9 @@ pub async fn validate_capture_body(request: axum::extract::Request, next: axum::
     struct Args { name: Option<String>, arguments: Option<Box<serde_json::value::RawValue>> }
     let call = match serde_json::from_slice::<Call>(&bytes) {
         Ok(call) => call,
-        Err(_) => return ApiError::InvalidSize("duplicate or malformed MCP request fields").into_response(),
+        Err(_) => return Err(ApiError::InvalidSize("duplicate or malformed MCP request fields").into_response()),
     };
+    let initializing = call.method.as_deref() == Some("initialize");
     if let Call { method, params: Some(args) } = call
         && method.as_deref() == Some("tools/call")
         && let Some(raw) = args.arguments
@@ -56,9 +57,9 @@ pub async fn validate_capture_body(request: axum::extract::Request, next: axum::
             Some("snapshot") => duplicate_arguments::<SnapshotArgs>(raw.get()),
             _ => false,
         };
-        if duplicate { return ApiError::InvalidSize("duplicate screenshot sizing arguments").into_response(); }
+        if duplicate { return Err(ApiError::InvalidSize("duplicate screenshot sizing arguments").into_response()); }
     }
-    next.run(axum::extract::Request::from_parts(parts, axum::body::Body::from(bytes))).await
+    Ok((axum::extract::Request::from_parts(parts, axum::body::Body::from(bytes)), initializing))
 }
 
 #[derive(Clone)]
