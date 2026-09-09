@@ -25,7 +25,7 @@ for (const fixed of [true, false]) {
   await mkdir(root + '/runtime', { mode: 0o700 });
   const log = await open(root + '/server.log', 'w');
   const origin = 'http://127.0.0.1:8093';
-  const server = spawn(binary, ['--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--listen', '127.0.0.1:8093', '--socket-name', 'wayland-fixed-size', ...(fixed ? ['--screen-size', '1280x720'] : [])], {
+  const server = spawn(binary, ['--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codecs', 'vp8', '--listen', '127.0.0.1:8093', '--socket-name', 'wayland-fixed-size', ...(fixed ? ['--screen-size', '1280x720'] : [])], {
     env: { ...process.env, HOME: root, XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime' }, stdio: ['ignore', log.fd, log.fd],
   });
   let browser;

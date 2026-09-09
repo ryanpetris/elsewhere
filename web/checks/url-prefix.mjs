@@ -36,7 +36,7 @@ try {
     await mkdir(dir + '/runtime', { mode: 0o700 });
     await mkdir(dir + '/files');
     await start(process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere', [
-      '--no-audio', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--screen-size', '640x480',
+      '--no-audio', '--no-tls', '--render-node', 'none', '--codecs', 'vp8', '--screen-size', '640x480',
       '--listen', `127.0.0.1:${instance.port}`, '--socket-name', 'wayland-prefix', '--files-dir', dir + '/files',
       '--rtc-addr', '127.0.0.1', '--rtc-port', String(instance.udp),
       ...(instance.prefix ? ['--url-prefix', instance.prefix + '/'] : []),

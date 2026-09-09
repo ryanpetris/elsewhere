@@ -10,7 +10,7 @@ const root = await mkdtemp(tmpdir() + '/elsewhere-sizing-');
 await mkdir(root + '/runtime', { mode: 0o700 });
 const log = await open(root + '/server.log', 'w');
 const origin = 'http://127.0.0.1:8093';
-const server = spawn((process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere'), ['--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--listen', '127.0.0.1:8093', '--socket-name', 'wayland-sizing'], {
+const server = spawn((process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere'), ['--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codecs', 'vp8', '--listen', '127.0.0.1:8093', '--socket-name', 'wayland-sizing'], {
   env: { ...process.env, HOME: root, XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime', RUST_LOG: 'elsewhere_server::api=debug' }, stdio: ['ignore', log.fd, log.fd],
 });
 const wait = async fn => {

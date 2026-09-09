@@ -42,7 +42,7 @@ const origin = 'http://127.0.0.1:8094';
 const server =
     spawn((process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere'),
           [
-            '--no-rtc', '--no-tls', '--render-node', 'none', '--codec', 'vp8',
+            '--no-rtc', '--no-tls', '--render-node', 'none', '--codecs', 'vp8',
             '--listen', '127.0.0.1:8094', '--socket-name', 'wayland-files-check'
           ],
           {

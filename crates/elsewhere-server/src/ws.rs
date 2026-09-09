@@ -7,7 +7,7 @@ use std::{
 };
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
-use elsewhere_core::{AxisSource, Bytes, Codec, Command, ControlMsg, ControlOp, EncodingEffort, Event, InputMsg, OutputGeometry, StreamMsg, TouchKind};
+use elsewhere_core::{AxisSource, Bytes, Codec, Command, ControlMsg, ControlOp, EncodingEffort, Event, InputMsg, OutputGeometry, StreamControl, StreamMsg, TouchKind};
 use tokio::sync::mpsc;
 
 use crate::{apps, auth, tokens::Permission as P, App, Key, ViewerSession, Viewers, api, protocol::{self, ClientMsg, Preset, Role}};
@@ -16,6 +16,61 @@ use crate::{apps, auth, tokens::Permission as P, App, Key, ViewerSession, Viewer
 const UNAUTHORIZED: u16 = 4001;
 /// A stream that can't (re)start: no such window, the window closed, no encoder could be made.
 const GONE: u16 = 4003;
+
+/// One viewer's ordered candidates. Failures survive encoder reopens until an attempt has
+/// produced 120 frames over at least two seconds; an explicit preference list starts over.
+pub(crate) struct CodecSelection {
+    candidates: Vec<Codec>,
+    index: usize,
+    failures: u8,
+    frames: u32,
+    since: Option<Instant>,
+    frame_epoch: Option<u64>,
+    status: &'static str,
+}
+impl CodecSelection {
+    fn new(preferences: &[Codec], supported: &[Codec], control: &dyn StreamControl) -> Self {
+        let mut candidates = Vec::new();
+        for &codec in preferences {
+            if supported.contains(&codec) && !candidates.contains(&codec) { candidates.push(codec); }
+        }
+        let selection = Self { candidates, index: 0, failures: 0, frames: 0, since: None, frame_epoch: None, status: "starting" };
+        if let Some(codec) = selection.codec() { control.set_codec(codec); } else { control.pause(); }
+        selection
+    }
+    fn codec(&self) -> Option<Codec> { self.candidates.get(self.index).copied() }
+    fn accepts(&self, epoch: u64, control: &dyn StreamControl) -> bool {
+        self.codec().is_some() && epoch == control.epoch()
+    }
+    fn failed(&mut self, control: &dyn StreamControl) {
+        self.failures += 1;
+        self.frames = 0;
+        self.since = None;
+        self.frame_epoch = None;
+        self.status = "retrying";
+        if self.failures >= 2 {
+            self.index += 1;
+            self.failures = 0;
+            self.status = "switching";
+        }
+        if let Some(codec) = self.codec() { control.set_codec(codec); } else { control.pause(); }
+    }
+    fn frame(&mut self, epoch: u64, now: Instant) {
+        if self.frame_epoch != Some(epoch) {
+            self.frame_epoch = Some(epoch);
+            self.frames = 0;
+            self.since = Some(now);
+        }
+        self.frames = self.frames.saturating_add(1);
+        if self.frames >= 120 && self.since.is_some_and(|since| now.duration_since(since) >= Duration::from_secs(2)) {
+            self.failures = 0;
+        }
+    }
+    fn state(&self, app: &App, quality: elsewhere_core::Quality, preset: Preset, control: &dyn StreamControl) -> Bytes {
+        protocol::stream_state(self.codec(), &app.codecs, !app.software,
+            if self.codec().is_none() { "failed" } else { self.status }, control.epoch(), quality, preset, app.bitrate_kbps, control.effort())
+    }
+}
 
 /// The clients' Opus packets to every viewer; a dropped packet is a 20 ms glitch.
 pub async fn distribute_audio(app: Arc<App>, mut rx: mpsc::Receiver<StreamMsg>) {
@@ -131,13 +186,13 @@ pub(super) async fn authenticate(socket: &mut WebSocket, app: &App) -> Option<Ke
 }
 
 /// Hello, which picks the codec, before the encoder exists; five seconds of silence ends the socket.
-async fn hello(socket: &mut WebSocket, key: &Key) -> Option<(u8, u8, Option<Codec>, Preset, EncodingEffort)> {
+async fn hello(socket: &mut WebSocket, key: &Key) -> Option<(Vec<Codec>, Preset, EncodingEffort)> {
     tokio::select! { biased; _ = key.ended() => None, result = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match socket.recv().await? {
                 Ok(Message::Binary(b)) => {
-                    if let Some(ClientMsg::Hello { hw, sw, codec, quality, effort }) = protocol::decode(&b) {
-                        return Some((hw, sw, codec, quality, effort));
+                    if let Some(ClientMsg::Hello { codecs, quality, effort }) = protocol::decode(&b) {
+                        return Some((codecs, quality, effort));
                     }
                 }
                 Ok(Message::Close(_)) | Err(_) => return None,
@@ -166,7 +221,7 @@ async fn send_message(socket: &mut WebSocket, key: &Key, msg: Message) -> bool {
 pub async fn session(mut socket: WebSocket, app: Arc<App>) {
     let Some(key) = authenticate(&mut socket, &app).await else { return };
     if !key.has(P::DesktopView) { return close(&mut socket, UNAUTHORIZED, "desktop.view required").await; }
-    let Some((hw, sw, want_codec, preset, effort)) = hello(&mut socket, &key).await else { return };
+    let Some((preferences, preset, effort)) = hello(&mut socket, &key).await else { return };
     let (tx, mut rx) = mpsc::channel::<StreamMsg>(2);
     let (sink, control) = match (app.sinks)(tx) {
         Ok(x) => x,
@@ -175,8 +230,7 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
             return close(&mut socket, GONE, "no encoder").await;
         }
     };
-    let Some(codec) = app.pick_codec(want_codec, hw, sw) else { return close(&mut socket, GONE, "no codec in common").await };
-    control.set_codec(codec);
+    let selection = CodecSelection::new(&preferences, &app.codecs, control.as_ref());
     control.set_effort(effort);
     let quality = preset.quality(app.bitrate_kbps);
     control.set_quality(quality);
@@ -194,7 +248,7 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
         }
         let id = v.next_id;
         v.next_id += 1;
-        v.sessions.insert(id, ViewerSession { key: key.clone(), events: etx.clone(), audio: atx, audio_seq: 0, size: None, control, hw, sw, want_codec, codec, quality, preset, cam_wait_key: false, mixer_subscribed: false });
+        v.sessions.insert(id, ViewerSession { key: key.clone(), events: etx.clone(), audio: atx, audio_seq: 0, size: None, control, selection, quality, preset, cam_wait_key: false, mixer_subscribed: false });
         if key.has(P::DesktopControl) && v.controller.is_none() {
             v.controller = Some(id);
             v.control_epoch = v.control_epoch.wrapping_add(1);
@@ -209,12 +263,13 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
     if let Some(hub) = &app.rtc {
         let _ = send(&mut socket, &key, protocol::rtc(&hub.config)).await; // the page may offer now
     }
+    if let Some(state) = app.stream_state(id) { let _ = send(&mut socket, &key, state).await; }
     let _ = key.with(&[P::DesktopView], || { let _ = app.commands.send(Command::ViewerStream { key: id, sink: Some(sink) }); Ok(()) });
 
     let mut mixer_state = app.mixer.as_ref().filter(|_| key.has(P::AudioListen)).map(|m| m.state.clone());
     let mut mixer_levels = app.mixer.as_ref().filter(|_| key.has(P::AudioListen)).map(|m| m.levels.clone());
     let mut mixer_subscribed = false;
-    let (mut info, mut config, mut ws_config, mut seq, mut failed) = (None::<elsewhere_core::StreamInfo>, Bytes::new(), None, 0u16, false);
+    let (mut info, mut config, mut ws_config, mut seq) = (None::<elsewhere_core::StreamInfo>, Bytes::new(), None, 0u16);
     let mut ping = tokio::time::interval(Duration::from_secs(1));
     let (mut unanswered, started) = (0, Instant::now());
     let ended = loop {
@@ -233,15 +288,18 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
                 if !send(&mut socket, &key, protocol::mixer_levels(&levels)).await { break None }
             },
             msg = rx.recv() => match msg {
-                Some(StreamMsg::Info(i)) => {
+                Some(StreamMsg::Info(epoch, i)) => {
+                    if !app.accepts_video(id, epoch) { continue; }
+                    if let Some(s) = app.viewers.lock().unwrap().sessions.get_mut(&id) { s.selection.status = "streaming"; }
                     seq = 0;
-                    failed = false;
-                    config = protocol::config(&i);
+                    config = protocol::config(&i, epoch);
                     info = Some(i);
                     let Some(state) = app.stream_state(id) else { break Some((UNAUTHORIZED, "token revoked or expired")) };
                     if !send(&mut socket, &key, state).await { break None }
                 }
-                Some(StreamMsg::Frame(f)) => {
+                Some(StreamMsg::Frame(epoch, f)) => {
+                    if !app.accepts_video(id, epoch) { continue; }
+                    if let Some(s) = app.viewers.lock().unwrap().sessions.get_mut(&id) { s.selection.frame(epoch, Instant::now()); }
                     if info.as_ref().is_some_and(|i| i.stream_id == f.stream_id) {
                         // Sent in reference order; the worker refuses raw input while output is blocked.
                         let (backlog, pressure) = (rx.len(), app.rtc.as_ref().and_then(|hub| hub.pressure(id))); // native send blockage and drops are congestion too
@@ -266,14 +324,12 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
                         }
                     }
                 }
-                // a keyframe request restarts a failed encoder; a restart that fails too
-                // ends the session instead of looping, and the page reconnects
-                Some(StreamMsg::Failed) if failed => break None,
-                Some(StreamMsg::Failed) => {
-                    failed = true;
-                    if let Some(s) = app.viewers.lock().unwrap().sessions.get(&id) {
-                        s.control.request_keyframe(); // restarts the failed encoder
-                    }
+                Some(StreamMsg::Failed(epoch)) => {
+                    if !app.accepts_video(id, epoch) { continue; }
+                    if let Some(s) = app.viewers.lock().unwrap().sessions.get_mut(&id) { s.selection.failed(s.control.as_ref()); }
+                    info = None;
+                    let Some(state) = app.stream_state(id) else { break None };
+                    if !send(&mut socket, &key, state).await { break None }
                     let _ = app.commands.send(Command::RequestFullFrame);
                 }
                 None => break None,
@@ -373,7 +429,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
     if !app.viewers.lock().unwrap().window_list.iter().any(|w| w.id == id) {
         return close(&mut socket, GONE, "no such window").await;
     }
-    let Some((hw, sw, mut want_codec, mut preset, effort)) = hello(&mut socket, &key).await else { return };
+    let Some((preferences, mut preset, effort)) = hello(&mut socket, &key).await else { return };
     let (tx, mut rx) = mpsc::channel::<StreamMsg>(2);
     let (sink, control) = match (app.sinks)(tx) {
         Ok(x) => x,
@@ -382,13 +438,12 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
             return close(&mut socket, GONE, "no encoder").await;
         }
     };
-    let Some(mut codec) = app.pick_codec(want_codec, hw, sw) else { return close(&mut socket, GONE, "no codec in common").await };
-    control.set_codec(codec);
+    let mut selection = CodecSelection::new(&preferences, &app.codecs, control.as_ref());
     let mut quality = preset.quality(app.bitrate_kbps);
     control.set_quality(quality);
     let mut auto = AutoRate::new(quality.bitrate_kbps);
     control.set_effort(effort);
-    let state = |codec, quality, want: Option<Codec>, preset| protocol::stream_state(codec, want.is_none(), quality, preset, app.bitrate_kbps, control.effort());
+    let state = |selection: &CodecSelection, quality, preset| selection.state(&app, quality, preset, control.as_ref());
     static KEY: AtomicU64 = AtomicU64::new(1);
     let stream = KEY.fetch_add(1, Ordering::Relaxed);
     let (etx, mut erx) = mpsc::channel::<Bytes>(32);
@@ -412,9 +467,10 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
     if let Some(hub) = &app.rtc {
         let _ = send(&mut socket, &key, protocol::rtc(&hub.config)).await;
     }
+    let _ = send(&mut socket, &key, state(&selection, quality, preset)).await;
     let _ = key.with(&[P::DesktopView], || { let _ = app.commands.send(Command::WindowStream { key: stream, window: id, sink: Some(sink) }); Ok(()) });
 
-    let (mut info, mut config, mut ws_config, mut seq, mut failed) = (None::<elsewhere_core::StreamInfo>, Bytes::new(), None, 0u16, false);
+    let (mut info, mut config, mut ws_config, mut seq) = (None::<elsewhere_core::StreamInfo>, Bytes::new(), None, 0u16);
     let mut pointer = None; // the last window-relative position, for the edge notice
     let mut ping = tokio::time::interval(Duration::from_secs(1));
     let (mut unanswered, started) = (0, Instant::now());
@@ -423,14 +479,17 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
             biased;
             _ = key.ended() => break Some((UNAUTHORIZED, "token revoked or expired")),
             msg = rx.recv() => match msg {
-                Some(StreamMsg::Info(i)) => {
+                Some(StreamMsg::Info(epoch, i)) => {
+                    if !selection.accepts(epoch, control.as_ref()) { continue; }
+                    selection.status = "streaming";
                     seq = 0;
-                    failed = false;
-                    config = protocol::config(&i);
+                    config = protocol::config(&i, epoch);
                     info = Some(i);
-                    if !send(&mut socket, &key, state(codec, quality, want_codec, preset)).await { break None }
+                    if !send(&mut socket, &key, state(&selection, quality, preset)).await { break None }
                 }
-                Some(StreamMsg::Frame(f)) => {
+                Some(StreamMsg::Frame(epoch, f)) => {
+                    if !selection.accepts(epoch, control.as_ref()) { continue; }
+                    selection.frame(epoch, Instant::now());
                     if info.as_ref().is_some_and(|i| i.stream_id == f.stream_id) {
                         let (backlog, pressure) = (rx.len(), app.rtc.as_ref().and_then(|hub| hub.pressure(rtc_key)));
                         let t = Instant::now();
@@ -449,14 +508,15 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                         if let Some(q) = auto.frame(backlog > 0 || blocked, dropped, t.elapsed()) {
                             quality = q;
                             control.set_quality(q);
-                            if !send(&mut socket, &key, state(codec, quality, want_codec, preset)).await { break None }
+                            if !send(&mut socket, &key, state(&selection, quality, preset)).await { break None }
                         }
                     }
                 }
-                Some(StreamMsg::Failed) if failed => break None,
-                Some(StreamMsg::Failed) => {
-                    failed = true;
-                    control.request_keyframe();
+                Some(StreamMsg::Failed(epoch)) => {
+                    if !selection.accepts(epoch, control.as_ref()) { continue; }
+                    selection.failed(control.as_ref());
+                    info = None;
+                    if !send(&mut socket, &key, state(&selection, quality, preset)).await { break None }
                     let _ = app.commands.send(Command::RequestFullFrame);
                 }
                 Some(StreamMsg::Audio { .. }) => {}
@@ -490,13 +550,9 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                         }
                         Some(ClientMsg::Stream(choice)) => {
                             let mut cmd = None;
-                            if let Some(c) = &choice.codec {
-                                want_codec = protocol::codec_named(c);
-                                if let Some(picked) = app.pick_codec(want_codec, hw, sw) {
-                                    cmd = (picked != codec).then_some(Command::RequestFullFrame); // supply a full frame for the new encoder
-                                    codec = picked;
-                                    control.set_codec(codec);
-                                }
+                            if let Some(preferences) = &choice.codecs {
+                                selection = CodecSelection::new(preferences, &app.codecs, control.as_ref());
+                                cmd = Some(Command::RequestFullFrame);
                             }
                             if let Some(p) = choice.quality.as_deref().and_then(Preset::named) {
                                 preset = p;
@@ -508,7 +564,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                                 control.set_effort(effort);
                                 cmd = Some(Command::RequestFullFrame);
                             }
-                            let _ = etx.try_send(state(codec, quality, want_codec, preset));
+                            if !send(&mut socket, &key, state(&selection, quality, preset)).await { break None }
                             cmd
                         }
                         Some(ClientMsg::Rtc { g, message: v }) => {
@@ -559,7 +615,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                     if let Some(q) = rtt_of(&p, started).and_then(|rtt| auto.rtt(rtt)) {
                         quality = q;
                         control.set_quality(q);
-                        if !send(&mut socket, &key, state(codec, quality, want_codec, preset)).await { break None }
+                        if !send(&mut socket, &key, state(&selection, quality, preset)).await { break None }
                     }
                 }
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break None,
@@ -628,12 +684,8 @@ impl App {
         }
     }
 
-    /// The viewer's own choice when both sides can, else the automatic pick.
-    fn pick_codec(&self, want: Option<Codec>, hw: u8, sw: u8) -> Option<Codec> {
-        match want {
-            Some(c) if sw & bit(c) != 0 && self.codecs.contains(&c) => Some(c),
-            _ => self.choose_codec(hw, sw),
-        }
+    fn accepts_video(&self, id: u64, epoch: u64) -> bool {
+        self.viewers.lock().unwrap().sessions.get(&id).is_some_and(|s| s.selection.accepts(epoch, s.control.as_ref()))
     }
 
     /// The automatic controller changed a session's quality.
@@ -650,13 +702,9 @@ impl App {
         let mut v = self.viewers.lock().unwrap();
         let Some(s) = v.sessions.get_mut(&id) else { return (false, None) };
         let mut restart = false;
-        if let Some(c) = &choice.codec {
-            s.want_codec = protocol::codec_named(c);
-            if let Some(picked) = self.pick_codec(s.want_codec, s.hw, s.sw) {
-                restart = picked != s.codec;
-                s.codec = picked;
-                s.control.set_codec(picked);
-            }
+        if let Some(preferences) = &choice.codecs {
+            s.selection = CodecSelection::new(preferences, &self.codecs, s.control.as_ref());
+            restart = true;
         }
         let preset = choice.quality.as_deref().and_then(Preset::named);
         if let Some(p) = preset {
@@ -675,20 +723,7 @@ impl App {
     fn stream_state(&self, id: u64) -> Option<Bytes> {
         let v = self.viewers.lock().unwrap();
         let s = v.sessions.get(&id)?;
-        Some(protocol::stream_state(s.codec, s.want_codec.is_none(), s.quality, s.preset, self.bitrate_kbps, s.control.effort()))
-    }
-
-    /// Prefer the configured codec, then the first server-ranked codec the browser can decode.
-    fn choose_codec(&self, _hw: u8, sw: u8) -> Option<Codec> {
-        let usable = |mask: u8| self.codecs.iter().copied().find(|&c| mask & bit(c) != 0);
-        match self.policy {
-            Some(c) if sw & bit(c) != 0 && self.codecs.contains(&c) => Some(c),
-            Some(c) => {
-                tracing::warn!(?c, "the browser can't decode the requested codec or the encoder can't produce it; picking another");
-                usable(sw)
-            }
-            None => usable(sw),
-        }
+        Some(s.selection.state(self, s.quality, s.preset, s.control.as_ref()))
     }
 
     /// A message from a viewer session: its size always counts (the output's if it controls, its own
@@ -859,17 +894,6 @@ fn rtt_of(pong: &[u8], started: Instant) -> Option<Duration> {
     Some(Duration::from_millis(started.elapsed().as_millis() as u64 - sent))
 }
 
-/// A codec's bit in the `Hello` masks.
-fn bit(c: Codec) -> u8 {
-    match c {
-        Codec::H264 => 1,
-        Codec::Hevc => 2,
-        Codec::Vp9 => 4,
-        Codec::Av1 => 8,
-        Codec::Vp8 => 16,
-    }
-}
-
 /// The rate controller: a viewer's quality is a ceiling, and the bitrate lives under it by what the link
 /// and the browser show. A second with a third of its frames congested (encoder backlog, native SCTP write
 /// refusal, channel drops or slow sends), a pong 200 ms over the link's best, or the page reporting frames
@@ -969,6 +993,65 @@ fn fit(output: &OutputGeometry, stage: &OutputGeometry) -> (u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Default)]
+    struct Control { epoch: AtomicU64, codec: std::sync::Mutex<Option<Codec>> }
+    impl StreamControl for Control {
+        fn set_codec(&self, codec: Codec) { *self.codec.lock().unwrap() = Some(codec); self.epoch.fetch_add(1, Ordering::Relaxed); }
+        fn epoch(&self) -> u64 { self.epoch.load(Ordering::Relaxed) }
+        fn pause(&self) { *self.codec.lock().unwrap() = None; self.epoch.fetch_add(1, Ordering::Relaxed); }
+        fn request_keyframe(&self) {}
+        fn set_size(&self, _: Option<(u32, u32)>) {}
+        fn set_quality(&self, _: elsewhere_core::Quality) {}
+        fn set_effort(&self, _: EncodingEffort) {}
+        fn effort(&self) -> elsewhere_core::EffortState { elsewhere_core::EffortState::pending(EncodingEffort::Fast) }
+    }
+
+    #[test]
+    fn codec_recovery_respects_order_attempts_and_stability() {
+        let control = Control::default();
+        let supported = [Codec::H264, Codec::Hevc];
+        let mut selection = CodecSelection::new(&[Codec::Vp8, Codec::Hevc, Codec::Hevc, Codec::H264], &supported, &control);
+        assert_eq!(selection.candidates, [Codec::Hevc, Codec::H264]);
+        let old = control.epoch();
+        selection.failed(&control);
+        assert_eq!(selection.codec(), Some(Codec::Hevc));
+        assert!(!selection.accepts(old, &control));
+        let now = Instant::now();
+        selection.frame(control.epoch(), now);
+        selection.failed(&control); // a recovery keyframe did not erase the first failure
+        assert_eq!(selection.codec(), Some(Codec::H264));
+        selection.failed(&control);
+        for _ in 0..120 { selection.frame(control.epoch(), now); }
+        assert_eq!(selection.failures, 1); // enough frames but not enough time
+        selection.frame(control.epoch(), now + Duration::from_secs(2));
+        assert_eq!(selection.failures, 0);
+        selection.failed(&control);
+        assert_eq!(selection.codec(), Some(Codec::H264));
+        selection.frame(control.epoch(), now);
+        selection.frame(control.epoch(), now + Duration::from_secs(10));
+        assert_eq!(selection.failures, 1); // a static desktop has not earned a reset
+        control.epoch.fetch_add(1, Ordering::Relaxed); // quality/size reopens start a fresh stability window
+        selection.frame(control.epoch(), now + Duration::from_secs(20));
+        assert_eq!(selection.frames, 1);
+        selection.failed(&control);
+        assert_eq!(selection.codec(), None);
+        assert_eq!(*control.codec.lock().unwrap(), None);
+        assert!(!selection.accepts(control.epoch(), &control));
+        let stale = control.epoch();
+        selection = CodecSelection::new(&[Codec::Hevc, Codec::H264], &supported, &control);
+        assert_eq!(selection.codec(), Some(Codec::Hevc));
+        assert_eq!(selection.failures, 0);
+        assert!(!selection.accepts(stale, &control));
+        assert!(selection.accepts(control.epoch(), &control));
+        let other = Control::default();
+        let other_selection = CodecSelection::new(&[Codec::H264], &supported, &other);
+        selection.failed(&control);
+        assert_eq!(other_selection.failures, 0);
+        assert_eq!(other_selection.codec(), Some(Codec::H264));
+        assert!(CodecSelection::new(&[], &supported, &control).codec().is_none());
+        assert!(CodecSelection::new(&[Codec::Vp8], &supported, &control).codec().is_none());
+    }
 
     /// One second of `n` frames, `bad` of them congested, evaluated at its end.
     fn second(a: &mut AutoRate, n: u32, bad: u32) -> Option<elsewhere_core::Quality> {

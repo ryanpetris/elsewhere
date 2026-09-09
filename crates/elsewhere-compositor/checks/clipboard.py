@@ -23,7 +23,7 @@ env = {**os.environ, "XDG_RUNTIME_DIR": str(root / "runtime"), "XDG_CONFIG_HOME"
 command, payload = root / "command", root / "payload"
 command.write_text(""); payload.write_bytes(b"")
 log = (root / "server.log").open("wb")
-server = subprocess.Popen([os.environ.get("ELSEWHERE_BINARY", "/src/target/release/elsewhere"), "--files-dir", str(root), "--no-audio", "--no-rtc", "--no-tls", "--render-node", "none", "--codec", "vp8", "--listen", "127.0.0.1:8098", "--socket-name", "wayland-clipboard-check", "--exec", shlex.join([str(root / "owner"), str(command), str(payload)])], env=env, stdout=log, stderr=log, start_new_session=True)
+server = subprocess.Popen([os.environ.get("ELSEWHERE_BINARY", "/src/target/release/elsewhere"), "--files-dir", str(root), "--no-audio", "--no-rtc", "--no-tls", "--render-node", "none", "--codecs", "vp8", "--listen", "127.0.0.1:8098", "--socket-name", "wayland-clipboard-check", "--exec", shlex.join([str(root / "owner"), str(command), str(payload)])], env=env, stdout=log, stderr=log, start_new_session=True)
 token = ""
 
 def request(path, data=None, mime="application/json", key=None, headers=None):

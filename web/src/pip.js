@@ -70,6 +70,7 @@ export function createPip(viewer) {
           const title = state.windowTitle || (entry.desktop ? 'Remote desktop' : `Window ${target}`);
           if (win.document.title !== title) win.document.title = title;
           if (['unauthorized', 'no-token', 'error', 'gone', 'closed', 'quit'].includes(state.status)) { close(); return; }
+          if (state.streamState) clearTimeout(entry.timer);
           if (state.status !== 'connected') return;
           clearTimeout(entry.timer);
           if (entry.desktop) {

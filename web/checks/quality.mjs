@@ -10,14 +10,12 @@ import { chromium } from 'playwright-core';
 const medium = Number(process.argv[2] ?? 8000);
 const renderNode = process.env.ELSEWHERE_RENDER_NODE ?? 'none';
 const codec = process.env.ELSEWHERE_CODEC ?? (renderNode === 'none' || process.env.ELSEWHERE_SOFTWARE_ENCODING ? 'vp8' : 'h264');
-const decoderMask = { h264: 1, hevc: 2, vp9: 4, av1: 8, vp8: 16 }[codec];
-assert.ok(decoderMask, 'choose a concrete codec for the quality check');
 const listen = `127.0.0.1:${process.env.ELSEWHERE_TEST_PORT ?? 8089}`;
 const root = await mkdtemp(tmpdir() + '/elsewhere-quality-');
 await mkdir(root + '/home'); await mkdir(root + '/runtime', { mode: 0o700 });
 const log = await open(root + '/desktop.log', 'w');
 const origin = `http://${listen}`;
-const desktop = spawn(process.env.ELSEWHERE_BINARY ?? '/src/target/release/elsewhere', ['--no-audio', '--no-tls', '--render-node', renderNode, '--codec', codec, ...(process.env.ELSEWHERE_SOFTWARE_ENCODING ? ['--software-encoding'] : []), '--bitrate', String(medium), '--listen', listen, '--socket-name', 'wayland-quality'], {
+const desktop = spawn(process.env.ELSEWHERE_BINARY ?? '/src/target/release/elsewhere', ['--no-audio', '--no-tls', '--render-node', renderNode, '--codecs', codec, ...(process.env.ELSEWHERE_SOFTWARE_ENCODING ? ['--software-encoding'] : []), '--bitrate', String(medium), '--listen', listen, '--socket-name', 'wayland-quality'], {
   env: { ...process.env, HOME: root + '/home', XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime' },
   stdio: ['ignore', log.fd, log.fd],
 });
@@ -31,7 +29,7 @@ try {
   const token = await createToken(root);
   browser = await chromium.launch({ executablePath: '/usr/bin/chromium', env: { ...process.env, XDG_CONFIG_HOME: root + '/browser-config' }, args: ['--no-sandbox'] });
   const errors = [];
-  const levels = [['very-low', 1, 2000], ['low', 2, 5000], ['medium', 3, medium], ['high', 4, 12000], ['max', 5, 25000]];
+  const levels = [['very-low', 1, 2000], ['low', 2, 5000], ['medium', 'medium', medium], ['high', 4, 12000], ['max', 5, 25000]];
   const connect = async (windowId, saved) => {
     const context = await browser.newContext({ viewport: { width: 1600, height: 900 } });
     await context.addInitScript(saved => {
@@ -56,7 +54,7 @@ try {
             if (data instanceof ArrayBuffer && new Uint8Array(data)[0] === 0x0c) qualityStates.push(JSON.parse(new TextDecoder().decode(new Uint8Array(data, 1))));
           });
         }
-        send(data) { const bytes = new Uint8Array(data); if (bytes[0] === 0x81) hellos.push([...bytes]); if (bytes[0] === 0x95) { const v = JSON.parse(new TextDecoder().decode(bytes.subarray(1))); if (v.offer) qualityOffers.push(v.g); } super.send(data); }
+        send(data) { const bytes = new Uint8Array(data); if (bytes[0] === 0x81) hellos.push(JSON.parse(new TextDecoder().decode(bytes.subarray(1)))); if (bytes[0] === 0x95) { const v = JSON.parse(new TextDecoder().decode(bytes.subarray(1))); if (v.offer) qualityOffers.push(v.g); } super.send(data); }
       };
     }, saved ?? null);
     const page = await context.newPage();
@@ -67,7 +65,7 @@ try {
   };
   const main = await connect(null, null);
   assert.equal(await main.getByTitle('Quality', { exact: true }).inputValue(), 'medium');
-  assert.deepEqual(await main.evaluate(() => [qualityStates[0].preset, qualityStates[0].ceiling_kbps, qualityStates[0].bitrate_kbps, hellos[0][4]]), ['medium', medium, medium, 3]);
+  assert.deepEqual(await main.evaluate(() => [qualityStates[0].preset, qualityStates[0].ceiling_kbps, qualityStates[0].bitrate_kbps, hellos[0].quality]), ['medium', medium, medium, 'medium']);
   await main.evaluate(() => elsewhere.spawn('foot --app-id=quality-check'));
   await main.waitForFunction(() => elsewhere.store.get().windows.some(w => w.app_id === 'quality-check'));
   const windowId = await main.evaluate(() => elsewhere.store.get().windows.find(w => w.app_id === 'quality-check').id);
@@ -77,9 +75,9 @@ try {
     const select = page.getByTitle('Quality', { exact: true });
     assert.equal(await select.inputValue(), 'medium');
     assert.deepEqual(await select.locator('option').evaluateAll(options => options.map(o => o.value)), levels.map(([name]) => name));
-    assert.deepEqual(await page.evaluate(() => [qualityStates[0].preset, qualityStates[0].bitrate_kbps, hellos[0][4]]), ['medium', medium, 3]);
+    assert.deepEqual(await page.evaluate(() => [qualityStates[0].preset, qualityStates[0].bitrate_kbps, hellos[0].quality]), ['medium', medium, 'medium']);
     assert((await select.locator('option[value="medium"]').textContent()).includes(`${medium / 1000} Mbit/s`));
-    for (const [name, wireId, ceiling] of levels) {
+    for (const [name, , ceiling] of levels) {
       await page.evaluate(() => { window.qualityStates = []; });
       await select.selectOption(name);
       await page.waitForFunction(name => qualityStates.some(s => s.preset === name), name);
@@ -90,7 +88,7 @@ try {
       assert.equal(await page.evaluate(() => localStorage.getItem('elsewhere.quality')), name);
       await page.reload();
       await page.waitForFunction(() => qualityStates.length > 0);
-      assert.deepEqual(await page.evaluate(() => [elsewhere.store.get().choice.quality, hellos[0][4], qualityStates[0].bitrate_kbps]), [name, wireId, ceiling]);
+      assert.deepEqual(await page.evaluate(() => [elsewhere.store.get().choice.quality, hellos[0].quality, qualityStates[0].bitrate_kbps]), [name, name, ceiling]);
     }
     await select.selectOption('max');
     await page.waitForFunction(() => elsewhere.store.get().streamState.preset === 'max');
@@ -104,7 +102,7 @@ try {
     assert((await select.locator('option:checked').textContent()).includes('up to 25 Mbit/s'));
     await page.getByTitle(/^Measured video throughput:/).waitFor();
     await page.getByTitle('Video codec', { exact: true }).selectOption('auto');
-    await page.waitForFunction(() => elsewhere.store.get().streamState.auto_codec);
+    await page.waitForFunction(() => elsewhere.store.get().choice.codec === 'auto' && elsewhere.store.get().streamState.codec);
     await page.evaluate(() => elsewhere.setChoice({ quality: 'low' }));
     await page.waitForFunction(() => elsewhere.store.get().streamState.preset === 'low');
     assert.equal(await select.inputValue(), 'low');
@@ -173,23 +171,23 @@ try {
   for (const id of [null, windowId]) {
     for (const saved of ['auto', 'invalid']) {
       const page = await connect(id, saved);
-      assert.deepEqual(await page.evaluate(() => [elsewhere.store.get().choice.quality, hellos[0][4], qualityStates[0].bitrate_kbps]), ['medium', 3, medium]);
+      assert.deepEqual(await page.evaluate(() => [elsewhere.store.get().choice.quality, hellos[0].quality, qualityStates[0].bitrate_kbps]), ['medium', 'medium', medium]);
       await page.context().close();
     }
-    for (const hello of [[0x81, 0, decoderMask], [0x81, 0, decoderMask, 0], [0x81, 0, decoderMask, 0, 0], [0x81, 0, decoderMask, 0, 255]]) {
+    for (const hello of [{}, { codecs: ["invalid"] }, { codecs: [codec] }, { codecs: [codec], quality: "invalid" }]) {
       const ws = new WebSocket(origin.replace('http:', 'ws:') + '/ws' + (id ? '/window/' + id : ''));
       ws.binaryType = 'arraybuffer';
       let state;
       ws.addEventListener('message', ({ data }) => { if (new Uint8Array(data)[0] === 0x0c) state ??= JSON.parse(new TextDecoder().decode(new Uint8Array(data, 1))); });
       try {
         await new Promise((resolve, reject) => { ws.addEventListener('open', resolve, { once: true }); ws.addEventListener('error', reject, { once: true }); });
-        ws.send(new Uint8Array([0x80, ...new TextEncoder().encode(token)])); ws.send(new Uint8Array(hello));
-        if (hello.length < 5) {
+        ws.send(new Uint8Array([0x80, ...new TextEncoder().encode(token)])); ws.send(new Uint8Array([0x81, ...new TextEncoder().encode(JSON.stringify(hello))]));
+        if (!hello.codecs || hello.codecs[0] === "invalid") {
           await waitFor(() => ws.readyState === WebSocket.CLOSED);
-          assert.equal(state, undefined, 'short HELLO cannot start a stream');
+          assert.equal(state, undefined, 'malformed HELLO cannot start a stream');
         } else {
           await waitFor(() => state);
-          assert.equal(state.preset, 'medium'); assert.equal(state.bitrate_kbps, medium); assert.equal(state.auto_codec, true);
+          assert.equal(state.preset, 'medium'); assert.equal(state.bitrate_kbps, medium); assert.equal(state.codec, codec);
         }
       } finally { ws.close(); }
     }

@@ -96,9 +96,15 @@ A custom Medium ceiling is displayed as configured, even if it exceeds another l
 Effort defaults to Fast. Balanced and High spend more encoding time for possible picture improvements
 at the same bitrate. Changes restart the viewer's stream immediately and are remembered on reconnect.
 See [encoding effort](docs/encoding-effort.md) for mappings and measured tradeoffs.
-`GET /api/codecs` lists the server's successfully probed encoders in preference order. The viewer fetches
-this list and checks browser decoding support before opening a video connection. Hardware encoding
-mode advertises only working VA-API encoders on the selected render node. After the picture stops changing one more frame
+Before accepting connections, the server probes the codecs allowed by `--codecs`. Hardware encoding
+mode advertises only working VA-API encoders on the selected render node. The browser sends its
+supported codecs in preference order, H.264, HEVC, AV1, VP9, then VP8, with a manual selection first.
+The server starts the first shared codec and sends its supported list and current selection to the viewer.
+If encoding fails twice, the server moves to the next shared codec and notifies the viewer. Failure
+counts clear after an attempt produces at least 120 frames over two seconds. If every candidate fails,
+the connection stays open with a Retry video button. Choosing a codec starts selection over.
+`GET /api/codecs` also exposes the startup probe results.
+After the picture stops changing one more frame
 encodes the settled picture at the current target so text left rough by motion can sharpen.
 Frames are painted on a 2D canvas. `?renderer=webgpu` in the URL uses a WebGPU external-texture path
 instead; it is opt-in because Chromium on Linux occasionally presents a blank frame that way, which looks like flicker.
@@ -416,8 +422,8 @@ viewer, and a `cargo build` without `web/dist` stops with that hint. `npm run de
 page with hot reload, proxying `/ws` and `/api` to a server started with `--no-tls --listen 127.0.0.1:8080`.
 
 Useful flags: `--no-tls` (localhost or HTTPS proxy), `--url-prefix`, `--proxy-strips-prefix`, `--listen`, `--bitrate <kbps>` (Medium ceiling),
-`--codec auto|h264|hevc|vp9|av1|vp8` (what Auto resolves to when the browser decodes it; a codec this
-machine can't encode stops startup; Auto ranks shared codecs as H.264, HEVC, AV1, VP9, then VP8),
+`--codecs h264,hevc,av1,vp9,vp8` (allowlist applied before probing; omitted means all codec families;
+its order does not override the browser's preferences; no usable encoder stops startup),
 `--software-encoding`, `--exec`, `--kiosk`, `--elements`, `--no-audio`, `--webcam`, `--no-rtc`, `--rtc-port`, `--rtc-addr`, `--stun`,
 `--turn`, `--turn-user`, `--turn-pass`, `--socket-name`, `--render-node` (`none` for no GPU). `--help`
 lists them all.

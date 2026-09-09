@@ -16,7 +16,7 @@ jobs:
         run: |
           pacman -Sy --noconfirm archlinux-keyring
           pacman -Syu --noconfirm --needed rust clang pkgconf git nodejs npm chromium python curl \
-            ffmpeg libpipewire libva mesa libxkbcommon ca-certificates openssl ttf-dejavu
+            ffmpeg libpipewire libva mesa libxkbcommon ca-certificates openssl ttf-dejavu foot
           native_versions=$(pkg-config --modversion libavcodec libavformat libavutil libavdevice libavfilter libswscale libswresample libva libpipewire-0.3 gbm egl xkbcommon)
           echo "abi=$(printf '%s\n' "$native_versions" | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
@@ -35,6 +35,7 @@ jobs:
         working-directory: web
         run: |
           npm run check:codec-negotiation
+          ELSEWHERE_BINARY="$PWD/../target/release/elsewhere" npm run check:codec-recovery
           npm run check:visualiser
           npm run check:viewer-disposal
       - name: Software broadcast and TLS checks

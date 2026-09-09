@@ -14,12 +14,12 @@ pub(crate) struct Choice { pub codec: Codec, pub name: &'static str, pub low_pow
 pub struct Encoders { pub(crate) node: Option<PathBuf>, choices: Vec<Choice> }
 
 impl Encoders {
-    pub fn probe(node: Option<&Path>) -> Result<Arc<Self>> {
+    pub fn probe(node: Option<&Path>, allowed: &[Codec]) -> Result<Arc<Self>> {
         crate::init()?;
         let mut choices = Vec::new();
         let order = [Codec::H264, Codec::Hevc, Codec::Av1, Codec::Vp9, Codec::Vp8];
         let hardware = node.map(ProbeFrames::new).transpose()?;
-        for codec in order {
+        for codec in order.into_iter().filter(|codec| allowed.contains(codec)) {
             let names: &[&'static str] = match (node.is_some(), codec) {
                 (true, Codec::H264) => &["h264_vaapi"],
                 (true, Codec::Hevc) => &["hevc_vaapi"],

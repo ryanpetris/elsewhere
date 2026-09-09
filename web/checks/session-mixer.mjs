@@ -214,7 +214,7 @@ try {
   await waitFor(() => rejected.readyState === WebSocket.OPEN);
   const auth = new TextEncoder().encode(token), packet = new Uint8Array(auth.length + 1);
   packet[0] = 0x80; packet.set(auth, 1); rejected.send(packet);
-  rejected.send(new Uint8Array([0x81, 0, 16, 5, 0]));
+  rejected.send(new Uint8Array([0x81, ...new TextEncoder().encode(JSON.stringify({ codecs: ["vp8"] }))]));
   await waitFor(() => closed);
   assert.equal(closed, 4001); assert.equal(leaked.length, 0);
   console.log('token revocation clears mixer UI; revoked credentials receive no mixer snapshot or levels');

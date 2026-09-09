@@ -19,7 +19,7 @@ execFileSync('wayland-scanner', ['private-code', xml, root + '/xdg-shell-protoco
 execFileSync('cc', ['-I' + root, '/src/crates/elsewhere-compositor/checks/thumbnail-client.c', root + '/xdg-shell-protocol.c', '-lwayland-client', '-o', root + '/source']);
 const environment = { ...process.env, XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime' };
 const server = spawn(process.env.ELSEWHERE_BINARY ?? '/src/target/release/elsewhere', [
-  '--no-audio', '--no-rtc', '--no-tls', '--render-node', renderNode, '--codec', codec,
+  '--no-audio', '--no-rtc', '--no-tls', '--render-node', renderNode, '--codecs', codec,
   ...(process.env.ELSEWHERE_SOFTWARE_ENCODING ? ['--software-encoding'] : []),
   '--listen', '127.0.0.1:8850', '--socket-name', 'wayland-lifecycle',
 ], { env: environment, stdio: ['ignore', log.fd, log.fd] });

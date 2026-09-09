@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, FolderOpen, Loader2, MonitorX, TriangleAlert } from 'lucide-react';
 import { useStore } from '../store.js';
-import { hue, windowColor } from './ui.jsx';
+import { hue, windowColor, codecName } from './ui.jsx';
 import { Notifications } from './Notifications.jsx';
 
 export function Stage({ viewer, windowMode, borders, elements }) {
@@ -95,7 +95,18 @@ function Banner({ viewer }) {
   const status = useStore(viewer.store, s => s.status);
   const reason = useStore(viewer.store, s => s.reason);
   const stream = useStore(viewer.store, s => s.stream);
-  if (status === 'connected' || status === 'no-token' || status === 'unauthorized') return null;
+  const encoding = useStore(viewer.store, s => s.streamState);
+  if (['connected', 'connecting'].includes(status) && ['failed', 'retrying', 'switching'].includes(encoding?.status)) {
+    return (
+      <div role="status" className="absolute top-3 rounded-xl border border-line-2 bg-surface/95 px-4 py-3 text-sm text-ink shadow-pop">
+        {encoding.status === 'failed' ? <>
+          Video encoding failed for all shared codecs.
+          <button type="button" className="ml-3 underline" onClick={() => viewer.setChoice({ codec: viewer.store.get().choice.codec })}>Retry video</button>
+        </> : `${encoding.status === 'retrying' ? 'Retrying' : 'Switching to'} ${codecName(encoding.codec)}…`}
+      </div>
+    );
+  }
+  if (status === 'connected' || status === 'no-token'  || status === 'unauthorized') return null;
   if (status === 'retrying' || (status === 'connecting' && stream)) {
     return (
       <div className="absolute top-3 left-1/2 flex -translate-x-1/2 animate-pop items-center gap-2 rounded-full border border-line-2 bg-surface/90 px-3 py-1 text-xs text-ink-2 shadow-pop backdrop-blur">

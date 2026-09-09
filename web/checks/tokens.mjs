@@ -9,7 +9,7 @@ await mkdir(root + '/runtime', { mode: 0o700 });
 const log = await open(root + '/server.log', 'w');
 const origin = 'http://127.0.0.1:18446';
 const binary = process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere';
-const server = spawn(binary, ['--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--listen', '127.0.0.1:18446', '--screen-size', '320x240'], {
+const server = spawn(binary, ['--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codecs', 'vp8', '--listen', '127.0.0.1:18446', '--screen-size', '320x240'], {
   cwd: root, env: { ...process.env, HOME: root, SHELL: '/bin/bash', XDG_CONFIG_HOME: root + '/config', XDG_CACHE_HOME: root + '/cache', XDG_RUNTIME_DIR: root + '/runtime' }, stdio: ['ignore', log.fd, log.fd],
 });
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -32,7 +32,7 @@ async function connect(token, terminal = false, windowId = null) {
   socket.onclose = event => { state.closed = true; state.code = event.code; };
   await wait('socket open', () => socket.readyState === WebSocket.OPEN);
   socket.send(Buffer.concat([Buffer.from([0x80]), Buffer.from(token)]));
-  if (!terminal) socket.send(Buffer.from([0x81, 0, 16, 5, 0]));
+  if (!terminal) socket.send(Buffer.from([0x81, ...new TextEncoder().encode(JSON.stringify({ codecs: ["vp8"] }))]));
   return state;
 }
 try {

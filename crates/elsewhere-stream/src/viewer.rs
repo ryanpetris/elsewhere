@@ -23,6 +23,7 @@ struct State {
     pressure: bool,
     failed: bool,
     stop: bool,
+    paused: bool,
     keyframe: bool,
     effort: EffortState,
 }
@@ -64,7 +65,7 @@ impl FfmpegSink {
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 settings: Settings { source: None, size: None, codec, quality: Quality { bitrate_kbps, max_fps: 0 }, effort: EncodingEffort::Fast },
-                epoch: 0, pending: None, last_submit: None, ready: false, started: false, pressure: false, failed: false, stop: false, keyframe: true,
+                epoch: 0, pending: None, last_submit: None, ready: false, started: false, pressure: false, failed: false, stop: false, paused: false, keyframe: true,
                 effort: EffortState::pending(EncodingEffort::Fast),
             }),
             changed: Condvar::new(), control: Notify::new(),
@@ -96,8 +97,10 @@ impl FfmpegControl {
     }
 }
 impl StreamControl for FfmpegControl {
-    fn request_keyframe(&self) { self.update(|s| { let pending = if s.failed { s.restart() } else { None }; s.keyframe = true; pending }); }
-    fn set_codec(&self, codec: Codec) { self.update(|s| { if s.settings.codec != codec { s.settings.codec = codec; s.restart() } else { None } }); }
+    fn request_keyframe(&self) { self.update(|s| { s.keyframe = true; None }); }
+    fn set_codec(&self, codec: Codec) { self.update(|s| { s.settings.codec = codec; s.paused = false; s.restart() }); }
+    fn epoch(&self) -> u64 { self.owner.upgrade().map_or(u64::MAX, |o| o.shared.state.lock().unwrap_or_else(|e| e.into_inner()).epoch) }
+    fn pause(&self) { self.update(|s| { s.paused = true; s.restart() }); }
     fn set_size(&self, size: Option<(u32, u32)>) { self.update(|s| { if s.settings.size != size { s.settings.size = size; s.restart() } else { None } }); }
     fn set_effort(&self, effort: EncodingEffort) { self.update(|s| { if s.settings.effort != effort { s.settings.effort = effort; s.restart() } else { None } }); }
     fn set_quality(&self, quality: Quality) {
@@ -200,7 +203,7 @@ fn run(shared: &Shared, encoders: &Encoders, tx: &mpsc::Sender<StreamMsg>, redra
             let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
             loop {
                 if state.stop || tx.is_closed() { return Ok(()); }
-                if state.settings.source.is_some() && !state.failed && (active.as_ref().is_none_or(|a| a.epoch != state.epoch || a.settings.quality != state.settings.quality) || state.pending.is_some()) { break; }
+                if state.settings.source.is_some() && !state.paused && !state.failed && (active.as_ref().is_none_or(|a| a.epoch != state.epoch || a.settings.quality != state.settings.quality) || state.pending.is_some()) { break; }
                 state = shared.changed.wait_timeout(state, Duration::from_millis(100)).unwrap_or_else(|e| e.into_inner()).0;
             }
             (state.settings, state.epoch)
@@ -231,7 +234,7 @@ fn run(shared: &Shared, encoders: &Encoders, tx: &mpsc::Sender<StreamMsg>, redra
                     drop(state);
                     drop(pending);
                     tracing::warn!(codec = ?settings.codec, %error, "video encoder initialization failed");
-                    if !deliver(shared, tx, vec![StreamMsg::Failed], epoch, false, redraw, runtime)? { continue; }
+                    if !deliver(shared, tx, vec![StreamMsg::Failed(epoch)], epoch, false, redraw, runtime)? { continue; }
                 }
             }
             continue;
@@ -239,7 +242,11 @@ fn run(shared: &Shared, encoders: &Encoders, tx: &mpsc::Sender<StreamMsg>, redra
         let running = active.as_mut().unwrap();
         if running.settings.quality != settings.quality {
             if running.settings.quality.bitrate_kbps != settings.quality.bitrate_kbps {
-                running.encoder.set_rate(settings.quality.bitrate_kbps)?;
+                if let Err(error) = running.encoder.set_rate(settings.quality.bitrate_kbps) {
+                    active = None;
+                    report_failure(shared, tx, epoch, &error, redraw, runtime)?;
+                    continue;
+                }
                 redraw();
             }
             running.settings.quality = settings.quality;
@@ -276,18 +283,18 @@ fn run(shared: &Shared, encoders: &Encoders, tx: &mpsc::Sender<StreamMsg>, redra
                     ensure!(keyframe, "first video packet is not a recovery keyframe");
                     info.codec = crate::codec_string(settings.codec, data, info.width, info.height).context("recovery keyframe lacks codec headers")?;
                     tracing::info!(codec = %info.codec, width = info.width, height = info.height, "stream started");
-                    messages.push(StreamMsg::Info(info));
+                    messages.push(StreamMsg::Info(epoch, info));
                 }
                 let packet_pts = packet.pts().and_then(|pts| u64::try_from(pts).ok()).context("invalid encoded video timestamp")?;
-                messages.push(StreamMsg::Frame(EncodedFrame { stream_id: running.stream_id, keyframe, pts_us: packet_pts, data: Bytes::copy_from_slice(data) }));
+                messages.push(StreamMsg::Frame(epoch, EncodedFrame { stream_id: running.stream_id, keyframe, pts_us: packet_pts, data: Bytes::copy_from_slice(data) }));
                 tracing::debug!(stream_id = running.stream_id, seq, pts_us, keyframe, bytes = data.len(), encode_us = started.elapsed().as_micros() as u64, submit_to_packet_us = pending.submitted.elapsed().as_micros() as u64, "ffmpeg encoded");
             }
             Ok(messages)
         })();
         match result {
             Ok(messages) => {
-                let key = messages.iter().any(|m| matches!(m, StreamMsg::Frame(f) if f.keyframe));
-                let bytes = messages.iter().map(|m| match m { StreamMsg::Frame(f) => f.data.len(), _ => 0 }).sum();
+                let key = messages.iter().any(|m| matches!(m, StreamMsg::Frame(_, f) if f.keyframe));
+                let bytes = messages.iter().map(|m| match m { StreamMsg::Frame(_, f) => f.data.len(), _ => 0 }).sum();
                 let encoding = started.elapsed();
                 if deliver(shared, tx, messages, epoch, key, redraw, runtime)? {
                     admission.delivered(bytes, started, encoding, Instant::now());
@@ -295,18 +302,23 @@ fn run(shared: &Shared, encoders: &Encoders, tx: &mpsc::Sender<StreamMsg>, redra
             }
             Err(error) => {
                 active = None;
-                let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
-                if state.epoch != epoch { continue; }
-                state.failed = true;
-                state.ready = false;
-                let pending = state.pending.take();
-                drop(state);
-                drop(pending);
-                tracing::warn!(%error, "video encoding failed");
-                deliver(shared, tx, vec![StreamMsg::Failed], epoch, false, redraw, runtime)?;
+                report_failure(shared, tx, epoch, &error, redraw, runtime)?;
             }
         }
     }
+}
+
+fn report_failure(shared: &Shared, tx: &mpsc::Sender<StreamMsg>, epoch: u64, error: &anyhow::Error, redraw: &Redraw, runtime: &tokio::runtime::Runtime) -> Result<()> {
+    let mut state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
+    if state.epoch != epoch { return Ok(()); }
+    state.failed = true;
+    state.ready = false;
+    let pending = state.pending.take();
+    drop(state);
+    drop(pending);
+    tracing::warn!(%error, "video encoding failed");
+    deliver(shared, tx, vec![StreamMsg::Failed(epoch)], epoch, false, redraw, runtime)?;
+    Ok(())
 }
 
 /// Request a complete redraw after the discarded raw picture's byte budget becomes available.
@@ -450,7 +462,7 @@ mod tests {
                     quality: Quality { bitrate_kbps: 1000, max_fps: 0 }, effort: EncodingEffort::Fast },
                 epoch: 1, pending: Some(input(1)),
                 last_submit: None, ready: true, started: true, pressure: false, failed: false,
-                stop: false, keyframe: false, effort: EffortState::pending(EncodingEffort::Fast),
+                stop: false, paused: false, keyframe: false, effort: EffortState::pending(EncodingEffort::Fast),
             }),
             changed: Condvar::new(), control: Notify::new(),
         });
@@ -506,7 +518,7 @@ mod tests {
     fn encoders() -> Arc<Encoders> {
         static ENCODERS: OnceLock<Arc<Encoders>> = OnceLock::new();
         ENCODERS.get_or_init(|| {
-            let encoders = Encoders::probe(None).unwrap();
+            let encoders = Encoders::probe(None, &[Codec::H264, Codec::Hevc, Codec::Av1, Codec::Vp9, Codec::Vp8]).unwrap();
             for (codec, libraries) in [
                 (Codec::H264, &["libx264", "libopenh264"][..]),
                 (Codec::Hevc, &["libx265"][..]),
@@ -546,10 +558,10 @@ mod tests {
         wait(|| {
             while let Ok(message) = rx.try_recv() {
                 match message {
-                    StreamMsg::Info(value) => *info = Some(value),
-                    StreamMsg::Frame(frame) if frame.pts_us == seq * 33_333 => { result = Some(frame); return true; }
-                    StreamMsg::Frame(_) => {} // Already queued pictures remain in reference order.
-                    StreamMsg::Failed => panic!("video encoder failed"),
+                    StreamMsg::Info(_, value) => *info = Some(value),
+                    StreamMsg::Frame(_, frame) if frame.pts_us == seq * 33_333 => { result = Some(frame); return true; }
+                    StreamMsg::Frame(_, _) => {} // Already queued pictures remain in reference order.
+                    StreamMsg::Failed(_) => panic!("video encoder failed"),
                     _ => panic!("unexpected audio on video channel"),
                 }
             }
@@ -634,8 +646,8 @@ mod tests {
         impl Drop for Lease { fn drop(&mut self) { self.0.fetch_add(1, Ordering::Relaxed); } }
         let (tx, mut rx) = mpsc::channel(2);
         // Fill the receiver before encoding so this exercises blocked delivery, not admission delay.
-        tx.try_send(StreamMsg::Failed).unwrap();
-        tx.try_send(StreamMsg::Failed).unwrap();
+        tx.try_send(StreamMsg::Failed(0)).unwrap();
+        tx.try_send(StreamMsg::Failed(0)).unwrap();
         let mut sink = FfmpegSink::new(4000, encoders(), tx, Arc::new(|| {})).unwrap();
         sink.output_changed(source(), u32::from_le_bytes(*b"XR24"), 0);
         wait(|| sink.owner.shared.state.lock().unwrap().ready);
@@ -661,8 +673,8 @@ mod tests {
         let redraws = Arc::new(AtomicUsize::new(0));
         let signal = redraws.clone();
         let (tx, mut rx) = mpsc::channel(2);
-        tx.try_send(StreamMsg::Failed).unwrap();
-        tx.try_send(StreamMsg::Failed).unwrap();
+        tx.try_send(StreamMsg::Failed(0)).unwrap();
+        tx.try_send(StreamMsg::Failed(0)).unwrap();
         let mut sink = FfmpegSink::new(4000, encoders(), tx, Arc::new(move || { signal.fetch_add(1, Ordering::Relaxed); })).unwrap();
         sink.control().set_codec(Codec::Vp8);
         sink.output_changed(source(), u32::from_le_bytes(*b"XR24"), 0);
@@ -671,8 +683,8 @@ mod tests {
         wait(|| sink.owner.shared.state.lock().unwrap().pressure);
         assert_eq!(sink.submit(frame(2)).unwrap(), Submit::Deferred);
         let before = redraws.load(Ordering::Relaxed);
-        assert!(matches!(rx.try_recv().unwrap(), StreamMsg::Failed));
-        assert!(matches!(rx.try_recv().unwrap(), StreamMsg::Failed));
+        assert!(matches!(rx.try_recv().unwrap(), StreamMsg::Failed(0)));
+        assert!(matches!(rx.try_recv().unwrap(), StreamMsg::Failed(0)));
         wait(|| redraws.load(Ordering::Relaxed) > before);
         let mut seen = redraws.load(Ordering::Relaxed);
         let first = receive(&mut rx, &mut None, &mut sink, 1, &redraws, &mut seen);

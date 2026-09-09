@@ -20,7 +20,7 @@
 # `docker exec <container> elsewhere token create --admin` and paste it into the connection dialog.
 # The volume preserves the SQLite token registry and certificates across runs.
 # Any number of viewers can connect; one controls at a time.
-# Arguments after the image name go to elsewhere, e.g. `... elsewhere --codec h264`.
+# Arguments after the image name go to elsewhere, e.g. `... elsewhere --codecs h264`.
 # If /dev/dri/renderD128 isn't world-accessible on the host, add `--group-add $(stat -c %g /dev/dri/renderD128)`.
 # Hardware encoding uses the host GPU through VA-API: Intel (iHD) and AMD (Mesa) drivers are included,
 # as are Mesa's OpenGL and Vulkan drivers for both. To check them from the desktop: `glxinfo -B`,

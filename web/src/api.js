@@ -91,4 +91,3 @@ export const pref = {
   getStr: (key, fallback) => { try { return localStorage.getItem(storageKey(key)) ?? fallback; } catch { return fallback; } },
   setStr: (key, v) => { try { localStorage.setItem(storageKey(key), v); } catch {} },
 };
-export const codecs = async () => (await ok(await api('/api/codecs', { signal: AbortSignal.timeout(5000) }))).json();

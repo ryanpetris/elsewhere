@@ -26,7 +26,7 @@ try {
     await waitFor(() => socket.readyState === WebSocket.OPEN);
     const auth = new TextEncoder().encode(token), packet = new Uint8Array(auth.length + 1);
     packet[0] = 0x80; packet.set(auth, 1); socket.send(packet);
-    socket.send(new Uint8Array([0x81, 0, 16, 5, 0])); // Software VP8 hello.
+    socket.send(new Uint8Array([0x81, ...new TextEncoder().encode(JSON.stringify({ codecs: ["vp8"] }))])); // Software VP8 hello.
     await waitFor(() => viewer.state?.available && viewer.state.nodes.some(n => n.kind === 'playback'));
   }
   assert.equal(viewers.length, 2);

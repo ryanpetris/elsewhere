@@ -73,7 +73,7 @@ with tempfile.TemporaryDirectory(prefix='elsewhere-tokens-') as directory:
         connection.close()
         return session
     def start(log):
-        server = subprocess.Popen([binary, '--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codec', 'vp8',
+        server = subprocess.Popen([binary, '--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codecs', 'vp8',
             '--screen-size', '320x240', '--listen', '127.0.0.1:18444'], env=env, stdout=log, stderr=subprocess.STDOUT)
         for _ in range(150):
             assert server.poll() is None, (root / 'server.log').read_text()

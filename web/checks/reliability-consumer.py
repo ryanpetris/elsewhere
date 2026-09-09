@@ -11,10 +11,8 @@ import time
 
 port, secret, codec = sys.argv[1:4]
 preset = sys.argv[4] if len(sys.argv) > 4 else "medium"
-preset_id = {"very-low": 1, "medium": 3}[preset]
 blocked_seconds = 30 if preset == "very-low" else 20
 token = secret.encode()
-choice = ["h264", "hevc", "vp9", "av1", "vp8"].index(codec) + 1
 
 
 def event(phase, **fields):
@@ -53,7 +51,7 @@ while True:
                 headers.extend(read(sock, 1))
             assert headers.startswith(b"HTTP/1.1 101 "), "WebSocket upgrade failed"
             send(sock, b"\x80" + token)
-            send(sock, bytes([0x81, 0, 1 << (choice - 1), choice, preset_id]))
+            send(sock, b"\x81" + json.dumps({"codecs": [codec], "quality": preset}).encode())
             state = None
             while True:
                 flags, size = read(sock, 2)

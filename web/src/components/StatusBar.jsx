@@ -43,8 +43,8 @@ function StreamControls({ viewer, stacked = false }) {
   const select = cx('select', stacked ? 'select-md w-full' : 'shrink-0');
   const codec = (
     <select value={choice.codec} onChange={e => viewer.setChoice({ codec: e.target.value })} className={select} title="Video codec">
-      <option value="auto">Auto{st?.auto_codec ? ` (${codecName(st.codec)})` : ''}</option>
-      {both.map(c => <option key={c.codec} value={c.codec}>{codecName(c.codec)}{c.hardware ? '' : ' (software)'}</option>)}
+      <option value="auto">Auto{choice.codec === 'auto' && st?.codec ? ` (${codecName(st.codec)})` : ''}</option>
+      {both.map(c => <option key={c.codec} value={c.codec}>{codecName(c.codec)}{choice.codec === c.codec && st?.codec && st.codec !== c.codec ? ` (using ${codecName(st.codec)})` : ''}{c.hardware ? '' : ' (software)'}</option>)}
     </select>
   );
   const quality = (
@@ -148,6 +148,7 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
   const transport = useStore(viewer.store, st => st.transport);
   const videoVia = useStore(viewer.store, st => st.videoVia);
   const status = useStore(viewer.store, st => st.status);
+  const streamState = useStore(viewer.store, st => st.streamState);
   const recovery = useStore(viewer.store, st => st.rtcRecovery);
   const wide = useMedia('(min-width: 57rem)'); // the stream controls fit beside the readouts
   const transportHint = status !== 'connected' ? 'WebSocket disconnected'
@@ -197,7 +198,7 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
             {cam ? <Camera className="size-3.5" /> : <CameraOff className="size-3.5" />}
           </button>
         )}
-        {status === 'connected' && (
+        {(status === 'connected' || status === 'connecting' && streamState) && (
           <>
             <span aria-hidden="true" className="mx-0.5 h-4 w-px shrink-0 bg-line-2" />
             {wide ? <StreamControls viewer={viewer} /> : <StreamChip viewer={viewer} />}

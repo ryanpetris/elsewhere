@@ -18,7 +18,7 @@ const log = await open(root + '/server.log', 'w');
 const errorLibrary = root + '/device-errors.so';
 execFileSync('cc', ['-shared', '-fPIC', new URL('./webcam-errors.c', import.meta.url).pathname, '-ldl', '-o', errorLibrary]);
 const origin = 'http://127.0.0.1:8093';
-const server = spawn((process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere'), ['--webcam', device, '--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--listen', '127.0.0.1:8093', '--socket-name', 'wayland-webcam'], {
+const server = spawn((process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere'), ['--webcam', device, '--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codecs', 'vp8', '--listen', '127.0.0.1:8093', '--socket-name', 'wayland-webcam'], {
   env: { ...process.env, HOME: root, XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime', RUST_LOG: 'elsewhere_server::api=debug',
     LD_PRELOAD: errorLibrary, ELSEWHERE_WEBCAM_TEST_DEVICE: device, ELSEWHERE_WEBCAM_TEST_FAILURE: 'ENODEV', ELSEWHERE_WEBCAM_TEST_ARM: root + '/device-loss' }, stdio: ['ignore', log.fd, log.fd],
 });

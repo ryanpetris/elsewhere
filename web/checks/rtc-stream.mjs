@@ -12,7 +12,7 @@ const port = process.env.ELSEWHERE_TEST_PORT ?? '8855';
 const origin = `http://127.0.0.1:${port}`;
 const environment = { ...process.env, XDG_RUNTIME_DIR: root + '/runtime', XDG_CONFIG_HOME: root + '/config', WAYLAND_DISPLAY: 'wayland-rtc-stream' };
 const startServer = (fixedSize = false) => spawn(process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere', [
-  '--no-audio', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--bitrate', '8000',
+  '--no-audio', '--no-tls', '--render-node', 'none', '--codecs', 'vp8', '--bitrate', '8000',
   ...(fixedSize ? ['--screen-size', '640x360'] : []),
   '--listen', `127.0.0.1:${port}`, '--socket-name', 'wayland-rtc-stream',
 ], { env: environment, stdio: ['ignore', log.fd, log.fd] });

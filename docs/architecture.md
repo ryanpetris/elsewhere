@@ -195,10 +195,20 @@ RGB input is full range; converted NV12 and encoded output use limited-range BT.
 
 With `--software-encoding`, the compositor supplies memory or linear DMA-buf pixels. The worker maps
 and synchronizes DMA-buf CPU access, converts through libswscale, and uses libvpx, libx264 or
-OpenH264, libx265, or libaom. The compositor clock runs at 30 Hz in this mode. Codec
-preference is H.264, HEVC, AV1, VP9, VP8 in both modes, filtered by the available encoders. Native capability
-probes require an actual keyframe. The browser intersects that list with its WebCodecs support;
-`--codec` wins when both sides support it. AV1 and VP9 codec levels are selected from picture size.
+OpenH264, libx265, or libaom. The compositor clock runs at 30 Hz in this mode.
+`--codecs` filters candidates before startup probes, which require an actual keyframe. The browser sends
+an ordered list of decodable codecs, H.264, HEVC, AV1, VP9, then VP8, with any manual preference first.
+The server intersects that list with its probe results. The selected codec and full supported list
+arrive in `StreamState` before video starts. AV1 and VP9 codec levels are selected from picture size.
+
+Desktop and window sessions share codec recovery logic. A returned encoder error retries the codec once;
+a second failure moves to the next candidate. Failure counts reset only after at least 120 frames over
+two seconds from one encoder attempt. A new preference list restarts selection and its failure counts.
+Exhaustion pauses encoding while leaving the connection open for an explicit retry or new list.
+Encoder output carries its attempt number; sessions discard output from superseded attempts. The same
+number in `Config` and `StreamState` lets the browser discard delayed configurations and video during
+recovery across WebSocket and RTC. These retries handle returned errors; native process aborts and
+blocked driver calls require process isolation and are not recovered by codec switching.
 
 Submission does not wait for the worker. It replaces one pending raw picture, applies the frame cap,
 and returns a retry deadline when the cap rejects a picture. Initialization and output or admission

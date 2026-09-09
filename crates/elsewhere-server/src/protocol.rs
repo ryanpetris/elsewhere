@@ -23,8 +23,8 @@ pub const NOTICE: u8 = 0x09;
 pub const CLIPBOARD_DATA: u8 = 0x0A;
 /// The open desktop notifications, as a JSON array of `Notification`, whenever they change (and in the replay).
 pub const NOTIFICATIONS: u8 = 0x0B;
-/// JSON `{"codec","auto_codec","preset","ceiling_kbps","medium_kbps","bitrate_kbps","max_fps"}`: what this session's encoder does right now;
-/// after every `Config` and whenever the rate controller steps the quality.
+/// JSON `{"codec","codecs","status","attempt","preset","ceiling_kbps","medium_kbps","bitrate_kbps","max_fps"}`: what this session's encoder does right now;
+/// before video starts, during recovery, and whenever settings or rate change.
 pub const STREAM_STATE: u8 = 0x0C;
 /// `[RTC][JSON]`: WebRTC signalling: `{"ice_servers": [...], "port": 8443}` with an optional
 /// `"host"` address override once the session is up; `{"answer": "<sdp>", "g": 1}` to its offer.
@@ -45,7 +45,7 @@ pub const FILE_RESULT: u8 = 0x13;
 // client -> server
 /// `[AUTH][token as UTF-8]`: must be the first message on a new socket; nothing else is processed before it.
 pub const AUTH: u8 = 0x80;
-/// `[HELLO][u8 hw][u8 sw][u8 codec][u8 quality]`: decoder masks, codec choice and quality ceiling.
+/// `[HELLO][JSON]`: ordered `codecs`, optional `quality` and `effort`.
 pub const HELLO: u8 = 0x81;
 pub const RESIZE: u8 = 0x82;
 pub const MOTION_ABS: u8 = 0x83;
@@ -122,10 +122,10 @@ pub const FEATURE_MIC: u8 = 1;
 pub const FEATURE_CAM: u8 = 2;
 pub const FEATURE_AUDIO: u8 = 4;
 
-pub fn config(info: &StreamInfo) -> Bytes {
+pub fn config(info: &StreamInfo, epoch: u64) -> Bytes {
     let json = format!(
-        r#"{{"streamId":{},"codec":"{}","width":{},"height":{},"scale":{}}}"#,
-        info.stream_id, info.codec, info.width, info.height, info.scale
+        r#"{{"streamId":{},"attempt":{},"codec":"{}","width":{},"height":{},"scale":{}}}"#,
+        info.stream_id, epoch, info.codec, info.width, info.height, info.scale
     );
     let mut b = Vec::with_capacity(1 + json.len());
     b.push(CONFIG);
@@ -209,15 +209,11 @@ pub fn clipboard(text: &str) -> Bytes {
     b.into()
 }
 
-/// The codec families' names on the wire and in the API, and their `Hello` ids (0 is Auto).
+/// Codec family names on the wire and in the API.
 pub const CODECS: [(Codec, &str); 5] = [(Codec::H264, "h264"), (Codec::Hevc, "hevc"), (Codec::Vp9, "vp9"), (Codec::Av1, "av1"), (Codec::Vp8, "vp8")];
 
 pub fn codec_name(c: Codec) -> &'static str {
     CODECS.iter().find(|(k, _)| *k == c).map(|(_, n)| *n).unwrap()
-}
-
-pub fn codec_named(name: &str) -> Option<Codec> {
-    CODECS.iter().find(|(_, n)| *n == name).map(|(c, _)| *c)
 }
 
 /// A viewer's adaptive bitrate ceiling (`--bitrate` configures Medium).
@@ -243,17 +239,6 @@ impl Preset {
         Self::NAMES.iter().find(|(p, _)| *p == self).unwrap().1
     }
 
-    fn from_id(id: u8) -> Preset {
-        match id {
-            1 => Preset::VeryLow,
-            2 => Preset::Low,
-            3 => Preset::Medium,
-            4 => Preset::High,
-            5 => Preset::Max,
-            _ => Preset::default(),
-        }
-    }
-
     /// The stream starts at this ceiling; under 3 Mbit/s its frame rate is capped at 30.
     pub fn quality(self, medium_kbps: u32) -> Quality {
         let bitrate_kbps = match self {
@@ -268,8 +253,8 @@ impl Preset {
 }
 
 /// The selected ceiling and current stream target, separate from measured throughput.
-pub fn stream_state(codec: Codec, auto_codec: bool, quality: Quality, preset: Preset, medium_kbps: u32, effort: EffortState) -> Bytes {
-    let json = serde_json::json!({ "codec": codec_name(codec), "auto_codec": auto_codec,
+pub fn stream_state(codec: Option<Codec>, codecs: &[Codec], hardware: bool, status: &str, attempt: u64, quality: Quality, preset: Preset, medium_kbps: u32, effort: EffortState) -> Bytes {
+    let json = serde_json::json!({ "codec": codec.map(codec_name), "codecs": codecs.iter().map(|&c| serde_json::json!({ "codec": codec_name(c), "hardware": hardware })).collect::<Vec<_>>(), "status": status, "attempt": attempt,
         "preset": preset.name(), "ceiling_kbps": preset.quality(medium_kbps).bitrate_kbps, "medium_kbps": medium_kbps,
         "bitrate_kbps": quality.bitrate_kbps, "max_fps": quality.max_fps, "effort": effort });
     let mut b = vec![STREAM_STATE];
@@ -310,7 +295,7 @@ pub fn audio(pts_us: u64, data: &[u8], seq: u16) -> Bytes {
 #[derive(Debug, PartialEq)]
 pub enum ClientMsg {
     /// The browser's decoders and codec, quality and effort choices.
-    Hello { hw: u8, sw: u8, codec: Option<Codec>, quality: Preset, effort: EncodingEffort },
+    Hello { codecs: Vec<Codec>, quality: Preset, effort: EncodingEffort },
     Resize { css_w: u16, css_h: u16, dpr: f32 },
     MotionAbs { x: f32, y: f32 },
     MotionRel { dx: f32, dy: f32 },
@@ -348,10 +333,10 @@ pub enum DragMsg {
     Cancel { batch: Option<String> },
 }
 
-/// `{"codec": "auto" | "h264" | …, "quality": "very-low" | "low" | …}`, either optional (unchanged).
+/// Ordered decoder preferences and optional quality/effort updates.
 #[derive(Debug, PartialEq, Default, serde::Deserialize)]
 pub struct StreamChoice {
-    pub codec: Option<String>,
+    pub codecs: Option<Vec<Codec>>,
     pub quality: Option<String>,
     pub effort: Option<EncodingEffort>,
 }
@@ -370,12 +355,9 @@ pub fn decode(b: &[u8]) -> Option<ClientMsg> {
     let u16_at = |i: usize| Some(u16::from_le_bytes(b.get(i..i + 2)?.try_into().ok()?));
     let f32_at = |i: usize| Some(f32::from_le_bytes(b.get(i..i + 4)?.try_into().ok()?));
     Some(match u8_at(0)? {
-        HELLO => ClientMsg::Hello {
-            hw: u8_at(1)?,
-            sw: u8_at(2)?,
-            codec: u8_at(3)?.checked_sub(1).and_then(|id| CODECS.get(id as usize)).map(|(c, _)| *c),
-            quality: Preset::from_id(u8_at(4)?),
-            effort: EncodingEffort::from_id(u8_at(5).unwrap_or(0)),
+        HELLO => {
+            let choice: StreamChoice = serde_json::from_slice(&b[1..]).ok()?;
+            ClientMsg::Hello { codecs: choice.codecs?, quality: choice.quality.as_deref().and_then(Preset::named).unwrap_or_default(), effort: choice.effort.unwrap_or_default() }
         },
         RESIZE => ClientMsg::Resize { css_w: u16_at(1)?, css_h: u16_at(3)?, dpr: f32_at(5)? },
         MOTION_ABS => ClientMsg::MotionAbs { x: f32_at(1)?, y: f32_at(5)? },
@@ -421,27 +403,31 @@ mod tests {
             assert_eq!(preset.name(), name);
             assert_eq!(preset as u8, id);
             assert_eq!(preset.quality(8000).bitrate_kbps, kbps);
-            assert_eq!(decode(&[HELLO, 0, 16, 5, id]), Some(ClientMsg::Hello { hw: 0, sw: 16, codec: Some(Codec::Vp8), quality: preset, effort: EncodingEffort::Fast }));
+            let mut hello = vec![HELLO];
+            hello.extend(serde_json::to_vec(&serde_json::json!({ "codecs": ["vp8", "h264"], "quality": name })).unwrap());
+            assert_eq!(decode(&hello), Some(ClientMsg::Hello { codecs: vec![Codec::Vp8, Codec::H264], quality: preset, effort: EncodingEffort::Fast }));
             for medium in [2500, 3000, 40000] {
                 let quality = preset.quality(medium);
                 assert_eq!(quality.bitrate_kbps, if preset == Preset::Medium { medium } else { kbps });
                 assert_eq!(quality.max_fps, if quality.bitrate_kbps < 3000 { 30 } else { 0 });
-                let packet = stream_state(Codec::Vp8, true, Quality { bitrate_kbps: 1000, max_fps: 30 }, preset, medium, EffortState::pending(EncodingEffort::Fast));
+                let packet = stream_state(Some(Codec::Vp8), &[Codec::Vp8], false, "streaming", 1, Quality { bitrate_kbps: 1000, max_fps: 30 }, preset, medium, EffortState::pending(EncodingEffort::Fast));
                 let state: serde_json::Value = serde_json::from_slice(&packet[1..]).unwrap();
                 assert_eq!(state["preset"], name);
                 assert_eq!(state["ceiling_kbps"], quality.bitrate_kbps);
                 assert_eq!(state["medium_kbps"], medium);
                 assert_eq!(state["bitrate_kbps"], 1000);
-                assert_eq!(state["auto_codec"], true);
+                assert_eq!(state["codecs"][0]["codec"], "vp8");
+                assert_eq!(state["status"], "streaming");
             }
         }
-        assert_eq!(decode(&[HELLO, 0, 16]), None);
-        assert_eq!(decode(&[HELLO, 0, 16, 0]), None);
         assert_eq!(Preset::named("auto"), None);
         assert_eq!(Preset::default(), Preset::Medium);
-        for packet in [vec![HELLO, 0, 16, 0, 0], vec![HELLO, 0, 16, 0, 255]] {
-            assert_eq!(decode(&packet), Some(ClientMsg::Hello { hw: 0, sw: 16, codec: None, quality: Preset::Medium, effort: EncodingEffort::Fast }));
-        }
+        let packet = |json: &str| { let mut b = vec![HELLO]; b.extend(json.as_bytes()); b };
+        assert_eq!(decode(&packet(r#"{"codecs":["h264"]}"#)), Some(ClientMsg::Hello { codecs: vec![Codec::H264], quality: Preset::Medium, effort: EncodingEffort::Fast }));
+        assert_eq!(decode(&packet(r#"{"codecs":["unknown"]}"#)), None);
+        assert_eq!(decode(&packet(r#"{}"#)), None);
+        assert_eq!(decode(&packet(r#"{"codecs":null}"#)), None);
+
     }
 
     #[test]

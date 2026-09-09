@@ -361,12 +361,6 @@ pub enum EncodingEffort {
     High,
 }
 
-impl EncodingEffort {
-    pub fn from_id(id: u8) -> Self {
-        match id { 1 => Self::Balanced, 2 => Self::High, _ => Self::Fast }
-    }
-}
-
 #[derive(Clone, Debug, Serialize)]
 pub struct EffortState {
     pub requested: EncodingEffort,
@@ -394,7 +388,8 @@ pub enum Submit {
     Deferred,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Codec {
     H264,
     Hevc,
@@ -407,8 +402,12 @@ pub enum Codec {
 /// What the server may ask of the running encoder.
 pub trait StreamControl: Send + Sync {
     fn request_keyframe(&self);
-    /// Switch codecs; the stream restarts with a new id.
+    /// Start a fresh attempt, including when retrying the same codec.
     fn set_codec(&self, codec: Codec);
+    /// Current encoder attempt; queued output from older attempts must be discarded.
+    fn epoch(&self) -> u64;
+    /// Suspend encoding until the next codec selection.
+    fn pause(&self);
     /// Encode at this size (the frames are scaled to it) or, with none, at the frames' own; the stream
     /// restarts with a new id when it changes.
     fn set_size(&self, size: Option<(u32, u32)>);
@@ -442,10 +441,10 @@ impl std::fmt::Debug for dyn FrameSink {
 /// Encoder -> server.
 pub enum StreamMsg {
     /// A (re)started stream; always followed by a keyframe.
-    Info(StreamInfo),
-    Frame(EncodedFrame),
-    /// Encoding failed; a keyframe request restarts the worker's encoder.
-    Failed,
+    Info(u64, StreamInfo),
+    Frame(u64, EncodedFrame),
+    /// Encoding failed in this attempt.
+    Failed(u64),
     /// One 20 ms Opus packet from the clients' audio sink.
     Audio { pts_us: u64, data: Bytes },
 }

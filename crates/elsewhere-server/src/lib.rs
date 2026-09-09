@@ -43,8 +43,6 @@ use elsewhere_core::{Bytes, Codec, Command, ControlMsg, Event, FrameSink, InputM
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager};
 use tokio::sync::mpsc;
 
-/// `None` = automatic: the first available codec in server preference order that the browser can decode.
-pub type CodecPolicy = Option<Codec>;
 /// Makes an encoder for one viewer or window stream: the sink the compositor feeds and a control
 /// handle that must not keep the encoder worker alive (the stream ends when the compositor drops the sink).
 pub type SinkFactory = Box<dyn Fn(mpsc::Sender<StreamMsg>) -> Result<(Box<dyn FrameSink>, Box<dyn StreamControl>)> + Send + Sync>;
@@ -60,8 +58,7 @@ pub struct Config {
     pub url_prefix: String,
     /// Accept root routes because the proxy strips the public prefix before forwarding.
     pub proxy_strips_prefix: bool,
-    pub codec: CodecPolicy,
-    /// What the encoder side can produce (`elsewhere_stream::codecs`), best first, and whether on the CPU.
+    /// Startup-probed codecs allowed by the configuration, and whether encoding uses the CPU.
     pub codecs: Vec<Codec>,
     pub software: bool,
     /// `--bitrate`: the Medium quality level's bitrate ceiling.
@@ -111,7 +108,6 @@ pub struct App {
     batches: Mutex<HashMap<String, Key>>,
     mcp_sessions: Arc<mcp::sessions::Sessions>,
     commands: calloop::channel::Sender<Command>,
-    policy: CodecPolicy,
     codecs: Vec<Codec>,
     software: bool,
     bitrate_kbps: u32,
@@ -210,11 +206,7 @@ pub(crate) struct ViewerSession {
     size: Option<OutputGeometry>,
     /// Its encoder: codec, size, quality and keyframes.
     control: Box<dyn StreamControl>,
-    /// What the browser decodes (the `Hello` masks), what it asked for, and what it got.
-    hw: u8,
-    sw: u8,
-    want_codec: Option<Codec>,
-    codec: Codec,
+    selection: ws::CodecSelection,
     quality: elsewhere_core::Quality,
     preset: protocol::Preset,
     /// A webcam frame of this session was dropped: the next ones are too, until a keyframe (a VP8 delta
@@ -243,7 +235,6 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
         // Enabling one requires authorization for replay requests without a session ID.
         mcp_sessions: Arc::new(mcp::sessions::Sessions::default()),
         commands,
-        policy: cfg.codec,
         codecs: cfg.codecs,
         software: cfg.software,
         bitrate_kbps: cfg.bitrate_kbps,
@@ -443,7 +434,7 @@ async fn bearer(State(app): State<Arc<App>>, mut req: Request, next: Next) -> Re
 
 const NO_STORE: [(header::HeaderName, &str); 1] = [(header::CACHE_CONTROL, "no-store")];
 
-/// The codecs this server encodes, in the order Auto prefers them, and whether on the GPU.
+/// The codecs this server encodes, and whether on the GPU.
 async fn api_codecs(Extension(key): Extension<Key>, State(app): State<Arc<App>>) -> Response {
     if let Err(e) = key.require(P::DesktopView) { return e.into_response(); }
     let list: Vec<serde_json::Value> = app.codecs.iter().map(|&c| serde_json::json!({ "codec": protocol::codec_name(c), "hardware": !app.software })).collect();

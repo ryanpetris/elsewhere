@@ -1,4 +1,4 @@
-// Docker: built viewer and Chromium. Capability discovery must precede the video socket.
+// Docker: built viewer and Chromium. Decoder order, recovery UI and live preferences for both viewers.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -19,58 +19,68 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const browser = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--no-sandbox'] });
 try {
   for (const query of ['', '?window=1']) {
-    const page = await browser.newPage();
+    const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
     await page.addInitScript(() => {
-      localStorage.setItem('elsewhere.codec', 'vp9');
       window.sent = []; window.sockets = []; window.requests = 0; window.probed = [];
       const fetch = window.fetch;
-      window.fetch = (url, init) => String(url).endsWith('/api/codecs') ? new Promise(resolve => {
-        requests++;
-        window.releaseCodecs = (list, status = 200) => resolve(new Response(JSON.stringify(list), { status }));
-      }) : fetch(url, init);
-      VideoDecoder.isConfigSupported = async config => { probed.push(config.codec); return { supported: true }; };
+      window.fetch = (url, init) => { if (String(url).endsWith('/api/codecs')) requests++; return fetch(url, init); };
+      VideoDecoder.isConfigSupported = async config => { probed.push(config.codec); return { supported: !config.codec.startsWith('vp09') }; };
       window.WebSocket = class {
         static OPEN = 1; readyState = 1;
         constructor() { sockets.push(this); queueMicrotask(() => this.onopen?.()); }
         send(data) { sent.push([...new Uint8Array(data)]); }
         close() { this.readyState = 3; this.onclose?.({ code: 1006, reason: '' }); }
       };
+      window.message = (tag, object) => sockets.at(-1).onmessage({ data: new Uint8Array([tag, ...new TextEncoder().encode(JSON.stringify(object))]).buffer });
+      window.streamState = (status, codec, attempt = 1) => message(0x0c, { status, codec, attempt, codecs: [{ codec: 'h264', hardware: true }, { codec: 'hevc', hardware: true }, { codec: 'vp9', hardware: true }], preset: 'medium', medium_kbps: 8000, ceiling_kbps: 8000, bitrate_kbps: 8000, max_fps: 0 });
+      window.payload = tag => JSON.parse(new TextDecoder().decode(new Uint8Array(sent.filter(p => p[0] === tag).at(-1).slice(1))));
     });
     await page.goto(`http://127.0.0.1:${server.address().port}/${query}#token=test`);
-    await page.waitForFunction(() => requests === 1);
-    assert.equal(await page.evaluate(() => sockets.length), 0);
-    await page.evaluate(() => releaseCodecs([{ codec: 'h264', hardware: true }, { codec: 'hevc', hardware: true }]));
     await page.waitForFunction(() => sent.some(p => p[0] === 0x81));
-    assert.deepEqual(await page.evaluate(() => sent.find(p => p[0] === 0x81)), [0x81, 0, 3, 0, 3, 0]);
-    assert.equal(await page.evaluate(() => elsewhere.store.get().choice.codec), 'auto');
-    assert.deepEqual(await page.evaluate(() => [...new Set(probed)]), ['avc1.640028', 'hev1.1.6.L120.90']);
-
-    await page.evaluate(() => { elsewhere.setChoice({ codec: 'hevc', quality: 'high' }); sockets[0].close(); });
-    await page.waitForFunction(() => requests === 2);
+    assert.equal(await page.evaluate(() => requests), 0);
+    assert.deepEqual(await page.evaluate(() => payload(0x81)), { codecs: ['h264', 'hevc', 'av1', 'vp8'], quality: 'medium', effort: 'fast' });
+    assert.equal(await page.evaluate(() => probed.length), 5);
+    await page.evaluate(() => streamState('starting', 'h264'));
+    await page.getByTitle('Video codec', { exact: true }).waitFor();
+    assert.deepEqual(await page.getByTitle('Video codec', { exact: true }).locator('option').evaluateAll(options => options.map(o => o.value)), ['auto', 'h264', 'hevc']);
+    await page.getByTitle('Video codec', { exact: true }).selectOption('hevc');
+    assert.deepEqual(await page.evaluate(() => payload(0x8f)), { codecs: ['hevc', 'h264', 'av1', 'vp8'] });
+    await page.evaluate(() => streamState('retrying', 'hevc', 2));
+    await page.getByRole('status').filter({ hasText: 'Retrying HEVC' }).waitFor();
+    await page.evaluate(() => streamState('switching', 'h264', 3));
+    await page.getByRole('status').filter({ hasText: 'Switching to H.264' }).waitFor();
+    assert(await page.evaluate(() => { const first = elsewhere.store.get().notice; streamState('switching', 'h264', 3); return elsewhere.store.get().notice === first; }), 'repeat state does not repeat the switch notice');
+    assert.match(await page.getByTitle('Video codec', { exact: true }).locator('option:checked').textContent(), /using H\.264/);
+    await page.evaluate(() => { streamState('failed', null, 4); streamState('starting', 'h264', 1); });
+    assert.equal(await page.evaluate(() => elsewhere.store.get().streamState.status), 'failed');
+    await page.getByRole('button', { name: 'Retry video', exact: true }).click();
+    assert.deepEqual(await page.evaluate(() => payload(0x8f)), { codecs: ['hevc', 'h264', 'av1', 'vp8'] });
     assert.equal(await page.evaluate(() => sockets.length), 1);
-    await page.evaluate(() => releaseCodecs([{ codec: 'hevc', hardware: true }]));
-    await page.waitForFunction(() => sent.filter(p => p[0] === 0x81).length === 2);
-    assert.deepEqual(await page.evaluate(() => sent.filter(p => p[0] === 0x81)[1]), [0x81, 0, 2, 2, 4, 0]);
-
-    await page.evaluate(() => sockets[1].close());
-    await page.waitForFunction(() => requests === 3);
-    await page.evaluate(() => releaseCodecs([], 503));
-    await page.waitForFunction(() => requests === 4);
-    assert.equal(await page.evaluate(() => sockets.length), 2);
-    await page.evaluate(() => releaseCodecs([]));
-    await page.waitForFunction(() => elsewhere.store.get().status === 'error');
-    assert.equal(await page.evaluate(() => sockets.length), 2);
-    await page.getByText('No video codec in common', { exact: true }).waitFor();
-    assert.equal(await page.getByText('This tab showed one window; it is gone.').count(), 0);
-    await page.reload();
-    await page.waitForFunction(() => requests === 1);
+    // An old RTC configuration cannot revive exhausted video.
+    await page.evaluate(() => message(1, { attempt: 3, streamId: 1, codec: 'avc1.640028', width: 640, height: 480, scale: 1 }));
+    assert.equal(await page.evaluate(() => elsewhere.store.get().stream), null);
+    // A new RTC config may beat its WebSocket state. A delayed old config must not replace it.
     await page.evaluate(() => {
-      window.VideoDecoder = undefined;
-      releaseCodecs([{ codec: 'h264', hardware: true }]);
+      message(1, { attempt: 6, streamId: 6, codec: 'avc1.640028', width: 640, height: 480, scale: 1 });
+      message(1, { attempt: 5, streamId: 5, codec: 'avc1.640028', width: 640, height: 480, scale: 1 });
     });
-    await page.waitForFunction(() => elsewhere.store.get().status === 'error');
-    assert.equal(await page.evaluate(() => sockets.length), 0);
+    assert.equal(await page.evaluate(() => elsewhere.store.get().stream.attempt), 6);
+    await page.getByTitle('Video codec', { exact: true }).selectOption('auto');
+    assert.deepEqual(await page.evaluate(() => payload(0x8f)), { codecs: ['h264', 'hevc', 'av1', 'vp8'] });
+    await page.evaluate(() => { elsewhere.setChoice({ codec: 'hevc', quality: 'high' }); sockets[0].close(); });
+    await page.waitForFunction(() => sockets.length === 2 && sent.filter(p => p[0] === 0x81).length === 2);
+    assert.deepEqual(await page.evaluate(() => payload(0x81)), { codecs: ['hevc', 'h264', 'av1', 'vp8'], quality: 'high', effort: 'fast' });
+    await page.evaluate(() => streamState('starting', 'hevc', 1));
+    assert.equal(await page.evaluate(() => elsewhere.store.get().streamState.attempt), 1);
+    assert.deepEqual(errors, []);
     await page.close();
+    const unsupported = await browser.newPage();
+    await unsupported.addInitScript(() => { window.VideoDecoder = undefined; });
+    await unsupported.goto(`http://127.0.0.1:${server.address().port}/${query}#token=test`);
+    await unsupported.waitForFunction(() => elsewhere.store.get().status === 'error');
+    await unsupported.close();
   }
-  console.log('codec discovery precedes desktop/window streaming; defaults, choices, reconnects and failures verified');
+  console.log('desktop/window ordered negotiation, filtering, recovery, retry and reconnect passed');
 } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }

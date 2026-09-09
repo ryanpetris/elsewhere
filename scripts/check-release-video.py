@@ -34,7 +34,7 @@ def read(stream, size):
     return data
 
 
-def fresh_key(codec, choice):
+def fresh_key(codec):
     with socket.create_connection(("127.0.0.1", int(port)), timeout=15) as sock:
         key = base64.b64encode(os.urandom(16))
         sock.sendall(b"GET /ws HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n"
@@ -50,7 +50,7 @@ def fresh_key(codec, choice):
         accept = base64.b64encode(hashlib.sha1(key + b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest())
         assert headers.get(b"sec-websocket-accept") == accept
         send(sock, b"\x80" + token)
-        send(sock, bytes([0x81, 0, 1 << (choice - 1), choice, 3]))
+        send(sock, b"\x81" + json.dumps({"codecs": [codec], "quality": "medium"}).encode())
         config, fragment = None, bytearray()
         while True:
             flags, size = read(stream, 2)
@@ -80,11 +80,10 @@ def fresh_key(codec, choice):
                 return config, payload[12:]
 
 
-families = ["h264", "hevc", "vp9", "av1", "vp8"]
 assert available, "release advertises no software codec"
 for entry in available:
     codec = entry["codec"]
-    config, payload = fresh_key(codec, families.index(codec) + 1)
+    config, payload = fresh_key(codec)
     width, height = config["width"], config["height"]
     assert (width, height) == (320, 240)
     if codec in ("vp8", "vp9", "av1"):

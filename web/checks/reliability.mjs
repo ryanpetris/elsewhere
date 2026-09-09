@@ -110,7 +110,7 @@ try {
     await mkdir(directory + '/runtime', { recursive: true, mode: 0o700 });
     const log = await open(directory + '/server.log', 'w');
     const origin = `http://127.0.0.1:${port}`;
-    const server = spawn(binary, ['--no-audio', '--no-tls', '--render-node', renderNode, '--codec', codecs[0], '--bitrate', String(ceiling),
+    const server = spawn(binary, ['--no-audio', '--no-tls', '--render-node', renderNode, '--codecs', codecs.join(','), '--bitrate', String(ceiling),
       '--screen-size', `${width}x${height}`, '--kiosk', '--listen', `127.0.0.1:${port}`],
     { cwd: directory, env: { ...process.env, HOME: directory, XDG_CONFIG_HOME: directory + '/config', XDG_RUNTIME_DIR: directory + '/runtime',
       RUST_LOG: logFilter, NO_COLOR: '1' }, stdio: ['ignore', log.fd, log.fd] });

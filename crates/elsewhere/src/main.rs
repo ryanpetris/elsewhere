@@ -31,10 +31,9 @@ struct Cli {
     /// Medium quality bitrate ceiling in kbit/s; other quality levels have their own ceilings.
     #[arg(long, default_value_t = 8000)]
     bitrate: u32,
-    /// Video codec: auto prefers H.264, HEVC, AV1, VP9, then VP8 among the encoders
-    /// available on this machine that the browser can decode.
-    #[arg(long, default_value = "auto", value_parser = ["auto", "h264", "hevc", "vp9", "av1", "vp8"])]
-    codec: String,
+    /// Comma-separated codecs to allow. Only these encoders are probed; the browser ranks them.
+    #[arg(long, value_delimiter = ',', default_value = "h264,hevc,av1,vp9,vp8", value_parser = ["h264", "hevc", "vp9", "av1", "vp8"])]
+    codecs: Vec<String>,
     /// Encode on the CPU (libvpx, x264, x265, libaom: whichever is installed) instead of with VA-API,
     /// for machines without a usable GPU encoder. Slower; the desktop runs at 30 Hz.
     #[arg(long)]
@@ -169,14 +168,10 @@ fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env().add_directive("info".parse()?))
         .init();
-    let codec = match cli.codec.as_str() {
-        "h264" => Some(Codec::H264),
-        "hevc" => Some(Codec::Hevc),
-        "vp9" => Some(Codec::Vp9),
-        "av1" => Some(Codec::Av1),
-        "vp8" => Some(Codec::Vp8),
-        _ => None,
-    };
+    let allowed: Vec<_> = cli.codecs.iter().map(|name| match name.as_str() {
+        "h264" => Codec::H264, "hevc" => Codec::Hevc, "vp9" => Codec::Vp9,
+        "av1" => Codec::Av1, "vp8" => Codec::Vp8, _ => unreachable!(),
+    }).collect();
     // a node given by hand must be there; only the default one may be missing (a machine without a GPU)
     let render_node = match cli.render_node.as_os_str().to_str() {
         Some("none") => None,
@@ -188,9 +183,8 @@ fn main() -> Result<()> {
         tracing::info!("no GPU ({}): rendering in software, encoding in software", cli.render_node.display());
     }
     let software = cli.software_encoding || render_node.is_none();
-    let encoders = elsewhere_stream::Encoders::probe(if software { None } else { render_node.as_deref() })?;
+    let encoders = elsewhere_stream::Encoders::probe(if software { None } else { render_node.as_deref() }, &allowed)?;
     let codecs = encoders.codecs();
-    anyhow::ensure!(codec.is_none_or(|c| codecs.contains(&c)), "no {codec:?} encoder here; available: {codecs:?}");
     tracing::info!(?codecs, software, "video encoders");
     let (audio_tx, audio_rx) = mpsc::channel(16);
     let (events_tx, events_rx) = mpsc::unbounded_channel();
@@ -287,7 +281,7 @@ fn main() -> Result<()> {
         }
         elsewhere_server::rtc::Config { port: cli.rtc_port.unwrap_or(cli.listen.port()), addr: cli.rtc_addr, ice_servers }
     });
-    let server = elsewhere_server::Config { listen: cli.listen, tls: !cli.no_tls, url_prefix: cli.url_prefix, proxy_strips_prefix: cli.proxy_strips_prefix, codec, codecs, software, bitrate_kbps: cli.bitrate, initial, fixed_size: cli.screen_size.is_some(), data_dir, elements: cli.elements, files_dir, version: env!("ELSEWHERE_VERSION"), sinks, broadcast, audio_available: audio.is_some(), mixer: audio.as_mut().and_then(|session| session.mixer.take()), mic: audio.as_ref().map(|session| session.mic.clone()), cam: cam.as_ref().map(|(_, tx)| tx.clone()), rtc };
+    let server = elsewhere_server::Config { listen: cli.listen, tls: !cli.no_tls, url_prefix: cli.url_prefix, proxy_strips_prefix: cli.proxy_strips_prefix, codecs, software, bitrate_kbps: cli.bitrate, initial, fixed_size: cli.screen_size.is_some(), data_dir, elements: cli.elements, files_dir, version: env!("ELSEWHERE_VERSION"), sinks, broadcast, audio_available: audio.is_some(), mixer: audio.as_mut().and_then(|session| session.mixer.take()), mic: audio.as_ref().map(|session| session.mic.clone()), cam: cam.as_ref().map(|(_, tx)| tx.clone()), rtc };
     // Ctrl+C and SIGTERM (`docker stop`, a service manager) return here so the audio devices get unloaded
     // and the media workers stopped.
     let result = runtime.block_on(async {

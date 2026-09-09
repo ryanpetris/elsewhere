@@ -17,7 +17,7 @@ const root = await mkdtemp(tmpdir() + '/elsewhere-rtc-recovery-');
 await mkdir(root + '/home'); await mkdir(root + '/runtime', { mode: 0o700 });
 const log = await open(root + '/desktop.log', 'w');
 const origin = 'http://127.0.0.1:8089';
-const desktop = spawn((process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere'), ['--no-audio', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--bitrate', String(medium), '--listen', '127.0.0.1:8089', '--socket-name', 'wayland-rtc-check'], {
+const desktop = spawn((process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere'), ['--no-audio', '--no-tls', '--render-node', 'none', '--codecs', 'vp8', '--bitrate', String(medium), '--listen', '127.0.0.1:8089', '--socket-name', 'wayland-rtc-check'], {
   env: { ...process.env, HOME: root + '/home', XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime', RUST_LOG: 'info,elsewhere_stream::viewer=debug' },
   stdio: ['ignore', log.fd, log.fd],
 });

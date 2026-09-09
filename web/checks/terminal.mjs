@@ -10,7 +10,7 @@ await mkdir(root + '/runtime', { mode: 0o700 });
 const log = await open(root + '/server.log', 'w');
 const origin = 'http://127.0.0.1:8097';
 const server = spawn(process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere', [
-  '--no-rtc', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--listen', '127.0.0.1:8097', '--socket-name', 'wayland-terminal',
+  '--no-rtc', '--no-tls', '--render-node', 'none', '--codecs', 'vp8', '--listen', '127.0.0.1:8097', '--socket-name', 'wayland-terminal',
 ], { cwd: root, env: { ...process.env, HOME: root, SHELL: '/bin/bash', XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime' },
   stdio: ['ignore', log.fd, log.fd] });
 const contents = path => readFile(path, 'utf8').catch(() => null);

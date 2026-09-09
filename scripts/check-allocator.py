@@ -52,7 +52,7 @@ int mallopt(int parameter, int value) {
         token = subprocess.check_output([binary, 'token', 'create', '--admin'], env={**os.environ, 'XDG_CONFIG_HOME': str(case / 'config')}, text=True).strip()
         with (case / 'server.log').open('wb') as log:
             server = subprocess.Popen([binary, '--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none',
-                                       '--codec', 'vp8', '--screen-size', '320x240', '--listen', '127.0.0.1:18445'],
+                                       '--codecs', 'vp8', '--screen-size', '320x240', '--listen', '127.0.0.1:18445'],
                                       env=env, stdout=log, stderr=subprocess.STDOUT)
             try:
                 for _ in range(100):

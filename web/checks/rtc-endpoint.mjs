@@ -19,7 +19,7 @@ try {
     ['localhost', ['--rtc-addr', '127.0.0.1', '--rtc-port', '8098'], 8098],
   ]) {
     const log = await open(root + '/desktop.log', 'w');
-    const desktop = spawn((process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere'), ['--no-audio', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--listen', '[::]:8097', ...args], {
+    const desktop = spawn((process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere'), ['--no-audio', '--no-tls', '--render-node', 'none', '--codecs', 'vp8', '--listen', '[::]:8097', ...args], {
       env: { ...process.env, XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime' },
       stdio: ['ignore', log.fd, log.fd],
     });

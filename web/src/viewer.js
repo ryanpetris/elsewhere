@@ -5,12 +5,12 @@ import { websocketUrl, storageKey } from './urls.js';
 import { createPip } from './pip.js';
 import { createClipboard } from './clipboard.js';
 import { KEYCODES } from './keycodes.js';
-import { TOKEN, WINDOW, PIP, api, elementsOf, snapshot, control, uploadFile, clipboardFiles, pref, codecs as serverCodecs } from './api.js';
+import { TOKEN, WINDOW, PIP, api, elementsOf, snapshot, control, uploadFile, clipboardFiles, pref } from './api.js';
 import { createStore } from './store.js';
 import { startMic, stopMic } from './mic.js';
 import { startCam, stopCam } from './cam.js';
 import { openRtc, rtcEndpoint, RTC_TIMING } from './rtc.js';
-import { CONFIG, VIDEO, CURSOR, POINTER_LOCK, AUDIO, WINDOWS, CLIPBOARD, ROLE, NOTICE, CLIPBOARD_DATA, NOTIFICATIONS, STREAM_STATE, RTC, ROLES, CODEC_FAMILIES, EFFORTS, PRESETS, PRESET_IDS, AUTH, HELLO, RESIZE, MOTION_ABS, MOTION_REL, BUTTON, AXIS, KEY, REQUEST_KEYFRAME, BLUR, POINTER_LOCK_LOST, POINTER_LOCK_GAINED, CONTROL, SET_CLIPBOARD, TAKE_CONTROL, NOTIFY, STREAM, DRAG, INPUT, TOUCH, MIC, CAM, RTC_CLIENT, REPORT, BTN, MIXER_STATE, MIXER_LEVELS, MIXER_ERROR, MIXER_CLIENT, SESSION, HANDOFF, FILE_RESULT } from './protocol.js';
+import { CONFIG, VIDEO, CURSOR, POINTER_LOCK, AUDIO, WINDOWS, CLIPBOARD, ROLE, NOTICE, CLIPBOARD_DATA, NOTIFICATIONS, STREAM_STATE, RTC, ROLES, CODEC_FAMILIES, EFFORTS, PRESETS, AUTH, HELLO, RESIZE, MOTION_ABS, MOTION_REL, BUTTON, AXIS, KEY, REQUEST_KEYFRAME, BLUR, POINTER_LOCK_LOST, POINTER_LOCK_GAINED, CONTROL, SET_CLIPBOARD, TAKE_CONTROL, NOTIFY, STREAM, DRAG, INPUT, TOUCH, MIC, CAM, RTC_CLIENT, REPORT, BTN, MIXER_STATE, MIXER_LEVELS, MIXER_ERROR, MIXER_CLIENT, SESSION, HANDOFF, FILE_RESULT } from './protocol.js';
 
 const AUDIO_LEAD = 0.06;
 const qualityName = name => PRESETS.includes(name) ? name : 'medium';
@@ -32,7 +32,7 @@ export function createViewer() {
     notice: null, // { text, kind: 'warning' | 'success' }: a word about our last action, shown for a few seconds
     notifications: [], // open desktop notifications, oldest first
     upload: null, // { name, index, count } while files dropped on the page go up
-    streamState: null, // { codec, auto_codec, preset, ceiling_kbps, medium_kbps, bitrate_kbps, max_fps, effort } from the server
+    streamState: null, // { codec, codecs, status, preset, ceiling_kbps, medium_kbps, bitrate_kbps, max_fps, effort } from the server
     choice: { codec: pref.getStr('codec', 'auto'), quality: qualityName(pref.getStr('quality', 'medium')), effort: effortName(pref.getStr('effort', 'fast')) }, // this viewer's picks
     touchMouse: pref.get('touchmouse', false), // fingers as a mouse with gestures, instead of real touch points
     audioAvailable: false,
@@ -48,8 +48,8 @@ export function createViewer() {
     rtcRecovery: { state: 'unavailable', reason: 'Waiting for desktop connection', retries: 0, nextAt: 0 },
     cam: false, // the local webcam is going to the desktop
     camAvailable: false, // the desktop takes one (--webcam)
-    codecs: [], // what the server encodes, in Auto's order: [{ codec, hardware }]
-    decodable: [], // server codec families this browser can decode
+    codecs: [], // what the server encodes: [{ codec, hardware }]
+    decodable: [], // codec families this browser can decode, in preference order
     filesPath: '@transfer', // Navigation belongs to this viewer.
     filesChange: null,
     filesOpen: 0,
@@ -179,7 +179,7 @@ export function createViewer() {
       if (!can('desktop.view')) { store.set({ status: 'unauthorized', reason: 'This token does not allow desktop viewing' }); return; }
       capabilities = await discoverCodecs();
       if (disposed) return;
-      if (!capabilities.sw) { store.set({ status: 'error', reason: 'No video codec in common' }); return; }
+      if (!capabilities.length) { store.set({ status: 'error', reason: 'This browser cannot decode any available video codec' }); return; }
     } catch (error) {
       if (!disposed) { store.set({ status: 'retrying', permissions: [], reason: error.message }); reconnectTimer = setTimeout(connect, 1000); }
       return;
@@ -193,7 +193,8 @@ export function createViewer() {
       if (disposed || ws !== socket) return;
       const t = new TextEncoder().encode(TOKEN);
       send(AUTH, t.length, dv => new Uint8Array(dv.buffer, 1).set(t));
-      sendHello(capabilities);
+      store.set({ status: 'connecting', streamState: null, codecs: [] });
+      sendHello();
       if (disposed || ws !== socket || socket.readyState !== WebSocket.OPEN) return;
       if (mixerSubscribed) sendText(MIXER_CLIENT, JSON.stringify({ op: 'subscribe', enabled: true }));
       if (!WINDOW) sendResize(); // a window stream is the window's size
@@ -287,25 +288,25 @@ export function createViewer() {
   /// A window action or spawn for the compositor, as JSON.
   const sendControl = obj => { if (can(({ launch: 'apps.launch', spawn: 'commands.execute', quit: 'server.manage' })[obj.op] ?? 'desktop.control')) sendText(CONTROL, JSON.stringify(obj)); };
 
-  // Discover shared codecs before opening the streaming connection.
+  // The browser ranks its decoders; the server intersects this list with its startup probe.
   async function discoverCodecs() {
-    const codecs = await serverCodecs();
-    const probes = ['avc1.640028', 'hev1.1.6.L120.90', 'vp09.00.40.08', 'av01.0.09M.08', 'vp8'];
-    let sw = 0;
+    const probes = ['avc1.640028', 'hev1.1.6.L120.90', 'av01.0.09M.08', 'vp09.00.40.08', 'vp8'];
+    const decodable = [];
     for (const [i, codec] of probes.entries()) {
-      if (!globalThis.VideoDecoder || !codecs.some(entry => entry.codec === CODEC_FAMILIES[i])) continue;
-      if ((await VideoDecoder.isConfigSupported({ codec, hardwareAcceleration: 'no-preference' }).catch(() => ({}))).supported) sw |= 1 << i;
+      if (!globalThis.VideoDecoder) break;
+      if ((await VideoDecoder.isConfigSupported({ codec, hardwareAcceleration: 'no-preference' }).catch(() => ({}))).supported) decodable.push(CODEC_FAMILIES[i]);
     }
-    if (!disposed) store.set({ codecs, decodable: CODEC_FAMILIES.filter((_, i) => sw & (1 << i)) });
-    return { sw };
+    if (!disposed) store.set({ decodable });
+    return decodable;
   }
-  function sendHello({ sw }) {
-    let { codec, quality, effort } = state().choice;
-    if (codec !== 'auto' && !state().decodable.includes(codec)) {
-      codec = 'auto';
-      store.set({ choice: { ...state().choice, codec } });
-    }
-    send(HELLO, 5, dv => { dv.setUint8(1, 0); dv.setUint8(2, sw); dv.setUint8(3, CODEC_FAMILIES.indexOf(codec) + 1); dv.setUint8(4, PRESET_IDS[quality]); dv.setUint8(5, EFFORTS.indexOf(effort)); });
+  function preferences() {
+    const { codec } = state().choice;
+    const list = state().decodable;
+    return list.includes(codec) ? [codec, ...list.filter(c => c !== codec)] : list;
+  }
+  function sendHello() {
+    const { quality, effort } = state().choice;
+    sendText(HELLO, JSON.stringify({ codecs: preferences(), quality, effort }));
   }
   // A new codec, quality or effort for this session, remembered for the next connection.
   function setChoice(patch) {
@@ -316,7 +317,9 @@ export function createViewer() {
     if (patch.codec !== undefined) pref.setStr('codec', patch.codec);
     if (patch.quality !== undefined) pref.setStr('quality', patch.quality);
     if (patch.effort !== undefined) pref.setStr('effort', patch.effort);
-    if (ws?.readyState === WebSocket.OPEN) sendText(STREAM, JSON.stringify(patch));
+    const { codec, ...update } = patch;
+    if (codec !== undefined) update.codecs = preferences();
+    if (ws?.readyState === WebSocket.OPEN) sendText(STREAM, JSON.stringify(update));
   }
 
   // The output takes the stage's size (CSS px × devicePixelRatio); in window mode a Resize resizes the window.
@@ -358,10 +361,10 @@ export function createViewer() {
     if (decoder && decoder.state !== 'closed') decoder.close();
     const d = new VideoDecoder({
       output: f => {
-        if (disposed || d !== decoder) { f.close(); return; }
+        if (disposed || d !== decoder || stream?.attempt < state().streamState?.attempt) { f.close(); return; }
         const rec = inflight.get(f.timestamp); if (rec) rec.output = performance.now(); (ctx ? paintNow : schedule)(f);
       },
-      error: e => { if (!disposed && d === decoder) { console.error(e); decodeErrors++; resync(); } },
+      error: e => { if (!disposed && d === decoder && !(stream?.attempt < state().streamState?.attempt)) { console.error(e); decodeErrors++; resync(); } },
     });
     d.configure({ codec: stream.codec, optimizeForLatency: true });
     decoder = d;
@@ -378,6 +381,7 @@ export function createViewer() {
     switch (dv.getUint8(0)) {
       case CONFIG: {
         const next = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 1)));
+        if (next.attempt < state().streamState?.attempt || configuredSocket === ws && next.attempt < stream?.attempt) break;
         if (configuredSocket === ws && stream?.streamId === next.streamId) break;
         // A new socket configuration owns subsequent video; pending RTC callbacks belong to the old stream.
         if (via === 'websocket' && state().videoVia === 'webrtc') failRtc('Video resumed over WebSocket');
@@ -449,9 +453,18 @@ export function createViewer() {
         if (v.close && rtc && v.g === rtcGen) failRtc(v.reason || 'Server queue stalled');
         break;
       }
-      case STREAM_STATE:
-        store.set({ streamState: JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 1))) });
+      case STREAM_STATE: {
+        const streamState = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 1)));
+        if (streamState.attempt < state().streamState?.attempt || configuredSocket === ws && streamState.attempt < stream?.attempt) break;
+        if (streamState.attempt > stream?.attempt && pendingFrame) { inflight.delete(pendingFrame.timestamp); pendingFrame.close(); pendingFrame = null; }
+        const previous = state().streamState;
+        const choice = state().choice;
+        const both = streamState.codecs.filter(c => state().decodable.includes(c.codec));
+        store.set({ streamState, codecs: streamState.codecs,
+          choice: choice.codec !== 'auto' && !both.some(c => c.codec === choice.codec) ? { ...choice, codec: 'auto' } : choice });
+        if (streamState.status === 'switching' && (previous?.status !== 'switching' || previous.codec !== streamState.codec)) notice(`Video encoding failed. Switching to ${streamState.codec.toUpperCase()}.`);
         break;
+      }
       case CLIPBOARD_DATA:
         onClipboardData(new TextDecoder().decode(new Uint8Array(buf, 1)));
         break;
@@ -507,7 +520,7 @@ export function createViewer() {
       case VIDEO: {
         if (via === 'websocket' && state().videoVia === 'webrtc') return;
         if (dropNext) { dropNext = false; return; } // debug: elsewhere.dropNext() simulates a lost message
-        if (!decoder) return;
+        if (!decoder || stream?.attempt < state().streamState?.attempt) return;
         received++;
         const key = (dv.getUint8(1) & 1) !== 0, seq = dv.getUint16(2, true), pts = Number(dv.getBigUint64(4, true)), now = performance.now();
         // Both paths share a sequence; late and duplicate frames cannot update the path baselines.

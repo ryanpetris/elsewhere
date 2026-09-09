@@ -23,7 +23,7 @@ trap 'exit 1' HUP INT TERM
 export XDG_CONFIG_HOME="$work/config" XDG_RUNTIME_DIR="$work/runtime"
 mkdir -m 700 "$XDG_RUNTIME_DIR"
 elsewhere token create --admin >"$work/credential"
-elsewhere --render-node none --software-encoding --codec vp8 --no-audio --no-rtc \
+elsewhere --render-node none --software-encoding --no-audio --no-rtc \
     --no-tls --listen 127.0.0.1:18443 --screen-size 320x240 >"$work/server.log" 2>&1 &
 pid=$!
 for _ in $(seq 1 30); do

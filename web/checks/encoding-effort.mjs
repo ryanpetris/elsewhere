@@ -14,7 +14,7 @@ await mkdir(root + '/runtime', { mode: 0o700 });
 const log = await open(root + '/server.log', 'w');
 const origin = `http://${listen}`;
 const server = spawn(process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere', [
-  '--no-audio', '--no-rtc', '--no-tls', '--render-node', renderNode, '--codec', initialCodec,
+  '--no-audio', '--no-rtc', '--no-tls', '--render-node', renderNode, '--codecs', process.env.ELSEWHERE_CODECS ?? 'h264,hevc,av1,vp9,vp8',
   ...(process.env.ELSEWHERE_SOFTWARE_ENCODING ? ['--software-encoding'] : []), '--listen', listen,
 ], { cwd: root, env: { ...process.env, HOME: root, XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime' }, stdio: ['ignore', log.fd, log.fd] });
 const wait = async predicate => {

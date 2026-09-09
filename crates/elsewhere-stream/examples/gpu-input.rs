@@ -100,9 +100,9 @@ fn encode(sink: &mut FfmpegSink, buffer: &Buffer<'_>, seq: u64, leases: &Arc<Lea
     loop {
         while let Ok(message) = rx.try_recv() {
             match message {
-                StreamMsg::Info(value) => *info = Some(value),
-                StreamMsg::Frame(value) if value.pts_us == seq * 33_333 => return Ok(value),
-                StreamMsg::Frame(_) => {},
+                StreamMsg::Info(_, value) => *info = Some(value),
+                StreamMsg::Frame(_, value) if value.pts_us == seq * 33_333 => return Ok(value),
+                StreamMsg::Frame(_, _) => {},
                 _ => anyhow::bail!("unexpected encoder failure or audio"),
             }
         }
@@ -124,7 +124,7 @@ fn main() -> Result<()> {
     let buffers = [Buffer::new(&device, tiled, [255, 0, 0])?, Buffer::new(&device, 0, [0, 255, 0])?];
     ensure!(buffers[0].modifier == tiled && tiled != 0 && tiled != 0x00ff_ffff_ffff_ffff, "test needs a real tiled export");
     ensure!(matches!(buffers[1].modifier, 0 | 0x00ff_ffff_ffff_ffff), "test needs a real linear export");
-    let encoders = Encoders::probe(Some(&node))?;
+    let encoders = Encoders::probe(Some(&node), &[Codec::H264])?;
     ensure!(encoders.codecs().contains(&Codec::H264), "H264 VA encoding unavailable");
     let baseline = resources()?;
     let leases = Arc::new(Leases::default());
@@ -155,7 +155,7 @@ fn main() -> Result<()> {
         let rejected = Arc::new(Leases::default());
         for attempt in 0..20 {
             while let Ok(message) = rx.try_recv() {
-                ensure!(matches!(message, StreamMsg::Frame(_)), "unexpected message during stale-input rejection");
+                ensure!(matches!(message, StreamMsg::Frame(_, _)), "unexpected message during stale-input rejection");
             }
             let stale = buffers[(transition + 1) % 2].frame(900 + transition as u64, &rejected)?;
             ensure!(sink.submit(stale).map_err(|e| anyhow::anyhow!("{e}"))? == Submit::Held, "stale modifier was accepted");

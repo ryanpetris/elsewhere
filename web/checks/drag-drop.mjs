@@ -12,7 +12,7 @@ await mkdir(root + '/runtime', {mode: 0o700});
 const log = await open(root + '/server.log', 'w');
 const origin = 'http://127.0.0.1:8099';
 const desktop = spawn(process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere', [
-  '--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codec', 'vp8',
+  '--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codecs', 'vp8',
   '--listen', '127.0.0.1:8099', '--socket-name', 'wayland-drag-check',
 ], {env: {...process.env, HOME: root, XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime'},
   stdio: ['ignore', log.fd, log.fd], detached: true});
@@ -59,7 +59,7 @@ try {
   socket.addEventListener('message', ({data}) => packets.push(Buffer.from(data)));
   await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
   socket.send(Buffer.concat([Buffer.from([AUTH]), Buffer.from(token)]));
-  socket.send(Buffer.from([HELLO, 0, 16, 5, 1, 0]));
+  socket.send(Buffer.from([HELLO, ...new TextEncoder().encode(JSON.stringify({ codecs: ["vp8"], quality: "very-low" }))]));
   await wait(() => packets.some(p => p[0] === ROLE && p[1] === 2), 'controller');
   const fixture = fileURLToPath(new URL('../../crates/elsewhere-compositor/checks/drag-client.py', import.meta.url));
   const windows = {};

@@ -13,7 +13,7 @@ const origin = 'http://127.0.0.1:8093';
 const server = spawn(
     (process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere'),
     [
-      '--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--listen',
+      '--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codecs', 'vp8', '--listen',
       '127.0.0.1:8093', '--socket-name', 'wayland-pip-probe'
     ],
     {
