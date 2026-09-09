@@ -5,9 +5,7 @@ ceiling. Fast preserves the default speed settings. Balanced and High can improv
 same target bitrate, but can also lower frame rate or increase delay. A higher setting does not
 promise a better picture for every scene.
 
-Changes restart that viewer's desktop or window stream immediately. The page shows Applying effort
-until the new encoder produces its first keyframe, then reports the applied choice or Effort
-unavailable.
+Changes restart that viewer's desktop or window stream immediately.
 The browser remembers the choice for reloads and reconnects, sharing the saved preference across
 desktop and window tabs. Codec changes use the saved effort with
 the new encoder's mapping. Changing effort preserves the selected ceiling and the congestion

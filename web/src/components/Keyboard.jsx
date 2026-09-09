@@ -3,6 +3,7 @@
 // sticky: the next key or character goes with them.
 import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
+import { IconButton, cx } from './ui.jsx';
 
 /// Bring the phone's keyboard back for the row that is open (its own hide button dismissed it, and left
 /// the field focused, so a plain focus() would do nothing).
@@ -50,17 +51,17 @@ export function Keyboard({ viewer, onClose }) {
   };
   const keep = e => e.preventDefault(); // a tap on a key must not take the focus (and the phone's keyboard) away
   return (
-    <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-t border-zinc-800 bg-zinc-900 px-1.5 py-1.5 text-xs">
+    <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-t border-line bg-surface px-2 py-1.5 text-xs">
       {KEYS.map(([label, key]) => (
         <button key={key} type="button" onPointerDown={keep} onClick={() => (MODS.includes(key) ? setMods(mods.includes(key) ? mods.filter(m => m !== key) : [...mods, key]) : chord(key))}
-          className={`shrink-0 rounded-md border px-1.5 py-1 ${mods.includes(key) ? 'border-indigo-500/40 bg-indigo-500/15 text-indigo-300' : 'border-zinc-700 bg-zinc-800 text-zinc-300 active:bg-zinc-700'}`}>
+          className={cx('h-7 shrink-0 rounded-md border px-2 font-medium transition-colors', mods.includes(key) ? 'border-accent/50 bg-accent/15 text-accent-2' : 'border-line-2 bg-surface-3 text-ink-2 shadow-card active:bg-surface-4')}>
           {label}
         </button>
       ))}
       <input ref={field} data-keyboard="" onKeyDown={onKeyDown} onFocus={viewer.releaseInput}
         aria-label="Type into the desktop" autoCapitalize="off" autoCorrect="off" autoComplete="off" spellCheck={false}
-        className="h-7 w-0 min-w-0 flex-1 rounded-md border border-dashed border-zinc-700 bg-transparent px-1 text-transparent caret-transparent outline-none focus:border-indigo-400" />
-      <button type="button" onClick={onClose} aria-label="Hide the keyboard row" className="shrink-0 rounded-md p-1 text-zinc-400 hover:bg-zinc-800"><X className="size-4" /></button>
+        className="h-7 w-0 min-w-0 flex-1 rounded-md border border-dashed border-line-2 bg-transparent px-1 text-transparent caret-transparent outline-none focus:border-accent" />
+      <IconButton icon={X} label="Hide the keyboard row" size="sm" onClick={onClose} />
     </div>
   );
 }

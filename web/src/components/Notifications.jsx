@@ -30,24 +30,26 @@ function Toast({ n, viewer }) {
   const act = (e, action) => { e.stopPropagation(); viewer.notify(n.id, action); };
   const buttons = n.actions.filter(([key]) => key !== 'default');
   return (
-    <div onClick={e => act(e, 'default')} className="cursor-pointer rounded-lg border border-zinc-700 bg-zinc-900/95 p-3 text-sm text-zinc-200 shadow-lg backdrop-blur">
-      <div className="flex items-start gap-2.5">
-        {icon ? <img src={icon} alt="" className="mt-0.5 size-8 shrink-0 object-contain" /> : <Bell className="mt-0.5 size-8 shrink-0 p-1.5 text-zinc-500" />}
+    <div onClick={e => act(e, 'default')} className="animate-rise cursor-pointer rounded-xl border border-line-2 bg-surface/95 p-3 text-sm text-ink-2 shadow-pop backdrop-blur">
+      <div className="flex items-start gap-3">
+        <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-surface-3">
+          {icon ? <img src={icon} alt="" className="size-7 object-contain" /> : <Bell className="size-4 text-ink-3" />}
+        </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
-            <span className="truncate font-medium text-zinc-100">{n.summary}</span>
-            {n.app && <span className="ml-auto shrink-0 text-[11px] text-zinc-500">{n.app}</span>}
+            <span className="truncate font-medium text-ink">{n.summary}</span>
+            {n.app && <span className="ml-auto shrink-0 text-[11px] text-ink-4">{n.app}</span>}
           </div>
-          {n.body && <div className="mt-0.5 line-clamp-4 text-xs whitespace-pre-line text-zinc-300">{plain(n.body)}</div>}
+          {n.body && <div className="mt-0.5 line-clamp-4 text-xs leading-relaxed whitespace-pre-line text-ink-2">{plain(n.body)}</div>}
           {buttons.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {buttons.map(([key, label]) => (
-                <button key={key} type="button" onClick={e => act(e, key)} className="rounded-md bg-zinc-800 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-700">{label}</button>
+                <button key={key} type="button" onClick={e => act(e, key)} className="btn btn-outline btn-xs">{label}</button>
               ))}
             </div>
           )}
         </div>
-        <button type="button" onClick={e => act(e, undefined)} title="Dismiss" className="-mt-1 -mr-1 rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"><X className="size-4" /></button>
+        <button type="button" onClick={e => act(e, undefined)} title="Dismiss" aria-label="Dismiss" className="-mt-1 -mr-1 rounded-md p-1 text-ink-4 transition-colors hover:bg-surface-3 hover:text-ink"><X className="size-4" /></button>
       </div>
     </div>
   );

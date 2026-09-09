@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { AudioLines, ChevronsDownUp, ChevronsUpDown, Maximize, Minimize, X } from 'lucide-react';
 import { pref } from '../api.js';
 import { useStore } from '../store.js';
+import { IconButton, cx } from './ui.jsx';
 
 const loadRenderer = () => import('../visualiser.js');
 
@@ -78,33 +80,39 @@ export function AudioPanel({ viewer, hidden, onClose }) {
     : !playback ? available ? 'Waiting for session audio.' : 'Session audio unavailable.'
     : audio?.state === 'suspended' ? 'Playback is waiting for a user gesture.'
     : audio?.signalPeak > 0.0001 ? 'Session signal received.' : 'Connected, but silent.';
-  const button = 'rounded border border-zinc-600 px-2 py-1 hover:bg-zinc-700 focus-visible:outline-2 focus-visible:outline-indigo-400';
-  const select = 'rounded border border-zinc-600 bg-zinc-800 px-2 py-1';
+  const live = status === 'connected' && playback && audio?.state !== 'suspended';
   return (
-    <section ref={panel} hidden={hidden} aria-label="Session audio" className="shrink-0 border-t border-zinc-700 bg-zinc-900 p-3 text-xs">
-      <div className="flex flex-wrap items-center gap-3">
-        <strong>Session audio</strong>
-        <label>Style <select className={select} value={style} onChange={e => { setStyle(e.target.value); pref.setStr('visualiser.style', e.target.value); }}>
+    <section ref={panel} hidden={hidden} aria-label="Session audio" className={cx('flex shrink-0 flex-col border-t border-line bg-surface text-xs', fullscreen && 'bg-canvas')}>
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-line px-3">
+        <AudioLines className="size-3.5 text-ink-3" />
+        <strong className="font-medium text-ink">Session audio</strong>
+        <span className="ml-auto flex items-center gap-1">
+          <button type="button" className="btn btn-ghost btn-xs" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>{expanded ? <><ChevronsDownUp className="size-3" /> Collapse</> : <><ChevronsUpDown className="size-3" /> Expand</>}</button>
+          {document.fullscreenEnabled && <button type="button" className="btn btn-ghost btn-xs" onClick={() => {
+            const action = fullscreen ? document.exitFullscreen() : panel.current.requestFullscreen();
+            action.catch(() => setError('Fullscreen unavailable. You can still expand the panel.'));
+          }}>{fullscreen ? <><Minimize className="size-3" /> Exit fullscreen</> : <><Maximize className="size-3" /> Fullscreen visualiser</>}</button>}
+          <IconButton icon={X} label="Close visualiser" size="sm" onClick={onClose} />
+        </span>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2">
+        <label className="inline-flex items-center gap-1.5 text-ink-3">Style <select className="select" value={style} onChange={e => { setStyle(e.target.value); pref.setStr('visualiser.style', e.target.value); }}>
           <option value="bars">Spectrum bars</option><option value="line">Line / area spectrum</option>
           <option value="radial">Radial spectrum</option><option value="stereo">Stereo spectrum</option>
         </select></label>
-        <label>Colours <select className={select} value={gradient} onChange={e => { setGradient(e.target.value); pref.setStr('visualiser.gradient', e.target.value); }}>
+        <label className="inline-flex items-center gap-1.5 text-ink-3">Colours <select className="select" value={gradient} onChange={e => { setGradient(e.target.value); pref.setStr('visualiser.gradient', e.target.value); }}>
           <option value="classic">Classic</option><option value="rainbow">Rainbow</option><option value="steelblue">Steel blue</option>
         </select></label>
-        <label><input type="checkbox" checked={animate} onChange={e => { setAnimate(e.target.checked); pref.set('visualiser.animate', e.target.checked); }} /> Animate</label>
-        <button type="button" className={button} onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>{expanded ? 'Collapse' : 'Expand'}</button>
-        {document.fullscreenEnabled && <button type="button" className={button} onClick={() => {
-          const action = fullscreen ? document.exitFullscreen() : panel.current.requestFullscreen();
-          action.catch(() => setError('Fullscreen unavailable. You can still expand the panel.'));
-        }}>{fullscreen ? 'Exit fullscreen' : 'Fullscreen visualiser'}</button>}
-        <button type="button" onClick={onClose} className={`${button} ml-auto`}>Close visualiser</button>
+        <label className="inline-flex items-center gap-1.5 text-ink-2"><input type="checkbox" className="check" checked={animate} onChange={e => { setAnimate(e.target.checked); pref.set('visualiser.animate', e.target.checked); }} /> Animate</label>
+        <p role="status" className="flex min-w-0 items-center gap-2 text-ink-3 sm:ml-auto">
+          <span className={cx('size-1.5 shrink-0 rounded-full', live ? 'bg-ok' : 'bg-ink-4')} />
+          <span className="truncate">{message} {reduced ? 'Animation paused for reduced motion.' : !animate ? 'Animation off.' : ''}</span>
+          {audio?.state === 'suspended' && <button type="button" onClick={viewer.resumeAudio} className="btn btn-link btn-xs">Start playback</button>}
+        </p>
       </div>
-      <p role="status" className="my-2">{message} {reduced ? 'Animation paused for reduced motion.' : !animate ? 'Animation off.' : ''}
-        {audio?.state === 'suspended' && <button type="button" onClick={viewer.resumeAudio} className="ml-2 underline">Start playback</button>}
-      </p>
-      {error && <p role="alert">{error}</p>}
-      {playback && !ready && !error && <p>Loading visualiser…</p>}
-      <div ref={canvas} className="w-full overflow-hidden" style={{ height: fullscreen ? 'calc(100vh - 160px)' : expanded ? '35vh' : '130px' }} aria-hidden="true" />
+      {error && <p role="alert" className="callout callout-warn mx-3 mb-2">{error}</p>}
+      {playback && !ready && !error && <p className="px-3 pb-1.5 text-ink-4">Loading visualiser…</p>}
+      <div ref={canvas} className="mx-3 mb-3 overflow-hidden rounded-lg bg-canvas ring-1 ring-line" style={{ height: fullscreen ? 'calc(100vh - 160px)' : expanded ? '35vh' : '130px' }} aria-hidden="true" />
     </section>
   );
 }

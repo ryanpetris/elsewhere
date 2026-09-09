@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Clipboard, ClipboardCheck, ClipboardX, Download, LoaderCircle, X } from 'lucide-react';
+import { Clipboard, ClipboardCheck, ClipboardX, Download, FileText, LoaderCircle, X } from 'lucide-react';
 import { useStore } from '../store.js';
 import { downloadClipboardFile } from '../api.js';
 import { CLIPBOARD_IMAGE_BYTES, CLIPBOARD_IMAGE_PIXELS } from '../clipboard.js';
 import { Popover } from './Launcher.jsx';
+import { IconButton, cx } from './ui.jsx';
 
-const buttonClass = 'rounded px-2 py-1 text-sm text-indigo-300 hover:bg-zinc-800 disabled:opacity-40';
 const sizeLabel = size => size == null ? '' : size < 1024 ? `${size} bytes` : `${(size / 1024).toFixed(1)} KiB`;
 
 function ImagePreview({ blob }) {
@@ -31,9 +31,12 @@ function ImagePreview({ blob }) {
     decode().catch(() => { if (url) URL.revokeObjectURL(url); if (live) setImage({ error: true }); });
     return () => { live = false; if (url) URL.revokeObjectURL(url); };
   }, [blob]);
-  if (!image) return <p role="status">Loading preview…</p>;
-  if (image.error) return <p>Preview unavailable</p>;
-  return <><img src={image.url} alt="Desktop clipboard image" className="max-h-64 max-w-full self-center object-contain" /><p className="mt-2 text-xs text-zinc-500">{image.width} × {image.height}</p></>;
+  if (!image) return <p role="status" className="text-ink-3">Loading preview…</p>;
+  if (image.error) return <p className="text-ink-3">Preview unavailable</p>;
+  return <>
+    <span className="flex justify-center rounded-lg bg-canvas p-2 ring-1 ring-line"><img src={image.url} alt="Desktop clipboard image" className="max-h-64 max-w-full object-contain" /></span>
+    <p className="mt-2 font-mono text-xs text-ink-3">{image.width} × {image.height}</p>
+  </>;
 }
 
 export function ClipboardControl({ viewer }) {
@@ -78,8 +81,8 @@ export function ClipboardControl({ viewer }) {
   if (!readable && !allowed) return null;
   return <>
     <button ref={button} id="clipboard-toggle" type="button" title={label} aria-label={label} aria-expanded={open} aria-controls="desktop-clipboard"
-      onClick={() => setOpen(!open)} className={`flex w-6 shrink-0 items-center justify-center rounded py-1 hover:bg-zinc-800 ${state.present ? 'text-indigo-300' : 'text-zinc-400'}`}>
-      <Icon className="size-3.5" />
+      onClick={() => setOpen(!open)} className={cx('inline-flex size-6 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-surface-3 focus-visible:outline-2 focus-visible:outline-accent', open ? 'bg-accent/15 text-accent-2' : state.present ? 'text-accent-2' : 'text-ink-3 hover:text-ink')}>
+      <Icon className={cx('size-3.5', loading && 'animate-spin')} />
     </button>
     {open && createPortal(<Popover floating ref={panel} id="desktop-clipboard" role="dialog" aria-label="Desktop clipboard" onClose={close}
       onKeyDown={event => {
@@ -92,41 +95,42 @@ export function ClipboardControl({ viewer }) {
         fields[index < 0 ? event.shiftKey ? fields.length - 1 : 0 : (index + (event.shiftKey ? fields.length - 1 : 1)) % fields.length].focus();
       }}
       onPaste={event => event.stopPropagation()} onCopy={event => event.stopPropagation()} onCut={event => event.stopPropagation()}
-      style={position} className="overflow-hidden font-sans text-sm text-zinc-300 select-text">
-      <div className="flex shrink-0 items-center justify-between border-b border-zinc-800 px-3 py-2">
-        <h2 className="font-medium">Desktop clipboard</h2>
-        <button type="button" onClick={close} aria-label="Close clipboard" className={buttonClass}><X className="size-4" /></button>
+      style={position} className="font-sans text-sm text-ink-2 select-text">
+      <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
+        <Clipboard className="size-3.5 text-ink-3" />
+        <h2 className="font-medium text-ink">Desktop clipboard</h2>
+        {state.present && <span className="ml-1 truncate font-mono text-[10px] text-ink-4">{state.mime || 'Unknown format'}{state.size != null ? ` · ${sizeLabel(state.size)}` : ''}</span>}
+        <IconButton icon={X} label="Close clipboard" size="sm" className="ml-auto" onClick={close} />
       </div>
       <div className="flex min-h-0 flex-col gap-3 overflow-auto p-3">
         {draft ? <>
-          {conflict && <div className="rounded bg-amber-950/50 p-2 text-amber-200"><p>Clipboard changed</p><p className="mt-1 text-xs">Your draft is preserved.</p>
-            <button type="button" className={buttonClass} disabled={pending || state.text === null || !editable} onClick={edit}>Load current contents</button>
+          {conflict && <div className="callout callout-warn"><p className="font-medium">Clipboard changed</p><p className="mt-0.5 text-warn/80">Your draft is preserved.</p>
+            <button type="button" className="btn btn-outline btn-xs mt-2" disabled={pending || state.text === null || !editable} onClick={edit}>Load current contents</button>
           </div>}
           <textarea aria-label="Clipboard text" autoFocus value={draft.text} onChange={event => setDraft({ ...draft, text: event.target.value })} disabled={pending}
-            spellCheck={false} className="min-h-40 w-full resize-y rounded border border-zinc-700 bg-zinc-950 p-2 font-mono text-sm whitespace-pre-wrap outline-none focus:border-indigo-400" />
-          <div className="flex justify-end gap-2">
-            <button type="button" className={buttonClass} disabled={pending} onClick={() => { setDraft(null); setError(''); }}>Cancel</button>
-            <button type="button" className={buttonClass} disabled={!allowed || pending} onClick={() => write(draft.text)}>{conflict ? 'Replace with draft' : 'Save'}</button>
+            spellCheck={false} className="input min-h-40 resize-y py-2 font-mono whitespace-pre-wrap" />
+          <div className="flex justify-end gap-1.5">
+            <button type="button" className="btn btn-outline btn-xs" disabled={pending} onClick={() => { setDraft(null); setError(''); }}>Cancel</button>
+            <button type="button" className="btn btn-primary btn-xs" disabled={!allowed || pending} onClick={() => write(draft.text)}>{conflict ? 'Replace with draft' : 'Save'}</button>
           </div>
         </> : <>
-          {!readable ? <p>This token allows writing the clipboard.</p> : loading ? <p role="status">Loading clipboard…</p>
-            : state.status === 'unavailable' ? <p>Clipboard unavailable</p>
-            : !state.present ? <p>Clipboard is empty</p>
-            : state.preview !== 'available' ? <p>Preview unavailable</p>
+          {!readable ? <p className="text-ink-3">This token allows writing the clipboard.</p> : loading ? <p role="status" className="text-ink-3">Loading clipboard…</p>
+            : state.status === 'unavailable' ? <p className="text-ink-3">Clipboard unavailable</p>
+            : !state.present ? <p className="py-4 text-center text-ink-4">Clipboard is empty</p>
+            : state.preview !== 'available' ? <p className="text-ink-3">Preview unavailable</p>
             : state.mime === 'image/png' && state.blob ? <ImagePreview blob={state.blob} />
-            : state.files.length ? <ul className="space-y-2">{state.files.map((name, index) => <li key={index} className="flex items-center justify-between gap-2">
-              <span className="min-w-0 break-all">{name}</span>{readable && permissions.includes('files.download') && <button type="button" className={buttonClass} aria-label={`Download ${name}`} onClick={() => downloadClipboardFile(index, name).catch(error => setError(error.message))}><Download className="size-4" /></button>}
+            : state.files.length ? <ul className="flex flex-col gap-1">{state.files.map((name, index) => <li key={index} className="flex items-center gap-2 rounded-md bg-surface-2 px-2 py-1.5">
+              <FileText className="size-3.5 shrink-0 text-ink-4" /><span className="min-w-0 flex-1 break-all">{name}</span>{readable && permissions.includes('files.download') && <button type="button" className="btn btn-ghost size-6 shrink-0 px-0" aria-label={`Download ${name}`} title={`Download ${name}`} onClick={() => downloadClipboardFile(index, name).catch(error => setError(error.message))}><Download className="size-3.5" /></button>}
             </li>)}</ul>
-            : state.text !== null ? <pre tabIndex={0} className="max-h-64 overflow-auto font-mono text-sm whitespace-pre-wrap break-words">{state.text}</pre>
-            : <p role="status">Loading preview…</p>}
-          {state.present && <p className="text-xs text-zinc-500">{state.mime || 'Unknown format'}{state.size != null ? ` · ${sizeLabel(state.size)}` : ''}</p>}
-          {allowed && <div className="flex justify-end gap-2">
-            {editable && <button type="button" className={buttonClass} disabled={pending || (readable && state.text === null)} onClick={edit}>{readable ? 'Edit' : 'New text'}</button>}
-            <button type="button" className={buttonClass} disabled={pending || (readable && state.status !== 'ready')} onClick={() => write('')}>Clear</button>
+            : state.text !== null ? <pre tabIndex={0} className="max-h-64 overflow-auto rounded-lg border border-line bg-canvas p-2.5 font-mono text-xs break-words whitespace-pre-wrap text-ink focus-visible:outline-2 focus-visible:outline-accent">{state.text}</pre>
+            : <p role="status" className="text-ink-3">Loading preview…</p>}
+          {allowed && <div className="flex justify-end gap-1.5">
+            {editable && <button type="button" className="btn btn-outline btn-xs" disabled={pending || (readable && state.text === null)} onClick={edit}>{readable ? 'Edit' : 'New text'}</button>}
+            <button type="button" className="btn btn-outline btn-xs" disabled={pending || (readable && state.status !== 'ready')} onClick={() => write('')}>Clear</button>
           </div>}
         </>}
-        {pending && <p role="status">Waiting for the desktop clipboard…</p>}
-        {(error || state.error) && <p role="alert" className="text-rose-300">{error || state.error}</p>}
+        {pending && <p role="status" className="flex items-center gap-2 text-ink-3"><LoaderCircle className="size-3 animate-spin" /> Waiting for the desktop clipboard…</p>}
+        {(error || state.error) && <p role="alert" className="callout callout-bad">{error || state.error}</p>}
       </div>
     </Popover>, document.body)}
   </>;

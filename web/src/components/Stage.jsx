@@ -1,7 +1,7 @@
 // The display: the video canvas, sized by its container (the desktop's output takes that size), with
 // the overlays and status banners on top. Fullscreen is requested on this element, so the chrome goes away.
 import { useEffect, useRef, useState } from 'react';
-import { CheckCircle2, Loader2, MonitorX, TriangleAlert } from 'lucide-react';
+import { CheckCircle2, FolderOpen, Loader2, MonitorX, TriangleAlert } from 'lucide-react';
 import { useStore } from '../store.js';
 import { hue, windowColor } from './ui.jsx';
 import { Notifications } from './Notifications.jsx';
@@ -59,8 +59,8 @@ function Overlay({ viewer, size, borders, elements }) {
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
       {borders && windows.filter(w => !w.minimized).map(w => (
         // the compositor's title bar, when it draws one, is part of the window
-        <div key={w.id} className={`absolute box-border ${w.focused ? 'border-[3px]' : 'border-2'}`} style={{ ...box(w.x, w.y - w.decoration, w.w, w.h + w.decoration), borderColor: windowColor(w) }}>
-          <span className="absolute -top-0.5 -left-0.5 rounded-br px-1 font-mono text-[11px] leading-4 text-zinc-950" style={{ background: windowColor(w) }}>
+        <div key={w.id} className={`absolute box-border rounded-sm ${w.focused ? 'border-[3px]' : 'border-2'}`} style={{ ...box(w.x, w.y - w.decoration, w.w, w.h + w.decoration), borderColor: windowColor(w) }}>
+          <span className="absolute -top-0.5 -left-0.5 rounded-br px-1.5 font-mono text-[11px] leading-4 font-medium text-canvas" style={{ background: windowColor(w) }}>
             {w.app_id || w.title}
           </span>
         </div>
@@ -69,7 +69,7 @@ function Overlay({ viewer, size, borders, elements }) {
         <div key={i} className="absolute box-border border" style={{ ...box(f.x + e.x, f.y + e.y, e.w, e.h), borderColor: `hsl(${hue(e.role)} 80% 55%)` }} />
       ))}
       {why && (
-        <div className="absolute rounded-b bg-zinc-950/80 px-1.5 font-mono text-[11px] leading-5 whitespace-nowrap text-zinc-200" style={{ left: ox + f.x * k, top: oy + (f.y + f.h) * k }}>
+        <div className="absolute rounded-b-md bg-surface/90 px-2 font-mono text-[11px] leading-5 whitespace-nowrap text-ink backdrop-blur" style={{ left: ox + f.x * k, top: oy + (f.y + f.h) * k }}>
           {why}
         </div>
       )}
@@ -83,9 +83,9 @@ function Notice({ viewer }) {
   if (!notice) return null;
   const good = notice.kind === 'success';
   return (
-    <div className={`pointer-events-none absolute bottom-3 left-1/2 flex max-w-[90%] -translate-x-1/2 items-center gap-2 rounded-lg border bg-zinc-900/95 px-3 py-2 text-xs shadow-lg ${good ? 'border-emerald-500/40 text-emerald-100' : 'border-amber-500/40 text-amber-100'}`}>
-      {good ? <CheckCircle2 className="size-4 shrink-0 text-emerald-400" /> : <TriangleAlert className="size-4 shrink-0 text-amber-400" />} {notice.text}
-      {notice.path && <button className="pointer-events-auto shrink-0 rounded bg-zinc-700 px-2 py-1" onClick={() => viewer.openFiles(notice.path)}>Open folder</button>}
+    <div className={`pointer-events-none absolute bottom-3 left-1/2 flex max-w-[90%] -translate-x-1/2 animate-rise items-center gap-2.5 rounded-lg border bg-surface/95 px-3 py-2 text-xs shadow-pop backdrop-blur ${good ? 'border-ok/30 text-ink' : 'border-warn/30 text-ink'}`}>
+      {good ? <CheckCircle2 className="size-4 shrink-0 text-ok" /> : <TriangleAlert className="size-4 shrink-0 text-warn" />} {notice.text}
+      {notice.path && <button className="btn btn-outline btn-xs pointer-events-auto shrink-0" onClick={() => viewer.openFiles(notice.path)}><FolderOpen className="size-3" /> Open folder</button>}
     </div>
   );
 }
@@ -98,34 +98,34 @@ function Banner({ viewer }) {
   if (status === 'connected' || status === 'no-token' || status === 'unauthorized') return null;
   if (status === 'retrying' || (status === 'connecting' && stream)) {
     return (
-      <div className="absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-zinc-700 bg-zinc-900/90 px-3 py-1 text-xs text-zinc-300 shadow-lg">
-        <Loader2 className="size-3.5 animate-spin text-amber-400" /> Reconnecting…
+      <div className="absolute top-3 left-1/2 flex -translate-x-1/2 animate-pop items-center gap-2 rounded-full border border-line-2 bg-surface/90 px-3 py-1 text-xs text-ink-2 shadow-pop backdrop-blur">
+        <Loader2 className="size-3.5 animate-spin text-warn" /> Reconnecting…
       </div>
     );
   }
-  const card = 'flex flex-col items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/95 px-8 py-6 text-center shadow-2xl';
+  const card = 'absolute flex animate-pop flex-col items-center gap-3 rounded-2xl border border-line-2 bg-surface/95 px-10 py-8 text-center shadow-pop backdrop-blur';
   if (status === 'quit') {
     return (
-      <div className={`absolute ${card}`}>
-        <MonitorX className="size-6 text-zinc-500" />
-        <div className="text-sm text-zinc-200">Elsewhere was shut down</div>
-        <div className="text-xs text-zinc-500">Start it again and reload this page.</div>
+      <div className={card}>
+        <span className="flex size-12 items-center justify-center rounded-xl bg-surface-3 text-ink-3"><MonitorX className="size-6" strokeWidth={1.5} /></span>
+        <div className="text-sm font-medium text-ink">Elsewhere was shut down</div>
+        <div className="text-xs text-ink-3">Start it again and reload this page.</div>
       </div>
     );
   }
   if (status === 'connecting') {
     return (
-      <div className={`absolute ${card}`}>
-        <Loader2 className="size-6 animate-spin text-indigo-400" />
-        <div className="text-sm text-zinc-300">Connecting…</div>
+      <div className={card}>
+        <Loader2 className="size-6 animate-spin text-accent-2" />
+        <div className="text-sm text-ink-2">Connecting…</div>
       </div>
     );
   }
   return (
-    <div className={`absolute ${card}`}>
-      <MonitorX className="size-6 text-zinc-500" />
-      <div className="text-sm text-zinc-200">{status === 'closed' ? 'Viewer closed' : reason || 'Window closed'}</div>
-      <div className="text-xs text-zinc-500">{status === 'closed' ? 'Reload this page to reconnect.' : 'This tab showed one window; it is gone.'}</div>
+    <div className={card}>
+      <span className="flex size-12 items-center justify-center rounded-xl bg-surface-3 text-ink-3"><MonitorX className="size-6" strokeWidth={1.5} /></span>
+      <div className="text-sm font-medium text-ink">{status === 'closed' ? 'Viewer closed' : reason || 'Window closed'}</div>
+      <div className="text-xs text-ink-3">{status === 'closed' ? 'Reload this page to reconnect.' : 'This tab showed one window; it is gone.'}</div>
     </div>
   );
 }

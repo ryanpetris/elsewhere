@@ -1,6 +1,20 @@
 import { useEffect, useRef } from 'react';
+import { MousePointer2, ScanSearch, SquareDashed } from 'lucide-react';
 import { useStore } from '../store.js';
 import { Popover } from './Launcher.jsx';
+
+function Toggle({ inputRef, icon: Icon, label, description, id, checked, onChange }) {
+  return (
+    <label className="flex min-h-11 cursor-pointer items-start gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-surface-2">
+      <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-surface-3 text-ink-3"><Icon className="size-3.5" strokeWidth={1.75} /></span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm text-ink">{label}</span>
+        <span id={id} className="mt-0.5 block text-xs leading-relaxed text-ink-3">{description}</span>
+      </span>
+      <input ref={inputRef} type="checkbox" aria-label={label} checked={checked} onChange={event => onChange(event.target.checked)} className="switch mt-1" aria-describedby={id} />
+    </label>
+  );
+}
 
 export function Settings({ viewer, borders, onBorders, elements, onElements, onClose }) {
   const first = useRef(null);
@@ -20,32 +34,24 @@ export function Settings({ viewer, borders, onBorders, elements, onElements, onC
       inputs[index < 0 ? (event.shiftKey ? inputs.length - 1 : 0) : (index + (event.shiftKey ? inputs.length - 1 : 1)) % inputs.length].focus();
     }
   };
-  const label = 'flex min-h-11 cursor-pointer items-start gap-3 rounded-lg p-2 hover:bg-zinc-800';
-  const checkbox = 'mt-1 size-5 shrink-0 accent-indigo-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400';
   return (
     <Popover id="viewer-settings" role="dialog" aria-label="Settings" onClose={onClose}
       onKeyDown={keyDown}
-      className="right-2 max-h-[calc(100dvh-4rem)] w-80 max-w-[calc(100vw-1rem)] overflow-y-auto p-3 sm:right-3">
-      <h2 className="mb-2 px-2 text-sm font-semibold text-zinc-100">Overlays</h2>
-      <label className={label}>
-        <input ref={first} type="checkbox" aria-label="Window borders" checked={borders} onChange={event => onBorders(event.target.checked)} className={checkbox} aria-describedby="borders-description" />
-        <span><span className="block text-sm text-zinc-100">Window borders</span>
-          <span id="borders-description" className="mt-1 block text-xs text-zinc-400">Coloured viewer outlines around remote windows. Application title bars and decorations stay unchanged.</span>
-        </span>
-      </label>
-      <label className={label}>
-        <input type="checkbox" aria-label="UI elements" checked={elements} onChange={event => onElements(event.target.checked)} className={checkbox} aria-describedby="elements-description" />
-        <span><span className="block text-sm text-zinc-100">UI elements</span>
-          <span id="elements-description" className="mt-1 block text-xs text-zinc-400">Accessibility outlines for the focused window. Requires server accessibility support and an application tree; this switch cannot enable server support.</span>
-        </span>
-      </label>
-      <h2 className="mt-3 mb-2 px-2 text-sm font-semibold text-zinc-100">Mouse</h2>
-      <label className={label}>
-        <input type="checkbox" aria-label="Capture mouse on click" checked={captureOnClick} onChange={event => viewer.setCaptureOnClick(event.target.checked)} className={checkbox} aria-describedby="capture-description" />
-        <span><span className="block text-sm text-zinc-100">Capture mouse on click</span>
-          <span id="capture-description" className="mt-1 block text-xs text-zinc-400">Keep the mouse inside the desktop.</span>
-        </span>
-      </label>
+      className="right-2 max-h-[calc(100dvh-4rem)] w-[22rem] max-w-[calc(100vw-1rem)] overflow-y-auto sm:right-3">
+      <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
+        <span className="text-sm font-medium text-ink">Settings</span>
+        <kbd className="kbd">Esc</kbd>
+      </div>
+      <div className="flex flex-col gap-1 p-2">
+        <h2 className="eyebrow px-2 pt-2 pb-1">Overlays</h2>
+        <Toggle inputRef={first} icon={SquareDashed} id="borders-description" label="Window borders" checked={borders} onChange={onBorders}
+          description="Coloured viewer outlines around remote windows. Application title bars and decorations stay unchanged." />
+        <Toggle icon={ScanSearch} id="elements-description" label="UI elements" checked={elements} onChange={onElements}
+          description="Accessibility outlines for the focused window. Requires server accessibility support and an application tree; this switch cannot enable server support." />
+        <h2 className="eyebrow px-2 pt-3 pb-1">Mouse</h2>
+        <Toggle icon={MousePointer2} id="capture-description" label="Capture mouse on click" checked={captureOnClick} onChange={on => viewer.setCaptureOnClick(on)}
+          description="Keep the mouse inside the desktop." />
+      </div>
     </Popover>
   );
 }

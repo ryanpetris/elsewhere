@@ -2,9 +2,10 @@ import { websocketUrl } from '../urls.js';
 import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { X } from 'lucide-react';
+import { RotateCw, Terminal as TerminalIcon, X } from 'lucide-react';
 import { TOKEN } from '../api.js';
 import { AUTH } from '../protocol.js';
+import { IconButton, cx } from './ui.jsx';
 
 export default function TerminalPanel({ viewer, onClose }) {
   const host = useRef(null);
@@ -12,7 +13,7 @@ export default function TerminalPanel({ viewer, onClose }) {
   const [session, setSession] = useState(0);
   useEffect(() => {
     const term = new Terminal({ cursorBlink: true, fontSize: 14, scrollback: 3000, screenReaderMode: true,
-      theme: { background: '#09090b', foreground: '#e4e4e7' } });
+      theme: { background: '#08090c', foreground: '#e8eaf0', cursor: '#a5b4fc', selectionBackground: 'rgba(99, 102, 241, 0.35)' } });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host.current);
@@ -61,17 +62,22 @@ export default function TerminalPanel({ viewer, onClose }) {
       socket.close(); term.dispose();
     };
   }, [viewer, session]);
+  const live = status === 'Connected' || status === 'Connecting…';
   return (
-    <section aria-label="Terminal" className="flex h-80 max-h-[70vh] min-h-40 shrink-0 flex-col border-t border-zinc-700 bg-zinc-950 px-3 pb-2"
+    <section aria-label="Terminal" className="flex h-[38vh] max-h-[70vh] min-h-40 shrink-0 flex-col border-t border-line bg-canvas"
       onKeyDown={event => event.stopPropagation()} onKeyUp={event => event.stopPropagation()} onFocusCapture={viewer.releaseInput}>
-      <header className="flex h-9 shrink-0 items-center gap-3 text-xs">
-        <span className="font-medium text-zinc-100">Terminal</span>
-        <span role="status" className="text-zinc-500">{status}</span>
-        <span className="ml-auto text-zinc-500">Closing ends this shell</span>
-        {status !== 'Connected' && status !== 'Connecting…' && <button type="button" className="rounded px-2 py-1 hover:bg-zinc-800" onClick={() => setSession(value => value + 1)}>New shell</button>}
-        <button type="button" aria-label="Close terminal" className="rounded p-1 hover:bg-zinc-800" onClick={onClose}><X className="size-4" /></button>
+      <header className="flex h-9 shrink-0 items-center gap-3 border-b border-line bg-surface px-3 text-xs">
+        <TerminalIcon className="size-3.5 text-ink-3" />
+        <span className="font-medium text-ink">Terminal</span>
+        <span role="status" className={cx('inline-flex items-center gap-1.5 rounded-full border px-2 py-px text-[10px] font-medium',
+          status === 'Connected' ? 'border-ok/30 bg-ok/10 text-ok' : live ? 'border-line-2 bg-surface-3 text-ink-2' : 'border-warn/30 bg-warn/10 text-warn')}>
+          <span className={cx('size-1.5 rounded-full', status === 'Connected' ? 'bg-ok' : live ? 'bg-ink-3 animate-glow' : 'bg-warn')} />{status}
+        </span>
+        <span className="ml-auto hidden text-ink-4 sm:inline">Closing ends this shell</span>
+        {!live && <button type="button" className="btn btn-outline btn-xs" onClick={() => setSession(value => value + 1)}><RotateCw className="size-3" /> New shell</button>}
+        <IconButton icon={X} label="Close terminal" size="sm" onClick={onClose} />
       </header>
-      <div ref={host} className="min-h-0 flex-1 select-text" />
+      <div ref={host} className="min-h-0 flex-1 px-3 pt-2 pb-1 select-text" />
     </section>
   );
 }

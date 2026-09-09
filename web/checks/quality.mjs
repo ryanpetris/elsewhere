@@ -102,7 +102,6 @@ try {
     await page.evaluate(() => clearInterval(window.pressureTimer));
     assert.equal(await select.inputValue(), 'max');
     assert((await select.locator('option:checked').textContent()).includes('up to 25 Mbit/s'));
-    assert((await page.getByTitle('Current stream target; actual network throughput depends on scene activity').textContent()).startsWith('Target '));
     await page.getByTitle(/^Measured video throughput:/).waitFor();
     await page.getByTitle('Video codec', { exact: true }).selectOption('auto');
     await page.waitForFunction(() => elsewhere.store.get().streamState.auto_codec);
@@ -144,16 +143,12 @@ try {
     await page.evaluate(() => qualitySocket.send(new Uint8Array([0x88])));
     await page.waitForFunction(() => qualitySocketFrames > 0);
     await page.evaluate(() => elsewhere.setTransport('websocket'));
-    await page.evaluate(() => elsewhere.store.set({ streamState: { ...elsewhere.store.get().streamState, bitrate_kbps: 1562, max_fps: 30 } }));
-    assert.equal(await page.getByTitle('Current stream target; actual network throughput depends on scene activity').textContent(), 'Target 1.6 Mbit/s, 30 fps cap');
 
     for (const width of [1280, 800]) {
       await page.setViewportSize({ width, height: 768 });
       assert(await page.locator('footer').evaluate(el => el.scrollWidth <= el.clientWidth), `quality controls fit ${width}px`);
     }
     assert(await page.locator('footer').evaluate(footer => {
-      const target = footer.querySelector('[title^="Current stream target"]');
-      const original = target.firstChild.data;
       const metrics = [...footer.children].slice(0, 4);
       const nodes = metrics.map(el => [...el.childNodes]);
       const icon = metrics[0].querySelector('svg').cloneNode(true);
@@ -163,14 +158,11 @@ try {
         let height;
         for (const values of [['9 fps', '9.9 Mbit/s', '9 ms', '0 · 0 · 0'], ['30 fps', '10.0 Mbit/s', '200 ms', '100 · 100 · 0'], ['60 fps', '100.0 Mbit/s', '2000 ms', '10000 · 10000 · 10']]) {
           metrics.forEach((el, i) => el.replaceChildren(...(i === 0 ? [icon.cloneNode(true)] : []), document.createTextNode(values[i])));
-          for (const text of ['Target 25 Mbit/s', 'Target 12.5 Mbit/s', 'Target 1.6 Mbit/s, 30 fps cap', 'Target 4294967.3 Mbit/s']) {
-            target.firstChild.data = text;
-            height ??= footer.getBoundingClientRect().height;
-            stable &&= footer.getBoundingClientRect().height === height && target.scrollWidth <= target.clientWidth;
-          }
+          height ??= footer.getBoundingClientRect().height;
+          stable &&= footer.getBoundingClientRect().height === height;
         }
       }
-      target.firstChild.data = original; footer.style.width = '';
+      footer.style.width = '';
       metrics.forEach((el, i) => el.replaceChildren(...nodes[i]));
       return stable;
     }), 'live readouts fit without resizing the stage');

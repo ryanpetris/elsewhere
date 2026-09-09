@@ -1,10 +1,121 @@
 @import "tailwindcss";
 
+/* Design tokens: one dark palette, one accent, semantic tones. Components use these names only. */
 @theme {
-  --font-sans: ui-sans-serif, system-ui, sans-serif;
-  --font-mono: ui-monospace, "JetBrains Mono", "Cascadia Mono", Menlo, monospace;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "Cascadia Mono", "SF Mono", Menlo, monospace;
+
+  --color-canvas: #08090c;
+  --color-surface: #0e1014;
+  --color-surface-2: #13161c;
+  --color-surface-3: #1a1e26;
+  --color-surface-4: #232833;
+  --color-line: #1f242d;
+  --color-line-2: #2d333e;
+  --color-ink: #e8eaf0;
+  --color-ink-2: #aab1c1;
+  --color-ink-3: #767e90;
+  --color-ink-4: #4e5563;
+  --color-accent: #6366f1;
+  --color-accent-2: #a5b4fc;
+  --color-accent-3: #7c7ff6;
+  --color-ok: #34d399;
+  --color-warn: #fbbf24;
+  --color-bad: #fb7185;
+  --color-info: #38bdf8;
+
+  --shadow-pop: 0 24px 48px -12px rgb(0 0 0 / 0.75), 0 0 0 1px rgb(255 255 255 / 0.04);
+  --shadow-card: inset 0 1px 0 0 rgb(255 255 255 / 0.03), 0 1px 2px 0 rgb(0 0 0 / 0.35);
+
+  --animate-pop: pop-in 120ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-rise: rise-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-glow: glow 1.6s ease-in-out infinite;
+
+  @keyframes pop-in {
+    from { opacity: 0; transform: translateY(-4px) scale(0.985); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes rise-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes glow {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, currentColor 55%, transparent); }
+    50% { box-shadow: 0 0 0 4px transparent; }
+  }
 }
 
-html, body { height: 100%; margin: 0; background: #09090b; }
+html, body { height: 100%; margin: 0; background: var(--color-canvas); color-scheme: dark; }
+body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
 #root { height: 100%; height: 100dvh; } /* a phone's URL bar must not cover the stage */
 canvas.stage { touch-action: none; transform-origin: 0 0; } /* the touch zoom scales from the corner */
+::selection { background: color-mix(in oklab, var(--color-accent) 45%, transparent); }
+* { scrollbar-width: thin; scrollbar-color: var(--color-line-2) transparent; }
+@media (prefers-reduced-motion: reduce) {
+  .animate-pop, .animate-rise, .animate-glow { animation: none; }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex h-8 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-transparent px-3 text-sm font-medium whitespace-nowrap transition-colors select-none;
+    @apply focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent disabled:pointer-events-none disabled:opacity-40;
+  }
+  .btn-sm { @apply h-7 px-2.5 text-xs; }
+  .btn-xs { @apply h-6 gap-1 px-2 text-[11px]; }
+  .btn-primary { @apply bg-accent text-white hover:bg-accent-3; }
+  .btn-outline { @apply border-line-2 bg-surface-2 text-ink-2 hover:bg-surface-3 hover:text-ink; }
+  .btn-ghost { @apply text-ink-2 hover:bg-surface-3 hover:text-ink; }
+  .btn-danger { @apply bg-bad/90 text-white hover:bg-bad; }
+  .btn-link { @apply h-auto rounded px-1 text-accent-2 hover:text-accent-2 hover:underline; }
+
+  .input {
+    @apply h-8 w-full min-w-0 rounded-md border border-line bg-canvas px-2.5 text-sm text-ink transition-colors placeholder:text-ink-4;
+    @apply hover:border-line-2 focus:border-accent focus:ring-2 focus:ring-accent/25 focus:outline-none disabled:opacity-50;
+  }
+  .input-sm { @apply h-7 px-2 text-xs; }
+
+  .select {
+    @apply h-7 max-w-full cursor-pointer appearance-none rounded-md border border-line bg-surface-2 pr-6 pl-2 text-[11px] text-ink-2 transition-colors;
+    @apply hover:border-line-2 hover:text-ink focus:border-accent focus:outline-none disabled:cursor-default disabled:opacity-50;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23767e90' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.4rem center;
+  }
+  .select-md { @apply h-8 pl-2.5 text-sm; }
+
+  /* A checkbox drawn as a switch; it stays a real checkbox for the keyboard and assistive technology. */
+  .switch {
+    @apply relative h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full border border-line-2 bg-surface-4 transition-colors;
+    @apply checked:border-accent checked:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent;
+  }
+  .switch::before { content: ""; @apply absolute top-0.5 left-0.5 size-3.5 rounded-full bg-ink-2 transition-transform; }
+  .switch:checked::before { @apply translate-x-4 bg-white; }
+
+  .check {
+    @apply size-4 shrink-0 cursor-pointer appearance-none rounded border border-line-2 bg-surface-2 transition-colors;
+    @apply checked:border-accent checked:bg-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent;
+    background-position: center;
+    background-repeat: no-repeat;
+  }
+  .check:checked {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+  }
+
+  .range { @apply h-1.5 w-full min-w-0 cursor-pointer appearance-none rounded-full bg-surface-4 disabled:cursor-default disabled:opacity-40; }
+  .range::-webkit-slider-thumb { -webkit-appearance: none; @apply size-3.5 rounded-full border-2 border-accent bg-ink shadow-card; }
+  .range::-moz-range-thumb { @apply size-3.5 rounded-full border-2 border-accent bg-ink; }
+  .range:focus-visible { @apply outline-2 outline-offset-2 outline-accent; }
+
+  .meter { @apply h-1.5 w-full min-w-0 appearance-none overflow-hidden rounded-full border-0 bg-surface-4; }
+  .meter::-webkit-meter-bar { background: var(--color-surface-4); border: 0; border-radius: 9999px; }
+  .meter::-webkit-meter-optimum-value, .meter::-webkit-meter-suboptimum-value, .meter::-webkit-meter-even-less-good-value { background: var(--color-ok); border-radius: 9999px; }
+  .meter::-moz-meter-bar { background: var(--color-ok); border-radius: 9999px; }
+
+  .card { @apply rounded-lg border border-line bg-surface-2 shadow-card; }
+  .eyebrow { @apply text-[10px] font-semibold tracking-[0.12em] text-ink-3 uppercase; }
+  .kbd { @apply inline-flex h-5 min-w-5 items-center justify-center rounded border border-line-2 bg-surface-3 px-1 font-mono text-[10px] text-ink-3; }
+  .callout { @apply rounded-md border px-3 py-2 text-xs; }
+  .callout-warn { @apply border-warn/30 bg-warn/10 text-warn; }
+  .callout-bad { @apply border-bad/30 bg-bad/10 text-bad; }
+  .callout-info { @apply border-accent/30 bg-accent/10 text-accent-2; }
+}

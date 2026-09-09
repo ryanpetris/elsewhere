@@ -70,7 +70,6 @@ try {
       assert.equal(state.encoder, 'libopenh264');
       assert.equal(state.applied, null);
       assert.equal(state.setting, null);
-      assert.equal(await page.locator('[data-effort-status]').textContent(), 'Effort unavailable');
       await page.reload();
       await page.waitForFunction(() => elsewhere.store.get().streamState?.effort?.requested === 'high' && !elsewhere.store.get().streamState.effort.pending);
       await page.waitForFunction(() => elsewhere.store.get().stats.frames > 0);
@@ -112,8 +111,6 @@ try {
           assert.ok(settings[encoder], `known FFmpeg effort mapping for ${encoder}`);
           assert.equal(setting, settings[encoder][index]);
         }
-        if (applied === null) assert.equal(await page.locator('[data-effort-status]').textContent(), 'Effort unavailable');
-        assert.ok(await page.locator('[data-effort-status]').evaluate(element => element.scrollWidth <= element.clientWidth), 'effort status fits ' + effort);
         assert.equal(await page.evaluate(() => localStorage.getItem('elsewhere.effort')), effort);
       }
       const old = await page.evaluate(() => elsewhere.store.get().stream.streamId);

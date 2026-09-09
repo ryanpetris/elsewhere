@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
+import { Pencil, Play, Plus, Radio, Square, Trash2 } from 'lucide-react';
 import { useStore } from '../store.js';
 import { PRESET_PREFIX, loadPresets, savePreset, removePreset, listBroadcasts, broadcastCapabilities, startBroadcast, stopBroadcast } from '../broadcasts.js';
+import { Badge, Eyebrow, cx } from './ui.jsx';
 
 const defaults = () => ({ preset_id: crypto.randomUUID(), label: 'Broadcast', url: '', stream_key: '', width: 1280, height: 720, fps: 30, bitrate_kbps: 4000, audio: 'silence', cursor: true });
-const inputClass = 'w-full rounded border border-zinc-700 bg-zinc-950 p-2 text-sm text-zinc-100';
-const buttonClass = 'rounded border border-zinc-600 px-2 py-1 text-sm disabled:opacity-40';
 const terminal = state => ['stopped', 'failed'].includes(state);
+const STATE = { running: ['ok', true], starting: ['warn', true], stopping: ['warn', true], stopped: ['neutral', false], failed: ['bad', false] };
 
 export function BroadcastsPanel({ viewer, open }) {
   const permissions = useStore(viewer.store, s => s.permissions);
@@ -58,38 +59,60 @@ export function BroadcastsPanel({ viewer, open }) {
     try { savePreset(edit); refreshPresets(); setEdit(null); setError(''); }
     catch { setError('Could not save settings in browser storage.'); }
   };
+  const field = 'flex flex-col gap-1 text-[11px] text-ink-3';
   return <div className="flex flex-col gap-4 p-3" data-broadcasts>
-    <p className="text-xs text-zinc-400">Presets are saved in this browser and shared with desktops on the same origin. Running streams belong to this desktop.</p>
-    {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
-    {pollError && <p role="alert" className="text-sm text-red-300">{pollError}</p>}
-    {caps && !caps.available && <p className="text-sm text-amber-300">{caps.error}</p>}
-    {!acts && <p className="text-sm text-zinc-400">Broadcast management permission is required.</p>}
-    <div className="flex items-center justify-between"><h3 className="text-sm font-medium">Saved presets</h3><button className={buttonClass} onClick={() => setEdit(defaults())}>Add preset</button></div>
-    {presets.map(p => <div key={p.preset_id} className="rounded border border-zinc-700 p-2">
-      <div className="truncate text-sm font-medium">{p.label}</div>
-      <div className="mb-2 text-xs text-zinc-400">{p.width}×{p.height} · {p.fps} fps · {p.bitrate_kbps} kbps</div>
-      {p.audio === 'desktop' && caps && !caps.desktop_audio && <p className="mb-2 text-xs text-amber-300">Desktop audio is unavailable on this host.</p>}
-      <div className="flex gap-2">
-        <button className={buttonClass} disabled={!acts || !permissions.includes('desktop.view') || (p.audio === 'desktop' && !permissions.includes('audio.listen')) || busy || !caps?.available || (p.audio === 'desktop' && !caps.desktop_audio)} onClick={() => start(p)}>Start</button>
-        <button className={buttonClass} onClick={() => setEdit({ ...p })}>Edit</button>
-        <button className={buttonClass} onClick={() => { try { removePreset(p.preset_id); refreshPresets(); } catch { setError('Could not remove the preset.'); } }}>Remove</button>
+    <p className="text-[11px] leading-relaxed text-ink-4">Presets are saved in this browser and shared with desktops on the same origin. Running streams belong to this desktop.</p>
+    {error && <p role="alert" className="callout callout-bad">{error}</p>}
+    {pollError && <p role="alert" className="callout callout-bad">{pollError}</p>}
+    {caps && !caps.available && <p className="callout callout-warn">{caps.error}</p>}
+    {!acts && <p className="callout callout-info">Broadcast management permission is required.</p>}
+    <div className="flex items-center justify-between">
+      <Eyebrow>Saved presets</Eyebrow>
+      <button className="btn btn-outline btn-xs" onClick={() => setEdit(defaults())}><Plus className="size-3" /> Add preset</button>
+    </div>
+    {presets.length === 0 && !edit && <p className="rounded-lg border border-dashed border-line-2 px-3 py-4 text-center text-xs text-ink-4">No presets yet.</p>}
+    {presets.map(p => <div key={p.preset_id} className="card p-3">
+      <div className="flex items-start gap-2">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-surface-3 text-ink-3"><Radio className="size-3.5" /></span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium text-ink">{p.label}</div>
+          <div className="font-mono text-[11px] text-ink-3">{p.width}×{p.height} · {p.fps} fps · {p.bitrate_kbps} kbps{p.audio === 'desktop' ? ' · desktop audio' : ''}</div>
+        </div>
+      </div>
+      {p.audio === 'desktop' && caps && !caps.desktop_audio && <p className="callout callout-warn mt-2">Desktop audio is unavailable on this host.</p>}
+      <div className="mt-2.5 flex gap-1.5">
+        <button className="btn btn-primary btn-xs" disabled={!acts || !permissions.includes('desktop.view') || (p.audio === 'desktop' && !permissions.includes('audio.listen')) || busy || !caps?.available || (p.audio === 'desktop' && !caps.desktop_audio)} onClick={() => start(p)}><Play className="size-3" /> Start</button>
+        <button className="btn btn-outline btn-xs" onClick={() => setEdit({ ...p })}><Pencil className="size-3" /> Edit</button>
+        <button className="btn btn-ghost btn-xs ml-auto hover:bg-bad/10 hover:text-bad" onClick={() => { try { removePreset(p.preset_id); refreshPresets(); } catch { setError('Could not remove the preset.'); } }}><Trash2 className="size-3" /> Remove</button>
       </div>
     </div>)}
-    {edit && <form onSubmit={save} className="flex flex-col gap-2 rounded border border-zinc-600 p-3" aria-label="Broadcast preset">
-      {[['label', 'Name'], ['url', 'Ingest URL'], ['stream_key', 'Stream key']].map(([key, label]) => <label key={key} className="text-xs text-zinc-300">{label}<input className={inputClass} value={edit[key]} required={key !== 'stream_key'} maxLength={key === 'label' ? 120 : 4096} autoComplete="off" onChange={e => setEdit({ ...edit, [key]: e.target.value })} /></label>)}
-      {[['width', 'Width', 64, caps?.max_width || 3840, 2], ['height', 'Height', 64, caps?.max_height || 2160, 2], ['bitrate_kbps', 'Video bitrate, kbps', 100, 50000, 1]].map(([key, label, min, max, step]) => <label key={key} className="text-xs text-zinc-300">{label}<input className={inputClass} type="number" required min={min} max={max} step={step} value={edit[key]} onChange={e => setEdit({ ...edit, [key]: +e.target.value })} /></label>)}
-      <label className="text-xs text-zinc-300">Frame rate<select className={inputClass} value={edit.fps} onChange={e => setEdit({ ...edit, fps: +e.target.value })}>{[24,25,30,50,60].map(fps => <option key={fps}>{fps}</option>)}</select></label>
-      <label className="text-xs text-zinc-300">Audio<select className={inputClass} value={edit.audio} onChange={e => setEdit({ ...edit, audio: e.target.value })}><option value="silence">Silence</option><option value="desktop">Desktop sound</option></select></label>
-      <label className="flex gap-2 text-sm"><input type="checkbox" checked={edit.cursor} onChange={e => setEdit({ ...edit, cursor: e.target.checked })} />Include mouse pointer</label>
-      <div className="flex gap-2"><button className={buttonClass} type="submit">Save preset</button><button className={buttonClass} type="button" onClick={() => setEdit(null)}>Cancel</button></div>
+    {edit && <form onSubmit={save} className="card flex flex-col gap-3 border-accent/40 p-3" aria-label="Broadcast preset">
+      <Eyebrow>{presets.some(p => p.preset_id === edit.preset_id) ? 'Edit preset' : 'New preset'}</Eyebrow>
+      {[['label', 'Name'], ['url', 'Ingest URL'], ['stream_key', 'Stream key']].map(([key, label]) => <label key={key} className={field}>{label}<input className="input input-sm" value={edit[key]} required={key !== 'stream_key'} maxLength={key === 'label' ? 120 : 4096} autoComplete="off" onChange={e => setEdit({ ...edit, [key]: e.target.value })} /></label>)}
+      <div className="grid grid-cols-2 gap-2">
+        {[['width', 'Width', 64, caps?.max_width || 3840, 2], ['height', 'Height', 64, caps?.max_height || 2160, 2]].map(([key, label, min, max, step]) => <label key={key} className={field}>{label}<input className="input input-sm" type="number" required min={min} max={max} step={step} value={edit[key]} onChange={e => setEdit({ ...edit, [key]: +e.target.value })} /></label>)}
+        <label className={field}>Video bitrate, kbps<input className="input input-sm" type="number" required min={100} max={50000} step={1} value={edit.bitrate_kbps} onChange={e => setEdit({ ...edit, bitrate_kbps: +e.target.value })} /></label>
+        <label className={field}>Frame rate<select className="select select-md w-full" value={edit.fps} onChange={e => setEdit({ ...edit, fps: +e.target.value })}>{[24, 25, 30, 50, 60].map(fps => <option key={fps}>{fps}</option>)}</select></label>
+      </div>
+      <label className={field}>Audio<select className="select select-md w-full" value={edit.audio} onChange={e => setEdit({ ...edit, audio: e.target.value })}><option value="silence">Silence</option><option value="desktop">Desktop sound</option></select></label>
+      <label className="flex items-center gap-2 text-xs text-ink-2"><input type="checkbox" className="check" checked={edit.cursor} onChange={e => setEdit({ ...edit, cursor: e.target.checked })} />Include mouse pointer</label>
+      <div className="flex justify-end gap-1.5"><button className="btn btn-outline btn-xs" type="button" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary btn-xs" type="submit">Save preset</button></div>
     </form>}
-    <h3 className="text-sm font-medium">Streams on this desktop</h3>
-    {streams.length === 0 && <p className="text-sm text-zinc-500">No streams.</p>}
-    {streams.map(s => <div key={s.id} className="rounded border border-zinc-700 p-2" data-broadcast-id={s.id}>
-      <div className="text-sm font-medium">{s.label}</div><div className="text-sm capitalize">{s.state}</div>
-      <div className="text-xs text-zinc-400">{s.width}×{s.height} · {s.fps} fps · {(s.bytes / 1e6).toFixed(1)} MB sent</div>
-      {s.error && <p className="my-1 text-xs text-amber-300">{s.error}</p>}
-      {!terminal(s.state) && <button className={buttonClass + ' mt-2'} disabled={!acts || busy || s.state === 'stopping'} onClick={() => action(() => stopBroadcast(s.id))}>Stop</button>}
-    </div>)}
+    <Eyebrow>Streams on this desktop</Eyebrow>
+    {streams.length === 0 && <p className="rounded-lg border border-dashed border-line-2 px-3 py-4 text-center text-xs text-ink-4">No streams.</p>}
+    {streams.map(s => {
+      const [tone, pulse] = STATE[s.state] ?? ['neutral', false];
+      return <div key={s.id} className={cx('card p-3', s.state === 'running' && 'border-ok/30')} data-broadcast-id={s.id}>
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium text-ink">{s.label}</div>
+            <div className="font-mono text-[11px] text-ink-3">{s.width}×{s.height} · {s.fps} fps · {(s.bytes / 1e6).toFixed(1)} MB sent</div>
+          </div>
+          <Badge tone={tone} dot pulse={pulse} className="capitalize">{s.state}</Badge>
+        </div>
+        {s.error && <p className="callout callout-warn mt-2">{s.error}</p>}
+        {!terminal(s.state) && <button className="btn btn-outline btn-xs mt-2.5" disabled={!acts || busy || s.state === 'stopping'} onClick={() => action(() => stopBroadcast(s.id))}><Square className="size-3" /> Stop</button>}
+      </div>;
+    })}
   </div>;
 }

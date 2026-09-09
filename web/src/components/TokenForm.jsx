@@ -1,8 +1,9 @@
 import { storageKey } from '../urls.js';
 // No usable token: ask for a token retrieved on the server. The page reloads with it in sessionStorage.
 import { useState } from 'react';
-import { KeyRound } from 'lucide-react';
+import { KeyRound, ShieldAlert } from 'lucide-react';
 import { useStore } from '../store.js';
+import { Logo } from './ui.jsx';
 
 export function TokenForm({ viewer }) {
   const reason = useStore(viewer.store, s => s.reason);
@@ -16,29 +17,42 @@ export function TokenForm({ viewer }) {
     location.reload();
   };
   return (
-    <div className="fixed inset-0 z-20 flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm">
-      <form onSubmit={submit} className="w-[30rem] max-w-[calc(100vw-2rem)] rounded-xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl">
-        <div className="flex items-center gap-2 text-zinc-100">
-          <KeyRound className="size-5 text-indigo-400" />
-          <h2 className="text-base font-semibold">Connect to the desktop</h2>
+    <div className="fixed inset-0 z-20 flex items-center justify-center bg-canvas/85 p-4 backdrop-blur-md">
+      <form onSubmit={submit} className="w-[27rem] max-w-full animate-pop rounded-2xl border border-line-2 bg-surface p-6 shadow-pop sm:p-7">
+        <div className="flex items-center gap-3">
+          <Logo className="size-10" />
+          <div>
+            <h2 className="text-base leading-tight font-semibold text-ink">Connect to the desktop</h2>
+            <p className="mt-0.5 text-xs text-ink-3">Elsewhere · remote desktop</p>
+          </div>
         </div>
-        <p className="mt-2 text-sm text-zinc-400">
-          {status === 'unauthorized' ? `${reason}. ` : ''}Paste a token from the server. Run <code>elsewhere token create --admin</code> in the server’s execution environment to create an admin token.
+        {status === 'unauthorized' && (
+          <div className="callout callout-bad mt-5 flex items-start gap-2" role="alert">
+            <ShieldAlert className="mt-px size-3.5 shrink-0" /> <span>{reason}.</span>
+          </div>
+        )}
+        <p className="mt-5 text-sm leading-relaxed text-ink-2">
+          Paste a token from the server. Create an admin token in the server’s execution environment with
         </p>
-        <input
-          autoFocus
-          value={token}
-          onChange={e => setToken(e.target.value)}
-          placeholder="token"
-          spellCheck={false}
-          autoComplete="off"
-          className="mt-4 w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 font-mono text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-indigo-400 focus:outline-none"
-        />
-        <div className="mt-4 flex justify-end">
-          <button type="submit" className="rounded-md bg-indigo-500 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-400 disabled:opacity-50" disabled={!token.trim()}>
-            Connect
-          </button>
-        </div>
+        <pre className="mt-2 overflow-x-auto rounded-md border border-line bg-canvas px-3 py-2 font-mono text-xs text-ink-2 select-text">elsewhere token create --admin</pre>
+        <label className="mt-5 block">
+          <span className="eyebrow mb-1.5 block">Token</span>
+          <span className="relative block">
+            <KeyRound className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-ink-4" />
+            <input
+              autoFocus
+              value={token}
+              onChange={e => setToken(e.target.value)}
+              placeholder="token"
+              spellCheck={false}
+              autoComplete="off"
+              className="input h-10 pl-9 font-mono"
+            />
+          </span>
+        </label>
+        <button type="submit" className="btn btn-primary mt-5 h-10 w-full" disabled={!token.trim()}>
+          Connect
+        </button>
       </form>
     </div>
   );

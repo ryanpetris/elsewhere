@@ -1,5 +1,6 @@
 // The viewer: chrome around the stage. State comes from the engine (viewer.js) through its store.
 import { useEffect, useState } from 'react';
+import { Loader2, Terminal as TerminalIcon, X } from 'lucide-react';
 import { useStore } from './store.js';
 import { WINDOW, PIP, pref } from './api.js';
 import { TopBar } from './components/TopBar.jsx';
@@ -13,6 +14,7 @@ import { Settings } from './components/Settings.jsx';
 import { MixerPanel } from './components/MixerPanel.jsx';
 import { AudioPanel } from './components/AudioPanel.jsx';
 import { Keyboard, focusKeyboard } from './components/Keyboard.jsx';
+import { IconButton } from './components/ui.jsx';
 import '@xterm/xterm/css/xterm.css';
 
 // A remembered on/off switch.
@@ -62,7 +64,7 @@ export function App({ viewer }) {
   useEffect(() => viewer.setStatsOn(!PIP && sidebar && tab === 'stats' && !fullscreen), [viewer, sidebar, tab, fullscreen]);
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-hidden bg-zinc-950 text-zinc-300 select-none">
+    <div className="relative flex h-full w-full flex-col overflow-hidden bg-canvas font-sans text-ink-2 select-none">
       <TopBar
         viewer={viewer}
         windowMode={windowMode}
@@ -81,10 +83,18 @@ export function App({ viewer }) {
         {/* stays mounted while hidden, so the thumbnails don't reload on every toggle */}
         {!windowMode && !PIP && <Sidebar viewer={viewer} tab={tab} onTab={setTab} hidden={!sidebar || fullscreen} />}
       </div>
+      {/* the docks open under the stage and the side panel, full width, where a phone's drawer never covers them */}
       {keyboard && <Keyboard viewer={viewer} onClose={() => setKeyboard(false)} />}
       {terminal && permissions.includes('commands.execute') && !PIP && (TerminalPanel
         ? <TerminalPanel viewer={viewer} onClose={closeTerminal} />
-        : <div className="flex items-center gap-3 p-3 text-sm"><span role="status">{terminalError || 'Opening terminal…'}</span><button type="button" onClick={closeTerminal}>Close terminal</button></div>)}
+        : (
+          <div className="flex h-10 shrink-0 items-center gap-3 border-t border-line bg-surface px-3 text-xs">
+            <TerminalIcon className="size-3.5 text-ink-3" />
+            <span className="font-medium text-ink">Terminal</span>
+            <span role="status" className="flex items-center gap-2 text-ink-3">{terminalError ? <span className="text-warn">{terminalError}</span> : <><Loader2 className="size-3 animate-spin" /> Opening terminal…</>}</span>
+            <IconButton icon={X} label="Close terminal" size="sm" className="ml-auto" onClick={closeTerminal} />
+          </div>
+        ))}
       {audioPanel && !windowMode && <AudioPanel viewer={viewer} hidden={fullscreen} onClose={() => setAudioPanel(false)} />}
       {mixerPanel && !windowMode && <MixerPanel viewer={viewer} hidden={fullscreen} onClose={() => { setMixerPanel(false); document.getElementById('session-mixer-toggle')?.focus(); }} />}
       {!PIP && <StatusBar mixerPanel={mixerPanel} onMixer={!windowMode ? () => setMixerPanel(!mixerPanel) : undefined} viewer={viewer} audioPanel={audioPanel} onAudioPanel={!windowMode ? () => setAudioPanel(!audioPanel) : undefined} />}
