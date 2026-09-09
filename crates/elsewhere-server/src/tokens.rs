@@ -46,12 +46,19 @@ pub struct Create {
     pub permissions: BTreeSet<Permission>,
     pub expires_at_ms: Option<i64>,
 }
+#[derive(Debug)]
+pub struct InvalidCreate(String);
+impl std::fmt::Display for InvalidCreate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(&self.0) }
+}
+impl std::error::Error for InvalidCreate {}
 impl Create {
     pub fn admin() -> Self { Self { label: "Admin".into(), permissions: Permission::ALL.iter().copied().collect(), expires_at_ms: None } }
-    pub fn validate(&mut self) -> Result<()> {
+    pub fn validate(&mut self) -> std::result::Result<(), InvalidCreate> { self.validate_at(now_ms()) }
+    fn validate_at(&mut self, now: i64) -> std::result::Result<(), InvalidCreate> {
         self.label = self.label.trim().to_string();
-        validate_label(&self.label)?;
-        ensure!(self.expires_at_ms.is_none_or(|expiry| expiry > now_ms()), "expiry must be in the future");
+        validate_label(&self.label).map_err(|e| InvalidCreate(e.to_string()))?;
+        if self.expires_at_ms.is_some_and(|expiry| expiry <= now) { return Err(InvalidCreate("expiry must be in the future".into())); }
         Ok(())
     }
 }
@@ -104,10 +111,11 @@ impl Store {
     pub async fn create(&self, mut request: Create) -> Result<Created> {
         request.validate()?;
         self.run(move |db| {
-            request.validate()?;
             let secret = crate::random_hex(32);
             let digest: [u8; 32] = Sha256::digest(secret.as_bytes()).into();
-            let metadata = Token { id: Uuid::new_v4(), label: request.label, created_at_ms: now_ms(), expires_at_ms: request.expires_at_ms, permissions: request.permissions };
+            let created_at_ms = now_ms();
+            request.validate_at(created_at_ms)?;
+            let metadata = Token { id: Uuid::new_v4(), label: request.label, created_at_ms, expires_at_ms: request.expires_at_ms, permissions: request.permissions };
             let tx = db.transaction()?;
             tx.execute("INSERT INTO tokens VALUES (?1, ?2, ?3, ?4, ?5)", params![metadata.id.to_string(), digest.as_slice(), metadata.label, metadata.created_at_ms, metadata.expires_at_ms])?;
             for permission in &metadata.permissions {
@@ -201,6 +209,41 @@ mod tests {
         }).await?;
         assert!(second.authenticate(&expiring.token).await?.is_none());
         assert_eq!(Store::open(fixture.path()).await?.list().await?.len(), 1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn constraints_and_canonical_records() -> Result<()> {
+        let fixture = Database::new();
+        let store = Store::open(fixture.path()).await?;
+        let token = store.create(Create::admin()).await?;
+        let id = token.metadata.id.to_string();
+        store.run(move |db| {
+            for sql in [
+                "INSERT INTO tokens SELECT * FROM tokens",
+                "INSERT INTO tokens SELECT '550e8400-e29b-41d4-a716-446655440000', secret_hash, label, created_at_ms, expires_at_ms FROM tokens",
+                "INSERT INTO token_permissions SELECT * FROM token_permissions",
+                "INSERT INTO token_permissions VALUES ('550e8400-e29b-41d4-a716-446655440000', 'desktop.view')",
+                "UPDATE tokens SET secret_hash = X'01'",
+                "UPDATE tokens SET created_at_ms = -1",
+                "UPDATE tokens SET expires_at_ms = created_at_ms",
+                "UPDATE tokens SET label = ''",
+            ] { assert!(db.execute_batch(sql).is_err(), "{sql}"); }
+            for label in [" untrimmed", "line\nbreak"] {
+                let tx = db.transaction()?;
+                tx.execute("UPDATE tokens SET label = ?1", [label])?;
+                assert!(read_tokens(&tx, None).is_err());
+            }
+            for invalid in ["invalid".to_string(), id.to_uppercase(), "550e8400-e29b-11d4-a716-446655440000".to_string()] {
+                assert!(parse_id(&invalid).is_err());
+                let tx = db.transaction()?;
+                tx.execute("DELETE FROM token_permissions", [])?;
+                tx.execute("UPDATE tokens SET id = ?1", [&invalid])?;
+                assert!(read_tokens(&tx, None).is_err());
+            }
+            Ok(())
+        }).await?;
+        assert!(store.authenticate(&token.token).await?.is_some());
         Ok(())
     }
 

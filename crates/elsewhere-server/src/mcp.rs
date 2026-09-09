@@ -22,6 +22,28 @@ use crate::{App, Key, auth, tokens::Permission as P, api::{self, ApiError}};
 pub const SKILL: &str = include_str!("../../../skills/elsewhere/SKILL.md");
 pub const REFERENCE: &str = include_str!("../../../skills/elsewhere/reference.md");
 
+/// A session's cached replies and resumed SSE streams belong to its creating token.
+pub async fn bind_session(axum::extract::State(app): axum::extract::State<Arc<App>>, axum::Extension(key): axum::Extension<Key>, request: axum::extract::Request, next: axum::middleware::Next) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let session = request.headers().get("mcp-session-id").and_then(|h| h.to_str().ok()).map(str::to_owned);
+    if let Some(session) = &session {
+        if !app.mcp_owners.lock().unwrap().get(session).is_some_and(|owner| owner.metadata.id == key.metadata.id && owner.live()) {
+            return ApiError::Forbidden.into_response();
+        }
+    }
+    let deleting = request.method() == axum::http::Method::DELETE;
+    let response = next.run(request).await;
+    if deleting && response.status().is_success() {
+        if let Some(session) = session { app.mcp_owners.lock().unwrap().remove(&session); }
+    }
+    if let Some(session) = response.headers().get("mcp-session-id").and_then(|h| h.to_str().ok()) {
+        if let Err(error) = key.with(&[], || { app.mcp_owners.lock().unwrap().insert(session.to_string(), key.clone()); Ok(()) }) {
+            return error.into_response();
+        }
+    }
+    response
+}
+
 // rmcp stores tool arguments in a JSON map, which otherwise discards repeated keys.
 fn duplicate_arguments<T: serde::de::DeserializeOwned>(raw: &str) -> bool {
     serde_json::from_str::<T>(raw).is_err()
@@ -305,7 +327,7 @@ impl Mcp {
     fn broadcast_start(&self, Extension(parts): Extension<Parts>, Parameters(settings): Parameters<elsewhere_core::broadcast::Start>) -> ToolResult {
         match self.require_key(&parts, P::BroadcastsManage).and_then(|key| self.app.broadcast_start(key, settings)) { Ok(s) => json(s), Err(e) => done(Err(e)) }
     }
-    #[tool(description = "Stop a runtime broadcast. Control token required; repeated stops are safe.")]
+    #[tool(description = "Stop a runtime broadcast. Requires broadcasts.manage; repeated stops are safe.")]
     fn broadcast_stop(&self, Extension(parts): Extension<Parts>, Parameters(arg): Parameters<BroadcastId>) -> ToolResult {
         match self.require_key(&parts, P::BroadcastsManage).and_then(|key| self.app.broadcast_stop(key, &arg.id)) { Ok(s) => json(s), Err(e) => done(Err(e)) }
     }

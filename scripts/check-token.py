@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Docker integration check for SQLite token creation, API grants and durable revocation."""
 import concurrent.futures
+from contextlib import closing
+import shutil
 import hashlib
 import json
 import os
@@ -63,12 +65,12 @@ with tempfile.TemporaryDirectory(prefix='elsewhere-tokens-') as directory:
     # The same command initializes a fresh store without a running server.
     offline = {**env, 'XDG_CONFIG_HOME': str(root / 'offline')}
     secret = cli(offline)
-    with sqlite3.connect(root / 'offline/elsewhere/state.sqlite3') as db:
+    with closing(sqlite3.connect(root / 'offline/elsewhere/state.sqlite3')) as db:
         assert db.execute('SELECT secret_hash FROM tokens').fetchone()[0] == hashlib.sha256(secret.encode()).digest()
     with (root / 'server.log').open('wb') as log:
         server = start(log)
         try:
-            with sqlite3.connect(database) as db:
+            with closing(sqlite3.connect(database)) as db:
                 assert db.execute('SELECT COUNT(*) FROM tokens').fetchone()[0] == 0
             admin = cli()
             status, me = request('/api/me', admin)
@@ -101,6 +103,7 @@ with tempfile.TemporaryDirectory(prefix='elsewhere-tokens-') as directory:
                 assert status not in (401, 403), (permission, status, body)
             a = create(['clipboard.write', 'files.upload'])
             b = create(['clipboard.write', 'files.upload'])
+            assert request('/api/clipboard', b['token'], 'PUT', b'file:///etc/passwd', 'text/uri-list')[0] == 403
             batch = str(uuid.uuid4())
             assert request('/api/drop/' + batch + '/private.txt', a['token'], 'PUT', b'private')[0] == 201
             assert request('/api/clipboard/files', b['token'], 'POST', {'batch': batch, 'names': ['private.txt']})[0] == 403
@@ -126,16 +129,33 @@ with tempfile.TemporaryDirectory(prefix='elsewhere-tokens-') as directory:
             assert request('/api/me', victim['token'])[0] == 401
             listing = request('/api/tokens', admin)[1]
             assert 'secret_hash' not in json.dumps(listing) and admin not in json.dumps(listing)
-            with sqlite3.connect(database) as db:
+            with closing(sqlite3.connect(database)) as db:
                 assert db.execute('PRAGMA foreign_key_check').fetchall() == []
                 assert db.execute('SELECT COUNT(*) FROM token_permissions WHERE token_id=?', (victim['metadata']['id'],)).fetchone()[0] == 0
-            assert database.stat().st_mode & 0o777 == 0o600
+            for path in database.parent.glob('state.sqlite3*'):
+                assert path.stat().st_mode & 0o777 == 0o600
+                assert admin.encode() not in path.read_bytes()
             server.terminate(); server.wait(timeout=10)
+            backup = root / 'backup'
+            backup.mkdir()
+            for path in database.parent.glob('state.sqlite3*'):
+                shutil.copy2(path, backup / path.name)
+            after_backup = cli()
+            for path in database.parent.glob('state.sqlite3*'):
+                path.unlink()
+            for path in backup.iterdir():
+                shutil.copy2(path, database.parent / path.name)
             server = start(log)
+            assert request('/api/me', after_backup)[0] == 401
             assert request('/api/me', admin)[0] == 200
             assert request('/api/me', victim['token'])[0] == 401
         finally:
             server.terminate(); server.wait(timeout=10)
+    broken_config = root / 'broken'
+    (broken_config / 'elsewhere').mkdir(parents=True)
+    (broken_config / 'elsewhere/state.sqlite3').write_bytes(b'not a database')
+    failed = subprocess.run([binary, 'token', 'create', '--admin'], env={**env, 'XDG_CONFIG_HOME': str(broken_config)}, capture_output=True, timeout=10)
+    assert failed.returncode != 0 and not failed.stdout and failed.stderr
     output = (root / 'server.log').read_text()
     assert 'elsewhere token create --admin' in output and admin not in output
     print('SQLite CLI/API creation, permission gates, batch ownership, expiry, revocation and restart passed')

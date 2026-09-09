@@ -23,8 +23,8 @@ const create = async (permissions, expires_at_ms) => {
   return response.json();
 };
 const revoke = async token => { const response = await request('/api/tokens/' + token.metadata.id, admin, 'DELETE'); assert.equal(response.status, 204); };
-async function connect(token, terminal = false) {
-  const socket = new WebSocket(origin.replace('http', 'ws') + (terminal ? '/ws/terminal' : '/ws'));
+async function connect(token, terminal = false, windowId = null) {
+  const socket = new WebSocket(origin.replace('http', 'ws') + (terminal ? '/ws/terminal' : windowId === null ? '/ws' : '/ws/window/' + windowId));
   socket.binaryType = 'arraybuffer';
   const state = { socket, packets: [], closed: false };
   sockets.push(socket);
@@ -40,6 +40,16 @@ try {
   admin = await createToken(root);
   const a = await create(['desktop.view', 'desktop.control', 'clipboard.write', 'commands.execute']);
   const b = await create(['desktop.view']);
+  const mcp = async (token, session, method, params) => fetch(origin + '/mcp', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', ...(session && { 'Mcp-Session-Id': session }) }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
+  const init = { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'token-test', version: '1' } };
+  const initA = await mcp(a.token, null, 'initialize', init), initB = await mcp(b.token, null, 'initialize', init);
+  const sessionA = initA.headers.get('mcp-session-id'), sessionB = initB.headers.get('mcp-session-id');
+  assert.ok(sessionA && sessionB);
+  await initA.text(); await initB.text();
+  assert.equal((await mcp(b.token, sessionA, 'tools/list', {})).status, 403);
+  assert.equal((await fetch(origin + '/mcp', { headers: { Authorization: 'Bearer ' + b.token, Accept: 'text/event-stream', 'Mcp-Session-Id': sessionA, 'Last-Event-ID': '0' } })).status, 403);
+  const ownTools = await mcp(b.token, sessionB, 'tools/list', {});
+  assert.equal(ownTools.status, 200); await ownTools.text();
   const one = await connect(a.token), two = await connect(b.token);
   await wait('two streams', () => [one, two].every(s => s.packets.some(p => p[0] === 1)));
   const terminal = await connect(a.token, true);
@@ -48,7 +58,26 @@ try {
   assert.equal(clipboard.status, 202);
   await delay(150);
   assert.ok(two.packets.every(p => ![5, 7, 10, 15, 16].includes(p[0])), 'desktop-only token has no clipboard or audio packets');
+  await request('/api/control', a.token, 'POST', { op: 'spawn', cmd: 'stdbuf -oL wev > held-input.log' });
+  let heldWindow;
+  await wait('input observer', async () => { heldWindow = (await (await request('/api/windows', admin)).json()).find(w => w.app_id === 'wev'); return heldWindow; });
+  const c = await create(['desktop.view', 'desktop.control']);
+  const windowSession = await connect(c.token, false, heldWindow.id);
+  await wait('window stream', () => windowSession.packets.some(p => p[0] === 1));
+  windowSession.socket.send(Buffer.from([0x87, 30, 0, 1]));
+  const heldLog = () => readFile(root + '/held-input.log', 'utf8');
+  await wait('window holds key', async () => (await heldLog()).includes('state: 1 (pressed)'));
+  const hidden = await create([]);
+  const hiddenExisting = await connect(hidden.token, false, heldWindow.id), hiddenMissing = await connect(hidden.token, false, 999999);
+  await wait('window visibility denied', () => hiddenExisting.closed && hiddenMissing.closed);
+  assert.equal(hiddenExisting.code, 4001); assert.equal(hiddenMissing.code, 4001);
   await revoke(a);
+  await delay(100);
+  assert.ok(!(await heldLog()).includes('state: 0 (released)'), 'controller revocation preserves another window token’s held key');
+  await revoke(c);
+  await wait('held key released by its owner revocation', async () => (await heldLog()).includes('state: 0 (released)'));
+  assert.equal((await mcp(a.token, sessionA, 'tools/list', {})).status, 401);
+  const otherTools = await mcp(b.token, sessionB, 'tools/list', {}); assert.equal(otherTools.status, 200); await otherTools.text();
   await wait('revoked desktop and terminal', () => one.closed && terminal.closed);
   assert.equal(one.code, 4001);
   assert.equal(two.closed, false);
@@ -98,7 +127,7 @@ try {
   await page.goto(origin + '/#token=' + b.token);
   await page.waitForFunction(() => elsewhere.store.get().status === 'connected');
   for (const selector of ['#apps-toggle', '#terminal-toggle', '#power-toggle', '#clipboard-toggle', '#session-mixer-toggle']) assert.equal(await page.locator(selector).count(), 0, selector);
-  const writable = await create(['desktop.view', 'clipboard.write']);
+  const writable = await create(['desktop.view', 'clipboard.write', 'files.upload']);
   const writer = await browser.newPage();
   writer.on('pageerror', error => errors.push(error.message));
   await writer.goto(origin + '/#token=' + writable.token);
@@ -108,6 +137,23 @@ try {
   await writer.getByRole('textbox', { name: 'Clipboard text' }).fill('write without read');
   await writer.getByRole('button', { name: 'Save', exact: true }).click();
   await writer.getByRole('button', { name: 'New text', exact: true }).waitFor();
+  await writer.getByRole('button', { name: 'Close clipboard', exact: true }).click();
+  await writer.locator('canvas.stage').evaluate(canvas => {
+    const data = new DataTransfer(); data.items.add(new File(['pasted without browsing'], 'paste-only.txt'));
+    canvas.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  });
+  await wait('file paste without browsing or desktop control', async () => (await (await request('/api/clipboard', admin)).text()).includes('paste-only.txt'));
+  const dropper = await create(['desktop.view', 'desktop.control', 'dragdrop.upload', 'files.upload']);
+  const dropSocket = await connect(dropper.token);
+  await wait('drop controller', () => dropSocket.packets.some(p => p[0] === 8 && p[1] === 2));
+  const batch = crypto.randomUUID();
+  assert.equal((await fetch(origin + '/api/drop/' + batch + '/dropped.txt', { method: 'PUT', headers: { Authorization: 'Bearer ' + dropper.token }, body: 'drop without browsing' })).status, 201);
+  const drag = message => dropSocket.socket.send(Buffer.concat([Buffer.from([0x90]), Buffer.from(JSON.stringify(message))]));
+  drag({ op: 'start' }); drag({ op: 'drop', batch, names: ['dropped.txt'] });
+  await wait('drop without file browser', () => dropSocket.packets.some(p => p[0] === 0x13 && JSON.parse(p.subarray(1)).batch === batch));
+  assert.equal((await request('/api/files?path=@transfer', dropper.token)).status, 403);
+  assert.equal((await request('/api/files/dropped.txt?path=@transfer', admin)).status, 200);
+  await revoke(dropper);
   assert.deepEqual(errors, []);
   await revoke(b);
   await page.waitForFunction(() => elsewhere.store.get().status === 'unauthorized');

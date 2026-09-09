@@ -1035,7 +1035,7 @@ export function createViewer() {
   function onDragOver(e) { if (dragging === 'over') onPointerMove(e); }
   function onDragLeave() { if (dragging === 'over') { dragging = false; drag({ op: 'cancel' }); } }
   async function onDrop(e) {
-    if (dragging !== 'over') { e.preventDefault(); e.stopPropagation(); return; }
+    if (dragging !== 'over') { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer?.files.length) notice('Desktop file drops require drag-and-drop, upload and desktop control permissions.'); return; }
     e.preventDefault();
     e.stopPropagation();
     dragging = 'dropping';

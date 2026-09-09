@@ -131,8 +131,8 @@ pub(super) async fn authenticate(socket: &mut WebSocket, app: &App) -> Option<Ke
 }
 
 /// Hello, which picks the codec, before the encoder exists; five seconds of silence ends the socket.
-async fn hello(socket: &mut WebSocket) -> Option<(u8, u8, Option<Codec>, Preset, EncodingEffort)> {
-    tokio::time::timeout(Duration::from_secs(5), async {
+async fn hello(socket: &mut WebSocket, key: &Key) -> Option<(u8, u8, Option<Codec>, Preset, EncodingEffort)> {
+    tokio::select! { biased; _ = key.ended() => None, result = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match socket.recv().await? {
                 Ok(Message::Binary(b)) => {
@@ -144,14 +144,11 @@ async fn hello(socket: &mut WebSocket) -> Option<(u8, u8, Option<Codec>, Preset,
                 _ => {}
             }
         }
-    })
-    .await
-    .ok()
-    .flatten()
+    }) => result.ok().flatten() }
 }
 
 async fn close(socket: &mut WebSocket, code: u16, reason: &str) {
-    let _ = socket.send(Message::Close(Some(CloseFrame { code, reason: reason.into() }))).await;
+    let _ = tokio::time::timeout(Duration::from_millis(200), socket.send(Message::Close(Some(CloseFrame { code, reason: reason.into() })))).await;
 }
 
 /// A send that gives up on a peer that stopped reading, so its session ends (and with it the encoder
@@ -169,7 +166,7 @@ async fn send_message(socket: &mut WebSocket, key: &Key, msg: Message) -> bool {
 pub async fn session(mut socket: WebSocket, app: Arc<App>) {
     let Some(key) = authenticate(&mut socket, &app).await else { return };
     if !key.has(P::DesktopView) { return close(&mut socket, UNAUTHORIZED, "desktop.view required").await; }
-    let Some((hw, sw, want_codec, preset, effort)) = hello(&mut socket).await else { return };
+    let Some((hw, sw, want_codec, preset, effort)) = hello(&mut socket, &key).await else { return };
     let (tx, mut rx) = mpsc::channel::<StreamMsg>(2);
     let (sink, control) = match (app.sinks)(tx) {
         Ok(x) => x,
@@ -372,11 +369,11 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
 /// or the window goes away.
 pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
     let Some(key) = authenticate(&mut socket, &app).await else { return };
+    if !key.has(P::DesktopView) { return close(&mut socket, UNAUTHORIZED, "desktop.view required").await; }
     if !app.viewers.lock().unwrap().window_list.iter().any(|w| w.id == id) {
         return close(&mut socket, GONE, "no such window").await;
     }
-    if !key.has(P::DesktopView) { return close(&mut socket, UNAUTHORIZED, "desktop.view required").await; }
-    let Some((hw, sw, mut want_codec, mut preset, effort)) = hello(&mut socket).await else { return };
+    let Some((hw, sw, mut want_codec, mut preset, effort)) = hello(&mut socket, &key).await else { return };
     let (tx, mut rx) = mpsc::channel::<StreamMsg>(2);
     let (sink, control) = match (app.sinks)(tx) {
         Ok(x) => x,
@@ -1052,7 +1049,7 @@ fn is_input(command: &Command) -> bool {
 impl App {
     fn session_command(&self, key: &Key, session: u64, command: Command) {
         if matches!(command, Command::ReleaseAllInput) { self.release_input(key, session); return; }
-        if is_input(&command) { self.claim_input(key, session); }
-        let _ = self.commands.send(command);
+        if is_input(&command) { let _ = self.send_input(key, session, command); }
+        else { let _ = self.commands.send(command); }
     }
 }

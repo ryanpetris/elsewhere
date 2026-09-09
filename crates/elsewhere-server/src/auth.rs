@@ -10,7 +10,7 @@ pub struct Access {
     gate: RwLock<()>,
 }
 impl Access {
-    fn new(metadata: tokens::Token) -> Self { Self { metadata, cancelled: CancellationToken::new(), gate: RwLock::new(()) } }
+    pub(crate) fn new(metadata: tokens::Token) -> Self { Self { metadata, cancelled: CancellationToken::new(), gate: RwLock::new(()) } }
     pub fn live(&self) -> bool { !self.cancelled.is_cancelled() && self.metadata.live() }
     pub fn admit(&self) -> Result<std::sync::RwLockReadGuard<'_, ()>, ApiError> {
         let guard = self.gate.read().unwrap();
@@ -54,15 +54,14 @@ impl Access {
 }
 
 impl App {
-    pub(crate) fn authorized_input(&self, key: &Key, msg: elsewhere_core::InputMsg) -> Result<(), ApiError> {
-        self.claim_input(key, u64::MAX);
-        self.input(msg)
-    }
-    pub(crate) fn claim_input(&self, key: &Key, session: u64) {
+    pub(crate) fn send_input(&self, key: &Key, session: u64, command: elsewhere_core::Command) -> Result<(), ApiError> {
+        // Ownership and command order share one lock across HTTP, MCP and both WebSocket routes.
         let mut owner = self.input_owner.lock().unwrap();
         let next = (key.metadata.id, session);
-        if owner.is_some_and(|old| old != next) { let _ = self.commands.send(elsewhere_core::Command::ReleaseAllInput); }
+        if owner.is_some_and(|old| old != next) { self.send(elsewhere_core::Command::ReleaseAllInput)?; }
+        self.send(command)?;
         *owner = Some(next);
+        Ok(())
     }
     pub(crate) fn release_input(&self, key: &Key, session: u64) {
         let mut owner = self.input_owner.lock().unwrap();
@@ -100,6 +99,14 @@ impl App {
         }
         self.stop_token_broadcasts(id);
         self.batches.lock().unwrap().retain(|_, key| key.metadata.id != id);
+        let sessions: Vec<_> = {
+            let mut owners = self.mcp_owners.lock().unwrap();
+            let sessions = owners.iter().filter(|(_, key)| key.metadata.id == id).map(|(session, _)| session.clone()).collect::<Vec<_>>();
+            owners.retain(|_, key| key.metadata.id != id);
+            sessions
+        };
+        use rmcp::transport::streamable_http_server::session::SessionManager;
+        for session in sessions { let _ = self.mcp_sessions.close_session(&session.into()).await; }
         if let Some(hub) = &self.rtc { for session in rtc_keys { hub.close(session).await; } }
     }
     pub(crate) async fn key_for(&self, secret: &str) -> Result<Option<Key>, ApiError> {
@@ -141,7 +148,7 @@ pub async fn create(Extension(key): Extension<Key>, State(app): State<Arc<App>>,
     request.validate().map_err(|e| ApiError::InvalidInput(e.to_string()))?;
     let _serial = app.auth_serial.lock().await;
     key.require(P::TokensManage)?;
-    let created = app.tokens.create(request).await.map_err(internal)?;
+    let created = app.tokens.create(request).await.map_err(|e| if e.is::<tokens::InvalidCreate>() { ApiError::InvalidInput(e.to_string()) } else { internal(e) })?;
     Ok((StatusCode::CREATED, crate::NO_STORE, Json(created)).into_response())
 }
 pub async fn list(Extension(key): Extension<Key>, State(app): State<Arc<App>>) -> Result<Response, ApiError> {
@@ -157,6 +164,7 @@ pub async fn revoke(Extension(key): Extension<Key>, State(app): State<Arc<App>>,
         key.require(P::TokensManage)?;
         if !app.tokens.revoke(id).await.map_err(internal)? { return Ok(StatusCode::NOT_FOUND); }
         if let Some(access) = app.active_tokens.lock().unwrap().remove(&id).and_then(|k| k.upgrade()) { access.cancel(); }
+        drop(_serial);
         app.cancel_token(id).await;
         Ok(StatusCode::NO_CONTENT)
     }).await.map_err(|e| internal(e.into()))?

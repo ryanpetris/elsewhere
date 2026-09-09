@@ -262,11 +262,11 @@ impl App {
 
     /// Pointer and keyboard input. `window` makes coordinates relative to that window's geometry; the
     /// compositor resolves it against the live geometry, this only answers 404 for an unknown id.
-    pub fn input(&self, msg: InputMsg) -> Result<(), ApiError> {
+    pub(crate) fn authorized_input(&self, key: &crate::Key, msg: InputMsg) -> Result<(), ApiError> {
         if let InputMsg::Move { window: Some(id), .. } | InputMsg::Click { window: Some(id), .. } = &msg {
             self.window(*id)?;
         }
-        self.send(Command::Input(msg))
+        self.send_input(key, u64::MAX, Command::Input(msg))
     }
 
     pub(crate) fn send(&self, cmd: Command) -> Result<(), ApiError> {
