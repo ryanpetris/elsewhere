@@ -12,19 +12,19 @@ const ROUTES: &str = "\
 |---|---|---|
 | `GET /api/windows` | | JSON array of **Window** |
 | `GET /api/broadcasts/capabilities` | | broadcast encoder availability and limits |
-| `POST /api/broadcasts/start` | **BroadcastStart** | control token; runtime status without connection credentials |
+| `POST /api/broadcasts/start` | **BroadcastStart** | broadcasts.manage + desktop.view, plus audio.listen for desktop audio; runtime status without connection credentials |
 | `GET /api/broadcasts` | | runtime statuses; no saved configurations or credentials |
 | `GET /api/broadcasts/{id}` | | runtime status; `404` unknown ID |
-| `POST /api/broadcasts/{id}/stop` | | control token; stop and return runtime status; `404` unknown ID |
+| `POST /api/broadcasts/{id}/stop` | | broadcasts.manage; stop and return runtime status; `404` unknown ID |
 | `GET /api/codecs` | | JSON array of `{codec, hardware}`: what this server encodes, in the order Auto prefers |
 | `GET /api/applications` | | JSON array of **Application**: the installed launchers, for `launch` |
 | `GET /api/applications/{id}/icon` | | the application's icon, SVG or PNG; `404` none |
 | `GET /api/windows/{id}/icon` | | the window's icon (its own, else its launcher's), SVG or PNG; `404` none |
-| `GET /api/files` | **FileQuery** query, required `path` | control token; **FileListing** |
-| `PUT /api/files/{name}` | bytes; required `path` query | control token; streaming upload with collision suffix; `201` **SavedFile** |
-| `GET /api/files/{name}` | required `path` query | control token; regular file attachment |
-| `DELETE /api/files/{name}` | required `path` query | control token; nonrecursive unlink; `204` |
-| `POST /api/files` | **FileAction** | control token; mkdir or rename without replacement; `201` **SavedFile** |
+| `GET /api/files` | **FileQuery** query, required `path` | files.browse; **FileListing** |
+| `PUT /api/files/{name}` | bytes; required `path` query | files.upload; streaming upload with collision suffix; `201` **SavedFile** |
+| `GET /api/files/{name}` | required `path` query | files.download; regular file attachment |
+| `DELETE /api/files/{name}` | required `path` query | files.manage; nonrecursive unlink; `204` |
+| `POST /api/files` | **FileAction** | files.manage; mkdir or rename without replacement; `201` **SavedFile** |
 | `PUT /api/drop/{batch}/{name}` | the file's bytes | staged in batch `batch` (a random id of the page's) for a drag or a paste onto the desktop, where the application picks the folder; the transfer folder is for uploads; `201` with `{\"name\": \"…\"}` |
 | `GET /api/notifications` | | JSON array of **Notification**: what applications reported and the viewers show |
 | `POST /api/notifications/{id}` | `{\"action\": \"default\" \\| \"<key>\"}`, or `{}` to dismiss | click, invoke an action of, or dismiss a notification; `202`, `404` |
@@ -35,11 +35,14 @@ const ROUTES: &str = "\
 | `POST /api/control` | **Control** | `202`; fire-and-forget; `404` unknown application (`launch`); `503` compositor gone |
 | `POST /api/input` | **Input** | `202`, with `{\"warning\": …}` when a click aims past the desktop's edge at an X11 window (Xwayland pins it to the edge); `404` unknown window; `503` compositor gone |
 | `GET /api/clipboard/state` | | metadata: `observation`, `operation`, `present`, `mime`, `size`, `preview`; preview is empty, loading, available, unavailable or restricted; opaque identifiers are scoped to this server process |
-| `GET /api/clipboard` | optional `If-Match` with quoted observation | current bytes with Content-Type and ETag; control token required for file lists; `204` no selection, `409` bytes unavailable, `412` observation changed |
+| `GET /api/clipboard` | optional `If-Match` with quoted observation | current bytes with Content-Type and ETag; `clipboard.read` and `files.download` required for file lists; `204` no selection, `409` bytes unavailable, `412` observation changed |
 | `PUT /api/clipboard` | UTF-8 text body, a PNG with `Content-Type: image/png`, or `file://` URIs with `text/uri-list` | queues a desktop clipboard change; `202` with an opaque `operation` confirmed by matching metadata after installation; `413` over 1 MiB (text) or 16 MiB (PNG) |
 | `POST /api/clipboard/files` | `{\"names\": [...]}` from the transfer folder, or with `\"batch\"` from that staged batch | those files become the desktop clipboard, as a file manager's copy; `202` |
-| `GET /api/clipboard/files/{index}` | | control token; the `index`th file on the desktop clipboard, as an attachment; `404` |
-| `POST /api/token/rotate` | | `{\"token\": …, \"viewer_token\": …}`: new tokens replace both at once (files, viewers, API); the CLI reads the new tokens from their files |
+| `GET /api/clipboard/files/{index}` | | clipboard.read + files.download; the `index`th file on the desktop clipboard, as an attachment; `404` |
+| `GET /api/me` | | caller metadata, permissions, available_permissions and server features |
+| `GET /api/tokens` | | `tokens.manage`; metadata list, no secrets or hashes |
+| `POST /api/tokens` | label, permissions, optional expires_at_ms | `tokens.manage`; `201` with token and metadata; secret disclosed once |
+| `DELETE /api/tokens/{id}` | canonical UUIDv4 ID | `tokens.manage`; `204`, `404`; stops the affected token’s live resources |
 | `POST /mcp` | MCP Streamable HTTP | the tools below |
 | `GET /skill/SKILL.md`, `GET /skill/reference.md` | no token needed | this documentation |
 ";
@@ -52,7 +55,7 @@ pub fn markdown() -> String {
     let mut out = String::new();
     out.push_str("# Elsewhere API and MCP reference\n\n");
     out.push_str("Generated from the code (`UPDATE_REFERENCE=1 cargo test -p elsewhere-server reference`); do not edit.\n\n");
-    out.push_str("## HTTP API\n\nEvery `/api` request carries `Authorization: Bearer <token>`; `401` (empty body) otherwise. The\nviewer token (`elsewhere token --viewer`) reads: the acting routes and tools answer `403`\n`read-only token` to it. The\nstatuses in the table come with a JSON body `{\"error\": \"...\"}`. A request body the server can't read is\nrejected before that with a plain-text message: `400` invalid JSON, `415` missing\n`Content-Type: application/json`, `422` wrong shape. Coordinates are logical pixels.\n\n");
+    out.push_str("## HTTP API\n\nEvery `/api` request carries `Authorization: Bearer <token>`; `401` otherwise. Each operation requires explicit token permissions; missing grants return `403` permission denied.\nThe statuses in the table come with a JSON body `{\"error\": \"...\"}`. A request body the server can't read is\nrejected before that with a plain-text message: `400` invalid JSON, `415` missing\n`Content-Type: application/json`, `422` wrong shape. Coordinates are logical pixels.\n\n");
     out.push_str(ROUTES);
     for (name, s) in [("BroadcastStart", schema::<elsewhere_core::broadcast::Start>()), ("Window", schema::<WindowInfo>()), ("Application", schema::<AppInfo>()), ("Notification", schema::<crate::notify::Notification>()), ("FileQuery", schema::<crate::files::FileQuery>()), ("FileListing", schema::<crate::files::FileListing>()), ("FileAction", schema::<crate::files::FileAction>()), ("SavedFile", schema::<crate::files::SavedFile>()), ("Control", schema::<ControlMsg>()), ("Input", schema::<InputMsg>()), ("Elements", schema::<Page>())] {
         out.push_str(&format!("\n## {name}\n\n```json\n{s}\n```\n"));

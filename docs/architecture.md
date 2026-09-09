@@ -22,10 +22,10 @@ snapshots, browser UI).
 | Stack | Rust + Smithay (git master, pinned by commit in `crates/elsewhere-compositor/Cargo.toml`; 0.7.0 kills a client that destroys a toplevel icon before its buffer, as Chromium 152 does); no wlroots. FFmpeg libraries via ffmpeg-next for encoding. axum for HTTP/WebSocket. |
 | Transport | WebSocket + WebCodecs. WebCodecs needs a secure context, so the server speaks HTTPS with a self-signed certificate unless `--no-tls` (localhost development). |
 | Windowing | Floating desktop: stacking, click-to-focus, decorations by the client or, for those that draw none, by the compositor, xdg move/resize, maximize/fullscreen, minimize, layer-shell panels. `--kiosk` fullscreens every window for nested desktops. |
-| Viewers | Any number, each with its own encoder at its own size and codec. One controls (input and output size): the first control-token session, or whoever took control last. A second, read-only token lets people watch. |
+| Viewers | Any number, each with its own encoder at its own size and codec. One controls (input and output size): the first desktop.control session, or whoever took control last. Tokens with only `desktop.view` let people watch. |
 | Cursor | Drawn by the browser (CSS cursor from the compositor's image), never composited: pointer motion costs no frames. Clients name a shape through cursor-shape-v1 or upload a surface; either ends as the same image. |
 | Rendering cadence | Damage-driven. No commit, no frame, no bandwidth. |
-| Auth | Two shared tokens (control and view-only), handed to a viewer once in the URL fragment and kept in `sessionStorage`; rotatable through the API. WebSocket authenticates with its first message; HTTP API uses `Authorization: Bearer`. No cookies. |
+| Auth | SQLite bearer tokens with explicit permissions and individual revocation. WebSockets authenticate with their first message; HTTP uses `Authorization: Bearer`. No cookies. |
 
 ## Process layout
 
@@ -285,9 +285,8 @@ axum with rustls. On first start the server writes a self-signed certificate (ev
 token into the data directory (`$XDG_CONFIG_HOME/elsewhere`, or `~/.config/...`). ALPN is pinned to
 HTTP/1.1 because WebSocket upgrades need it.
 
-A session becomes a viewer only after it sends a token (see [protocol.md](protocol.md)); which of the
-two tokens decides whether it may act. Each session forwards its own encoder's output with a
-ten-second send deadline; state messages and audio are broadcast to every session. Encoder output
+A session becomes a viewer only after it sends a token (see [protocol.md](protocol.md)); its explicit grants decide which operations it may perform. Each session forwards its own encoder's output with a
+ten-second send deadline; state messages and audio are sent only to sessions with their required grants. Encoder output
 belonging to a superseded stream id is discarded. The controller and the sizing rules are in
 [desktop-api.md](desktop-api.md).
 

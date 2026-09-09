@@ -101,7 +101,7 @@ Preserve the `Authorization` header, which nginx forwards by default. A gateway 
 authentication and does not replace Elsewhere's tokens.
 
 Open `https://desktop.example.com/elsewhere/alice/` or `/elsewhere/bob/`. Retrieve the matching token
-with `docker exec alice elsewhere token` or `docker exec bob elsewhere token`, and paste it into the
+with `docker exec alice elsewhere token create --admin` or `docker exec bob elsewhere token create --admin`, and paste it into the
 viewer. Token storage, preferences and named window popups are scoped by prefix. Different instances
 can remain open in separate tabs. Paths on the same origin are not a browser security boundary;
 use separate hostnames if the applications must not share an origin.

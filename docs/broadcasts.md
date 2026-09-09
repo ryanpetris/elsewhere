@@ -3,8 +3,8 @@
 The Broadcasts sidebar panel sends the generated desktop to RTMP/RTMPS ingest services. Enter an
 ingest URL and stream key, choose output size, frame rate, bitrate, desktop sound or silence, and
 whether to include the mouse pointer. Save a browser preset and press Start. Each running output
-has its own Stop button and status. The control token permits start and stop even when another
-viewer controls the desktop. Viewer-token connections can read status but cannot change streams.
+has its own Stop button and status. `broadcasts.manage` permits management even when another
+viewer controls the desktop. Status and capabilities also require `broadcasts.manage`.
 
 Presets, including keys, live in local storage under `elsewhere.broadcastPreset.<id>`. They are
 shared by instances at different paths of the same origin in the same browser profile. Scheme,
@@ -15,7 +15,7 @@ comes from the currently connected host. Clearing browser storage removes preset
 ## YouTube and Twitch setup
 
 Service instructions and encoder recommendations checked against the linked official documentation
-on 2026-09-07. Elsewhere is the encoder in these instructions. Connect with a control token and
+on 2026-09-07. Elsewhere is the encoder in these instructions. Connect with `broadcasts.manage`, `desktop.view`, and `audio.listen` for desktop audio and
 open **Broadcasts → Add preset**. Choose **Desktop sound** if host audio is available, otherwise
 **Silence**, and choose whether to include the pointer. The preset name is a local label; set the
 public title, category, audience, and visibility on the service itself.
@@ -162,8 +162,8 @@ Set `BROADCAST_DURATION=600` for a ten-minute A/V clock and idle bitrate check.
 
 Run `web/checks/broadcasts.mjs` in the Docker desktop rig with the current binary, FFmpeg and Node.
 It checks four simultaneous outputs, idle cadence, codecs, sizes, keyframe intervals, audio timing,
-network reconnection, independent stop, request retries, API/MCP parity, and viewer-token rejection.
-`web/checks/url-prefix.mjs` checks browser presets across instance paths and control-token actions
+network reconnection, independent stop, request retries, API/MCP parity, and desktop-view-only rejection.
+`web/checks/url-prefix.mjs` checks browser presets across instance paths and desktop.control actions
 from a participant. Set `ELSEWHERE_BINARY` to a mounted or copied build for quick iteration. Run the broadcast check
 again with `BROADCAST_AUDIO=1` to verify desktop sound, resizing, cursor inclusion, idle browser
 behavior, varying capture quanta, a brief capture pause, and private-audio failure while a silent

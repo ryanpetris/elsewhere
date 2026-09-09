@@ -60,26 +60,26 @@ make run ARGS="--exec foot"                   # any Wayland client; WAYLAND_DISP
 
 The server prints its certificate fingerprint and plain connection URLs, without tokens. Open a URL
 in a browser, compare the fingerprint before accepting the self-signed certificate, and paste a token
-into the connection dialog. Retrieve an existing token on the server with:
+into the connection dialog. Create an admin token on the server with:
 
 ```sh
-elsewhere token           # control access
-elsewhere token --viewer  # read-only access
+elsewhere token create --admin
 ```
 
-Use the same user and environment as the running server. Tokens are stored in
-`$XDG_CONFIG_HOME/elsewhere/token` and `viewer-token`, or `~/.config/elsewhere/` when
-`XDG_CONFIG_HOME` is unset. The command only reads the selected file; it does not start the server,
-create files or rotate tokens. Start the server once to create tokens. In Docker, run
-`docker exec <container> elsewhere token`, adding `--viewer` for read-only access.
+Use the same user, configuration and execution environment as the server. In Docker, run
+`docker exec <container> elsewhere token create --admin`. The command works before startup or while
+the server runs. It prints a new secret once, after committing its hash and grants to
+`$XDG_CONFIG_HOME/elsewhere/state.sqlite3`, or `~/.config/elsewhere/state.sqlite3` when
+`XDG_CONFIG_HOME` is unset. Startup creates no tokens. See [token permissions and management](docs/tokens.md)
+for scoped access, recovery and database backups.
 
 The desktop takes the size of the controlling viewer's display area; the fullscreen button hands it the whole screen, with
 keyboard lock so shortcuts like Ctrl+W reach the desktop.
 
 Any number of people can watch at once, each with a stream scaled to their own window. The first to
-connect with the control token drives the pointer and keyboard; anyone else with that token sees a
-"Take control" button, and the desktop then takes their window's size. Anyone using the view-only token
-can watch, read the window list and elements, and take snapshots, but not act.
+connect with `desktop.control` drives the pointer and keyboard; other eligible sessions can use
+"Take control". Each token grants explicit feature access. Desktop viewing, clipboard, files, audio,
+camera, microphone and program execution have separate permissions.
 
 Use `--screen-size 1920x1080` to set a fixed desktop resolution from startup. Browser resizes and
 control handoffs keep that resolution; each browser scales the picture to fit while preserving its
@@ -193,8 +193,7 @@ The desktop starts empty; the viewer's menu launches the applications, and `--ex
 the image name adds the panel. `make docker-run` builds the image and runs it; the details are
 in the Dockerfile's header.
 
-The page says when the server closed its socket with a token dialog ("wrong token" or "token
-rotated"; the tokens change with the data directory, e.g. a fresh container without a volume).
+The page says when the server closed its socket with a token dialog ("wrong token" or "token revoked or expired").
 
 In Settings, enable **Capture mouse on click** for games that use edge scrolling. The first click
 captures the mouse; movement, clicks, and the mouse wheel reach the desktop only while captured.
@@ -325,15 +324,12 @@ The compositor is the window manager, so the viewer and outside scripts can see 
 HTTP calls send the token as `Authorization: Bearer <token>`; the viewer page takes it from its URL
 fragment once (`#token=`, never sent to the server), keeps it in `sessionStorage` and drops it from the
 address bar, and sends it as the first message on its WebSocket. A tab without a token shows a dialog
-asking for one. There are no cookies and a token is never in a URL the server sees. The view-only token
-works for everything below that reads (the window list, elements, snapshots, the clipboard, copied files
-included) and
-gets `403` for everything that acts. `POST /api/token/rotate` (with the control token) issues new
-tokens: the files, the API and every viewer switch at once. The API returns the new tokens;
-`elsewhere token` reads the updated files. Token values are not printed to server output.
+asking for one. There are no cookies and a token is never in a URL the server sees. Each operation
+requires its documented permissions. Token management uses `/api/tokens`; revoking a token ends
+only its own sessions and live resources. Token values are disclosed only at creation.
 
 ```sh
-T=$(elsewhere token)
+T=$(elsewhere token create --admin)
 curl -s -H "Authorization: Bearer $T" http://host:8443/api/windows | jq        # the window list
 curl -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
      http://host:8443/api/control -d '{"id":3,"op":"minimize"}'                # act on a window

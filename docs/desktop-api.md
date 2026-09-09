@@ -13,8 +13,8 @@ of a window, and a small desktop UI in the viewer built on the same data. Wire f
 | Window identity | `u64` from a counter, stored in the `Window` user data on first sight. Stable, never reused. |
 | Where the page talks | The existing WebSocket: `Windows` (server → client) and `Control` (client → server) JSON messages. |
 | Where scripts talk | `/api/...` on the same axum router, bearer token. |
-| Two tokens | The control token acts; the viewer token (`viewer-token`, retrieved with `elsewhere token --viewer`) reads: window list, elements, snapshots, clipboard text and images, and video. Copied file lists and downloads require the control token. Acting routes answer `403`, acting MCP tools a tool error. |
-| Several viewers | Each session has its own encoder (codec and size of its own); one controller at a time drives input and sizes the output, the first control-token session or whoever took control last; the rest watch letterboxed. |
+| Token permissions | Explicit grants govern each feature; see [tokens](tokens.md). |
+| Several viewers | Each session has its own encoder (codec and size of its own); one controller at a time drives input and sizes the output, the first desktop.control session or whoever took control last; the rest watch letterboxed. |
 | "Focused" | The compositor's intent: the window `focus_window` last activated (or that was just mapped), not the client-acknowledged xdg state, which lags a round trip and is wrong for a hung client. |
 | Update timestamps | Whole-second resolution. It is part of the diffed list, so finer resolution would turn a 60 fps client into sixty lists a second. |
 | Snapshot content | The window's xdg geometry (shadows clipped), popups included, minimized windows included, rendered offscreen with uniform scaling to the requested image dimensions. The full screenshot builds the output's elements itself (`output_elements`). |
@@ -248,8 +248,9 @@ the mechanism.
 It is not an access boundary: the process's Unix permissions determine access to the remote filesystem,
 including mounted volumes in a container. `/proc` must be mounted for descriptor-based operations.
 
-Every file endpoint, including clipboard file lists/downloads and equivalent MCP tools, requires a control
-token. Participants may use files without taking desktop control.
+File browsing, uploads, downloads and management have separate grants. Clipboard file reads also
+require `clipboard.read`; file pastes require `clipboard.write` and `files.upload`. None requires
+file-browser access unless browsing is the requested operation.
 
 `GET /api/files?path=…` returns `FileListing`: the resolved absolute path, entries, total, offset, limit,
 and the count of omitted non-UTF-8 names. Paths are absolute UTF-8 strings, percent-encoded once as query
@@ -297,8 +298,7 @@ before any asynchronous work and reports final saved names, destination and part
 Desktop drops and pastes retain `PUT /api/drop/{batch}/{name}` cache staging, carried through the drag
 or clipboard operation by a client-generated batch ID. The receiving application chooses its destination.
 Unclaimed drops and cancelled partial batches link validated regular files to the transfer folder,
-copying through a temporary file across filesystems. Publication is collision-safe. `FILE_RESULT` reports saved paths and failures to control-token
-sessions; only the client remembering that batch displays the result and offers Open folder. This
+copying through a temporary file across filesystems. Publication is collision-safe. `FILE_RESULT` reports saved paths and failures to sessions of the token that staged the batch; the client remembering that batch displays the result and offers Open folder. This
 operation result is not a directory update subscription. Staged sources remain for the hourly sweep,
 which removes batches older than a day. No navigation or unrelated refresh follows a late result.
 
@@ -454,12 +454,11 @@ session's `Resize` only sets its own encoder's size (`fit`: the output's aspect 
 enlarged, even-sized). `set_size` on a `FfmpegSink` changes the worker's conversion target, scaling on
 the GPU to NV12 or on the CPU to YUV420P. The stream's `scale` becomes `output scale × target / output width`, so
 the page's logical mapping still holds; the controller's encoder has no target and takes the output as
-it is, so a resize reopens its encoder once, through the compositor. `TakeControl` from a control-token session, or the controller
-leaving (the oldest remaining control-token session inherits), goes through `set_controller`: release
+it is, so a resize reopens its encoder once, through the compositor. `TakeControl` from a desktop.control session, or the controller
+leaving (the oldest remaining desktop.control session inherits), goes through `set_controller`: release
 all input and the pointer lock, re-fit, resize the output to the new controller's size, tell both
 sessions their `Role`. An encoder that fails is rebuilt by the next full frame; one that fails again
-before producing a stream ends the session, and the page reconnects. A token rotation drops every
-session's senders, which ends them with `4001`.
+before producing a stream ends the session, and the page reconnects. Revocation cancels the affected token’s sessions, which close with `4001`.
 
 ## Window streams
 
@@ -501,7 +500,7 @@ the existing URL fragment and session storage. The compact toolbar shows title, 
 status and Return. Desktop controllers can open the existing keyboard row for composition input.
 Fullscreen remains available in the normal viewer.
 
-Desktop control transfers only from its current owner to a live control-token connection, using the
+Desktop control transfers only from its current owner to a live desktop.control connection, using the
 server's conditional `Handoff` message. A participant opening PiP keeps watching until explicitly
 claiming control. Closing PiP conditionally returns control to the opener; a third party's intervening
 claim is preserved. Taking control in the opener closes its desktop PiP first. If the opener is
@@ -531,7 +530,7 @@ installed operating-system IME. Window PiP keeps the ordinary window viewer's ke
 
 Chromium checks additionally cover pairwise audio ownership, stopped microphone capture, third-party
 control, read-only tokens and handoff targets, rejected/unsupported APIs, ordinary popups/fullscreen,
-content replacement, reconnection, viewport resize, held-key release, navigation and token rotation.
+content replacement, reconnection, viewport resize, held-key release, navigation and token revocation.
 Browser size hints remain subject to clamping; the viewer uses the dimensions it actually receives.
 Requests for a 100,000-pixel square PiP were clamped to 1280×720 in Chromium and 1280×800 in Firefox
 in the same rig. DPR checks cover 1, 1.5 and 2. CDP omits the iframe media-query event for DPR-only overrides, so that
@@ -555,7 +554,7 @@ browser shortcuts. The checks live in `web/checks/picture-in-picture.mjs` and
 
 ## Browser terminal
 
-The desktop toolbar's Terminal button opens an interactive shell for control-token holders, including
+The desktop toolbar's Terminal button opens an interactive shell for `commands.execute` holders, including
 participants. It has its own PTY, so shell typing does not require taking control of the desktop.
 Commands inherit the same current Wayland, Xwayland, toolkit, session-bus and private audio environment
 as programs launched from the desktop. `SHELL` selects the executable, with `/bin/sh` as the fallback;
@@ -564,8 +563,7 @@ it runs with `-i` and `TERM=xterm-256color`. A graphical command opens on the ac
 The terminal supports interactive programs, job control, scrollback and resizing. Closing the panel,
 leaving the page or losing its socket closes the PTY and reaps the shell. Detached applications follow
 normal terminal hangup behavior. A disconnected session offers New shell; it does not replay input or
-resume the old process. Read-only tokens cannot start a terminal. After token rotation, the next input
-frame is rejected; idle terminal connections close on the next 200 ms check.
+resume the old process. `commands.execute` is required to start a terminal. Revocation and expiry close its PTY, including idle connections.
 
 `/ws/terminal` uses the same first binary AUTH frame as the viewer. Subsequent binary frames carry raw
 terminal input and output. Client text frames contain either `{ "cols": 80, "rows": 24 }` or
@@ -578,7 +576,7 @@ opens; their styles ship with the viewer stylesheet.
 `npm run check:terminal` in the Docker rig checks real shell commands, environment equality with
 desktop launches, a Wayland application, Ctrl+C, Ctrl+Z, PTY resizing, output beyond the acknowledgement
 window, continuous-output interruption, desktop input isolation, shell cleanup, read-only denial,
-token rotation and failed-emulator-download isolation. It needs Chromium, foot, the private audio
+token revocation and failed-emulator-download isolation. It needs Chromium, foot, the private audio
 stack and a release binary; `ELSEWHERE_BINARY` can select a build mounted into the image.
 
 ## Browser UI (`web/src`)
@@ -638,7 +636,7 @@ read it with `useSyncExternalStore` and send actions back through the engine.
   `launch`. Icons come through `fetch()` and blob URLs like thumbnails, cached per page, with a generic
   glyph for entries without one. The **power menu** confirms, then sends `quit`; once the server accepts
   it, the page shows "shut down" instead of reconnecting when the socket ends. Both are for sessions that
-  act (not the viewer token, not a window popup); together with the window list they cover what a panel
+  act (not the token without `desktop.control`, not a window popup); together with the window list they cover what a panel
   provides, so the desktop can run without one.
 - **Windows tab**: one row per window, top-most first, minimized last: a thumbnail, a colour dot, the
   title, the app id and size, state badges, and (on hover) buttons to open the window in its own popup
@@ -675,21 +673,14 @@ read it with `useSyncExternalStore` and send actions back through the engine.
 
 ## Security model
 
-There are no cookies, so there is no ambient credential to ride on: every HTTP request carries a
-bearer token and the WebSocket authenticates with its first message. Two tokens: the control token can
-do everything (`spawn` is remote code execution for whoever holds it, which the viewer already implied,
-since it can type into a terminal; `launch` runs an installed program's `Exec` line, `quit` ends the
-desktop); the viewer token is for showing the desktop to someone who should
-only watch: it gets the video, the window list, elements, snapshots and the clipboard (copied files
-included), and `403`
-(or a tool error) for anything that acts, including taking control. The bearer middleware tags each
-request with which token it carried; handlers and MCP tools check the tag. Snapshot
-rendering is bounded by the one-in-flight rule and the pixel cap. The viewer receives the token once in
-its URL fragment (so it never reaches the server's or a proxy's log), moves it into `sessionStorage` (this
-tab only) and strips it from the address bar, so the URL can be shared or bookmarked without it; a tab with no token shows a dialog asking for one. `POST /api/token/rotate`
-(control token) replaces both tokens everywhere at once and closes every session with `4001 token
-rotated`; the CLI reads the new tokens from their files. Per-person tokens with individual revocation are not implemented. Window streams (`/ws/window/{id}`)
-cost an encoder and a swapchain each and are not limited: the token holder is trusted with that.
+Every HTTP request carries a bearer token; each WebSocket authenticates with its first message.
+The middleware authenticates against SQLite and attaches a live token context. Handlers, MCP tools
+and connection events enforce explicit permissions. Revocation and expiry cancel that token's
+requests and live resources. See [tokens](tokens.md) for the full model and its OS isolation limits.
+
+The browser reads a token from its URL fragment, moves it into tab-local `sessionStorage`, and strips
+it from the address bar. Snapshot rendering has a one-in-flight limit and a pixel cap. Each window
+stream costs an encoder and a swapchain.
 
 ## Deferred
 

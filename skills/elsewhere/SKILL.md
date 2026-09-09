@@ -7,11 +7,11 @@ description: Drive an Elsewhere desktop (Wayland compositor streamed to a browse
 
 Elsewhere is a Wayland compositor whose screen is a browser tab. It is also the window manager,
 so it can tell you what is on the screen and act on it. You talk to it over HTTP with a bearer token
-(retrieve it on the server with `elsewhere token`), or through its MCP tools, which are the same
+(create an admin token on the server with `elsewhere token create --admin`), or through its MCP tools, which are the same
 operations under the same names. `reference.md` next to this file lists every route, tool and field.
 
 ```sh
-T=...                                   # the token; usually in $ELSEWHERE_TOKEN or ~/.config/elsewhere/token
+T=...                                   # the token; supplied by the user, often in $ELSEWHERE_TOKEN
 H="Authorization: Bearer $T"
 curl -s -H "$H" https://host:8443/api/windows | jq
 ```
@@ -55,7 +55,7 @@ For example, `/elsewhere/alice/api/windows` and `/elsewhere/alice/mcp` address t
   (`PUT /api/clipboard`, tool `clipboard_write`) and press `ctrl+v` in the field; `GET /api/clipboard`
   (tool `clipboard_read`) returns what an application last copied, text or a PNG (its Content-Type says
   which), and a PNG body with `Content-Type: image/png` on the PUT puts an image on the clipboard.
-- Files require a control token and an explicit directory: `GET /api/files?path=@transfer` lists
+- Files require their operation’s `files.*` grant and an explicit directory: `GET /api/files?path=@transfer` lists
   Downloads. Use `@home` or an absolute path for another directory. MCP `files` takes `path` and
   optional `hidden`, `sort`, `desc`, `offset`, and `limit`, returning the same paginated listing.
   `GET` and `PUT /api/files/{name}?path=…` download or upload an entry in that directory.
@@ -90,7 +90,7 @@ For example, `/elsewhere/alice/api/windows` and `/elsewhere/alice/mcp` address t
 |---|---|---|
 | 400 | invalid screenshot sizing | supply one positive width, height or percentage within the documented limits |
 | 401 | missing or wrong bearer token | check `Authorization: Bearer` |
-| 403 | the token is the view-only one (`read-only token`) | it can list windows, read elements, take snapshots and read the clipboard, nothing else; ask for the control token |
+| 403 | permission denied | obtain a token with the grants required by this operation |
 | 404 | no such window | the window closed; list again |
 | 429 | another snapshot is in flight | one at a time; retry after it returns |
 | 500 | the snapshot render failed | retry after checking the error |
@@ -129,9 +129,8 @@ Retry the identical request with the same ID for ten minutes to recover an uncer
 changing its settings conflicts. A retry never restarts a retained stopped run.
 
 `broadcast_list` and `broadcast_get` return runtime IDs and status, never destination credentials.
-`broadcast_stop` takes an `id` and is idempotent while that record is retained. Start and stop require
-a control token, including when a different browser controls the pointer. The viewer token can read
-status only. `sending` means media transport is active, not that the service has made it public.
+`broadcast_stop` takes an `id` and is idempotent while that record is retained. All broadcast operations require `broadcasts.manage`. Starting also requires `desktop.view`,
+and `audio.listen` when using desktop audio. `sending` means media transport is active, not that the service has made it public.
 
 Broadcasts continue without browser viewers. Up to four independent H.264/AAC outputs can run.
 Silent audio does not require the private audio service. Settings are not saved on the host;

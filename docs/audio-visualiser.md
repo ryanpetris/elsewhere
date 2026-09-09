@@ -32,7 +32,7 @@ failed the signal readiness check within five seconds.
 Freezing FFT reads after the signal snapshot failed the silence readiness check.
 
 The live check is `node checks/session-audio.mjs`, with `ELSEWHERE_TEST_URL` and
-`ELSEWHERE_TEST_TOKEN_FILE` pointing at an isolated Docker desktop and its control token.
+`ELSEWHERE_TEST_TOKEN_FILE` pointing at an isolated Docker desktop and a token granting `desktop.view` and `audio.listen`.
 It uses finite FFmpeg audio and mpv software-Wayland video test signals, then
 Chromium's fake microphone device. It terminates test processes whose command
 lines match its own signals; use a dedicated rig.

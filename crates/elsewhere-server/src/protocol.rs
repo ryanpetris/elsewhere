@@ -12,10 +12,9 @@ pub const AUDIO: u8 = 0x05;
 pub const WINDOWS: u8 = 0x06;
 /// UTF-8 text a desktop application put on the clipboard.
 pub const CLIPBOARD: u8 = 0x07;
-/// `[ROLE][u8 role][u8 features]`: what this session may do: 0 watch only (the viewer token), 1 act but
-/// not drive (a control token while someone else controls), 2 control (its pointer, keyboard and size are
-/// the desktop's); then what the desktop takes from the browser: bit 0 its microphone (`MIC`), bit 1 its
-/// webcam (`CAM`).
+/// `[ROLE][u8 role][u8 features]`: input ownership, with 0 unable to control, 1 eligible,
+/// and 2 controlling. Features reflect grants and server availability: bit 0 microphone,
+/// bit 1 camera, bit 2 desktop audio. Other feature permissions come from `/api/me`.
 pub const ROLE: u8 = 0x08;
 /// `[NOTICE][utf-8 text]`: something the page should tell its user about what it just did.
 pub const NOTICE: u8 = 0x09;
@@ -63,9 +62,9 @@ pub const POINTER_LOCK_GAINED: u8 = 0x99;
 pub const CONTROL: u8 = 0x8B;
 /// UTF-8 text the browser pasted: becomes the desktop clipboard.
 pub const SET_CLIPBOARD: u8 = 0x8C;
-/// A session with a control token asks to become the controller.
+/// A session with a token with `desktop.control` asks to become the controller.
 pub const TAKE_CONTROL: u8 = 0x8D;
-/// JSON `{"id":N,"action":"key"}`: the viewer clicked a notification (`default`) or one of its actions; without `action` it dismissed it. Control token only.
+/// JSON `{"id":N,"action":"key"}`: the viewer clicked a notification (`default`) or one of its actions; without `action` it dismissed it. `desktop.control` required.
 pub const NOTIFY: u8 = 0x8E;
 /// JSON `{"codec": "auto" | name, "quality": "very-low" | "low" | "medium" | "high" | "max"}`, either field
 /// optional: this session's choice, applied live. Any session.

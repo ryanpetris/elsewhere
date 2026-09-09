@@ -1,9 +1,8 @@
 # Protocol and HTTP API
 
 The server speaks two things: a binary WebSocket protocol for the viewer page and a JSON/PNG HTTP API
-for scripts. Both are guarded by two shared tokens from the data directory: `token`, the control token,
-which may do everything, and `viewer-token`, which may only look (`elsewhere token --viewer` retrieves it): the video, the window list, elements, snapshots and the clipboard's text, but no input, window
-actions, programs or clipboard writes.
+for scripts. Both require a live bearer token with explicit permissions.
+See [tokens](tokens.md) for setup, the management API and the operation-to-permission mapping.
 
 Routes below are relative to the public URL prefix, if configured. For example, with
 `--url-prefix /elsewhere/alice`, the viewer connects to `/elsewhere/alice/ws` and API clients use
@@ -16,11 +15,11 @@ Routes below are relative to the public URL prefix, if configured. For example, 
   `sessionStorage` and stripped from the address bar; a page with no token shows a dialog asking for one.
 - **WebSocket** (`/ws`): the first message must be `AUTH` with a token. Until then the socket is
   nobody: nothing is processed. A wrong token, or five seconds of silence, closes it with code **4001**
-  `unauthorized`. Which token it was decides the session's role (below).
+  `unauthorized`. Its grants determine feature access; its role tracks desktop input ownership.
 - **Window streams** (`/ws/window/{id}`): authenticated like `/ws`; see below.
 - **HTTP API** (`/api/...`): `Authorization: Bearer <token>`. Nothing else is accepted, so the token
-  never appears in a URL the server or a proxy logs. The viewer token gets `403` from the routes that act.
-- `POST /api/token/rotate` (control token) replaces both tokens everywhere at once.
+  never appears in a URL the server or a proxy logs. Operations without their required grants return `403`.
+- `DELETE /api/tokens/{id}` revokes that token and closes its active sessions.
 
 No cookies are used anywhere.
 
@@ -40,7 +39,7 @@ Binary frames, little-endian, byte 0 is the type. Mirrored in `crates/elsewhere-
 | `0x05` | Audio | `u8 0` `u16 seq` `u64 pts_us` then one 20 ms Opus packet. `seq` counts every packet, sent or not. |
 | `0x06` | Windows | JSON array of window objects (see below), the whole list, whenever anything in it changed. Replayed to a new viewer. |
 | `0x07` | Clipboard | UTF-8 text a desktop application put on the clipboard (at most 1 MiB). Not replayed: a viewer that reconnects keeps its browser clipboard. |
-| `0x08` | Role | `u8 role` `u8 features`: what this session may do. 0 watch only (the viewer token); 1 act but not drive (a control token while another session controls); 2 control: its pointer, keyboard and window size are the desktop's. `features` says what the desktop takes from the browser: bit 0 its microphone (`Mic`), bit 1 its webcam (`Cam`), bit 2 session playback is available. Sent with the replay after `Hello` and whenever it changes. |
+| `0x08` | Role | `u8 role` `u8 features`: desktop input eligibility and ownership. 0 watch only (the token without `desktop.control`); 1 act but not drive (a token with `desktop.control` while another session controls); 2 control: its pointer, keyboard and window size are the desktop's. `features` reflects both token permissions and server availability: bit 0 its microphone (`Mic`), bit 1 its webcam (`Cam`), bit 2 session playback is available. Sent with the replay after `Hello` and whenever it changes. |
 | `0x09` | Notice | `u8 kind` (0 a warning, 1 good news) then UTF-8 text about the session's last action, for the page to show briefly. Sent to the controller when its drag (`Drag`) was dropped: good news naming the application that took the files, a warning when none did. Sent to a window stream whose press aims past the desktop's edge at an X11 window: Xwayland's screen is the desktop, and the X server pins the pointer to it, so that click cannot arrive. |
 | `0x0A` | ClipboardData | A desktop application put something other than text on the clipboard; the payload is its mime type: `image/png` (the page fetches the bytes from `GET /api/clipboard` and writes them to the browser clipboard) or `text/uri-list` (files copied in a file manager: the page offers them for download). |
 | `0x0B` | Notifications | JSON array of the open desktop notifications, oldest first, whenever they change and in the replay: each has `id`, `rev` (counts up when the application replaces it), `app`, `summary`, `body`, `icon` (whether `GET /api/notifications/{id}/icon` has a picture), `actions` as `[key, label]` pairs, and `timeout_ms` (0: until closed). |
@@ -76,9 +75,9 @@ Config on WebSocket before video if that stream has not been configured on the s
 | `0x89` | Blur | none. Window blur, page hidden: releases every held key and button. |
 | `0x8A` | PointerLockLost | none. The browser lost its lock (Escape): the client's lock is released and not re-taken until the next click or successful browser capture. |
 | `0x8B` | Control | JSON control message (below). |
-| `0x8C` | SetClipboard | UTF-8 text the browser pasted; it becomes the desktop clipboard, offered to Wayland and X11 clients. Control token only. A pasted image goes by `PUT /api/clipboard` instead. |
-| `0x8D` | TakeControl | none. A control-token session becomes the controller; the desktop takes its size. |
-| `0x8E` | Notify | JSON `{"id": N, "action": "default" \| "<key>"}`: the viewer clicked a notification or one of its actions; without `action` it dismissed it. Control token only. |
+| `0x8C` | SetClipboard | UTF-8 text the browser pasted; it becomes the desktop clipboard, offered to Wayland and X11 clients. `clipboard.write` required. A pasted image goes by `PUT /api/clipboard` instead. |
+| `0x8D` | TakeControl | none. A desktop.control session becomes the controller; the desktop takes its size. |
+| `0x8E` | Notify | JSON `{"id": N, "action": "default" \| "<key>"}`: the viewer clicked a notification or one of its actions; without `action` it dismissed it. `desktop.control` required. |
 | `0x8F` | Stream | JSON `{"codec": "auto" \| "h264" \| "hevc" \| "vp9" \| "av1" \| "vp8", "quality": "very-low" \| "low" \| "medium" \| "high" \| "max", "effort": "fast" \| "balanced" \| "high"}`, all fields optional: this session's choice, applied live (a codec or effort change restarts the stream with a new id; a codec the browser or the server can't do means Auto). Any session, its own stream only. |
 | `0x90` | Drag | JSON `{"op": "start"}`, `{"op": "drop", "batch": "…", "names": ["a.txt", …]}` or `{"op": "cancel"}` (with `"batch"` when files were staged for it): the browser drags local files over the desktop. `start` begins a drag on the desktop where the pointer is (offering `text/uri-list`, to copy or to move); the pointer messages move it; `drop` names the batch the files were staged in (`PUT /api/drop/{batch}/{name}` first, not the transfer folder) and their names, and drops their `file://` URIs on the application under the pointer; a drop nothing took, or a cancel naming a batch, sends the files to the transfer folder; `cancel` lets go over nothing. Controlling session only. |
 | `0x91` | Input | JSON: one input action as `POST /api/input` takes it (`{"type": "text", "text": "…"}`, `{"type": "key", "keys": "ctrl+c"}`, `move`, `click`, …), resolved on the compositor thread, in order with the session's other input; the on-screen keyboard types with it. Controlling session only. |
@@ -88,14 +87,14 @@ Config on WebSocket before video if that stream has not been configured on the s
 | `0x95` | Rtc | JSON: `{"offer": "<sdp>", "g": 1, "endpoint": {"host": "<page hostname or IP>", "port": 8443}}` from the page to open its `video` data channel (ordered, reliable; the page sends the offer once its candidates are gathered, the server resolves the endpoint with a two-second DNS deadline and answers as an ICE-lite peer with numeric candidates for that endpoint. `--rtc-addr` ignores the endpoint and uses the configured address and UDP port; without the override, offers require an endpoint. The backend supplies numeric candidates for consistent browser support. An invalid or unresolvable endpoint returns a matching close with `"reason": "Page endpoint resolution failed"`); `{"close": true, "g": 1}` to go back to the socket. `g` is a required unsigned integer on offers and closes, numbering the attempt; it comes back with answers and server close notifications. A client close must carry the matching generation; it cannot close a newer attempt. While a session's channel is open its video frames and decoder configuration go there with the same message formats; other messages stay on the socket. Desktop and window sessions alike; the page offers while WebRTC is selected, initially and on recovery. Each attempt belongs to one WebSocket session. |
 | `0x96` | Report | `u16 delay_ms` `u16 dropped`: the page's last second of video, once a second while frames come: how much later they arrived than at their best over the last ten seconds (the link queueing, which comes before it loses) and how many its decoder dropped. Either feeds the server's rate controller, which halves the bitrate under the viewer's quality ceiling and holds two seconds; five clean seconds raise it a quarter. |
 | `0x97` | Mixer | JSON, at most 4096 bytes: `{op: "subscribe", enabled: bool}`, `{op: "volume", id, value}`, `{op: "mute", id, value}`, `{op: "target", id, target}`, or `{op: "default", id}`. Subscriptions are available to every authenticated desktop viewer; mutations require the current controller. Volume is finite 0–100 percent with cubic gain; mute is boolean; target is a compatible endpoint ID or null to follow the session default. Unknown fields, stale IDs and unsupported operations are rejected. Commands never accept a server address or native operation. |
-| `0x98` | Handoff | `u64 target`: the current controller transfers to a live control-token desktop connection. Other senders, missing targets and viewer-token targets are ignored. |
+| `0x98` | Handoff | `u64 target`: the current controller transfers to a live desktop.control desktop connection. Other senders, missing targets and desktop-view-only targets are ignored. |
 | `0x99` | PointerLockGained | none. The browser acquired pointer lock; allow a pending application lock to resume without sending a button event. Driving sessions only. |
 
 ### Close codes
 
 | Code | Meaning |
 |---|---|
-| 4001 | unauthorized: no or wrong token within five seconds, or the tokens were rotated |
+| 4001 | unauthorized: no or wrong token within five seconds, or its token was revoked or expired |
 | 4003 | a stream that can't run: no such window, the window closed, or no encoder could be made |
 
 The page shows these (a token dialog for 4001, a card for 4003) and stops retrying; on any other close
@@ -105,13 +104,13 @@ it reconnects after a second.
 
 Any number of sessions may watch the desktop at once; each has its own encoder, so each gets the
 codec its browser decodes best and a stream scaled to fit its own window. One session at a time is the
-**controller**: the first control-token session to connect, until it leaves (then the oldest
-remaining control-token session) or another control-token session sends `TakeControl`. The
+**controller**: the first desktop.control session to connect, until it leaves (then the oldest
+remaining desktop.control session) or another desktop.control session sends `TakeControl`. The
 controller's pointer and keyboard messages drive the desktop, and its `Resize` sizes the output; the
 others' pointer and keyboard messages are ignored and their `Resize` only sets the size their own
-stream is scaled to (the output's aspect, never enlarged; the page letterboxes it). A control-token
+stream is scaled to (the output's aspect, never enlarged; the page letterboxes it). A desktop.control
 session that isn't controlling still acts through `Control` and `SetClipboard`, and through the API;
-a viewer-token session can't. Control changes send `Role` to the two sessions concerned and release
+a desktop-view-only session can't. Control changes send `Role` to the two sessions concerned and release
 whatever the old controller held. `Session` identifies each desktop connection. `Handoff` uses the
 same control-change path but checks ownership and the target under the session lock. PiP uses this
 conditional transfer so a late presentation callback cannot displace another controller.
@@ -126,20 +125,20 @@ the viewer's panel opens one, sized to the window). The same messages as `/ws`, 
   only, like `resize` below).
 - Pointer positions are relative to the window's geometry, as in the input message (they are forwarded
   as one, resolved against the live geometry). Keys and buttons go where they always go (the focused
-  window, the pointer). Any control-token session drives its popup, whoever controls the desktop; a
-  viewer-token session only watches. Focusing the tab activates the window.
+  window, the pointer). Any desktop.control session drives its popup, whoever controls the desktop; a
+  desktop-view-only session only watches. Focusing the tab activates the window.
 - `Cursor`, `PointerLock`, `Windows` and `Clipboard` arrive as on `/ws`; there is no audio. The page
   uses the window list only for the tab title. `Notice` arrives only here: a press on the part of an
   X11 window that hangs past the desktop's edge, which Xwayland pins to the edge.
 - Any number can run beside the viewer, each with its own encoder (one `--bitrate` each). The
   compositor renders a window stream only when that window changed; it drops the stream when the
-  window closes (close code 4003) or the socket ends. `Hello` still picks the codec. A token rotation
-  ends them all with 4001. A tab that stops reading for ten seconds is dropped, as is a viewer.
+  window closes (close code 4003) or the socket ends. `Hello` still picks the codec. Token revocation
+  ends only that token’s sessions with 4001. A tab that stops reading for ten seconds is dropped, as is a viewer.
 
 ## HTTP API
 
 ```sh
-T=$(elsewhere token)
+T=$(elsewhere token create --admin)
 curl -s -H "Authorization: Bearer $T" https://host:8443/api/windows
 curl -X POST -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
      https://host:8443/api/control -d '{"id":3,"op":"minimize"}'
@@ -158,10 +157,10 @@ curl -s -H "Authorization: Bearer $T" https://host:8443/api/windows/3/elements  
 | `GET /api/windows/{id}/snapshot.png` | PNG of that window. Optional `width`, `height`, or `percentage`, default native dimensions; [sizing limits](desktop-api.md#screenshot-sizing). `400` invalid sizing. `404` unknown id, `429` another snapshot is in flight, `500` the render failed (logged), `503` the compositor didn't answer within 2 s. |
 | `GET /api/screenshot.png` | PNG of the whole output (layers included, cursor excluded); sizing as for a window; `400`, `429`, `500`, `503` as for a window. |
 | `POST /api/input` | Body: an input message (below). `202`, with `{"warning": …}` when a click aims past the desktop's edge at an X11 window; `404` unknown window; `503` compositor gone. |
-| `GET /api/files?path=…` | Control token required. Paginated `FileListing`; required absolute directory path, `@home`, or `@transfer`. Optional `hidden`, `sort`, `desc`, `offset`, `limit`; [file operations](desktop-api.md#files). |
-| `PUT /api/files/{name}?path=…` | Control token required. Streamed upload to the required directory; collisions add ` (2)` before the extension. `201` with `name`, `path`, and `directory`. |
-| `GET /api/files/{name}?path=…` | Control token required. Download from the required directory, as an attachment. `404` missing. |
-| `DELETE /api/files/{name}?path=…` | Control token required. Nonrecursive unlink from the required directory. `204`; `404` missing. |
+| `GET /api/files?path=…` | `files.browse` required. Paginated `FileListing`; required absolute directory path, `@home`, or `@transfer`. Optional `hidden`, `sort`, `desc`, `offset`, `limit`; [file operations](desktop-api.md#files). |
+| `PUT /api/files/{name}?path=…` | `files.upload` required. Streamed upload to the required directory; collisions add ` (2)` before the extension. `201` with `name`, `path`, and `directory`. |
+| `GET /api/files/{name}?path=…` | `files.download` required. Download from the required directory, as an attachment. `404` missing. |
+| `DELETE /api/files/{name}?path=…` | `files.manage` required. Nonrecursive unlink from the required directory. `204`; `404` missing. |
 | `PUT /api/drop/{batch}/{name}` | Like `PUT /api/files/{name}`, but into batch `batch`, a directory under the cache directory named by a random id of the page's, for the application that will take the files in a drag or a paste (the `Drag` `drop` or `POST /api/clipboard/files` name the batch); batches are swept after a day. `201` with `{"name": "…"}`. |
 | `GET /api/notifications` | The open notifications, oldest first, as the `Notifications` message carries them. |
 | `POST /api/notifications/{id}` | Body `{"action": "default" \| "<key>"}`, or `{}` to dismiss. `202`; `404` unknown id. |
@@ -170,12 +169,9 @@ curl -s -H "Authorization: Bearer $T" https://host:8443/api/windows/3/elements  
 | `PUT /api/clipboard` | Body: UTF-8 text, a PNG with `Content-Type: image/png`, or `file://` URIs with `Content-Type: text/uri-list`; it becomes the desktop clipboard. `202`; `413` over 1 MiB of text or 16 MiB of image. |
 | `POST /api/clipboard/files` | Body `{"names": [...]}`, files of the transfer folder, or with `"batch"` of that staged batch: they become the desktop clipboard as a file manager's copy (`text/uri-list` and `x-special/gnome-copied-files`). `202`. |
 | `GET /api/clipboard/files/{index}` | The `index`th file of the URI list on the desktop clipboard, as an attachment. `404` when the clipboard holds no such list or entry. |
-| `POST /api/token/rotate` | Replaces both tokens: written to the data directory and returned as `{"token": …, "viewer_token": …}`; every session is closed with `4001 token rotated` and the old tokens stop working. Control token only; not an MCP tool. |
 | `GET /api/windows/{id}/elements` | The window's UI elements (below). `501` the server runs without `--elements`, `503` the tree couldn't be read: no D-Bus session or accessibility bus, the application went away, or 2 s passed (body: `{"error": …}`), `404` unknown id. |
 
-Status codes: `401` (empty body) missing or wrong bearer token; `403` `read-only token` from `POST
-/api/control`, `POST /api/input`, `PUT /api/clipboard`, `POST /api/clipboard/files`, `PUT` and `DELETE
-/api/files/{name}`, `PUT /api/drop/{batch}/{name}`, `POST /api/notifications/{id}` and `POST /api/token/rotate` with the viewer token; the statuses above come with
+Status codes: `401` invalid or expired token; `403` permission denied. Errors use
 `{"error": "..."}`. A body axum can't read is rejected with a plain-text message: `400` invalid JSON,
 `415` missing `Content-Type: application/json`, `422` wrong shape; JSON bodies are limited to 2 MiB (the
 clipboard and file uploads have their own limits, or none).
@@ -223,7 +219,7 @@ Also on the server: `POST /mcp` (MCP over Streamable HTTP, same bearer token; se
 - `scroll` is in wheel lines (positive `dy` down), sent like the viewer's wheel.
 
 `node web/checks/structured-input.mjs` checks text and key chords against a real
-terminal in the Docker rig, through desktop and window WebSockets. Both viewer-token
+terminal in the Docker rig, through desktop and window WebSockets. Both desktop-view-only
 paths reject input. Keys follow the compositor's current keyboard focus in both streams.
 
 ### Elements object
@@ -289,6 +285,5 @@ run that check with NET_ADMIN inside Docker so it can temporarily block its test
 It removes its dedicated firewall chain on exit.
 
 `FILE_RESULT` (`0x13`) carries UTF-8 JSON `{batch, saved, failed, error}` after an unclaimed or
-cancelled desktop drop is rescued. `saved` contains `{name,path,directory}` objects. Control-token
-sessions receive it; the originating client matches its batch ID and offers navigation explicitly.
+cancelled desktop drop is rescued. `saved` contains `{name,path,directory}` objects. Sessions belonging to the token that staged the batch receive it; the originating client matches its batch ID and offers navigation explicitly.
 It carries an operation result, not a directory subscription.
