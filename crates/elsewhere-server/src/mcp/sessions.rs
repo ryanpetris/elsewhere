@@ -69,9 +69,8 @@ impl Sessions {
             sessions.extract_if(|id, _| !owners.contains_key(id.as_ref())).map(|(_, handle)| handle).collect()
         };
         // Normal expiry closes gracefully. If a worker stalls, dropping its handle closes the event channel.
-        let _ = tokio::time::timeout(Duration::from_secs(1), async {
-            for handle in &handles { let _ = handle.close().await; }
-        }).await;
+        let _ = tokio::time::timeout(Duration::from_secs(1),
+            futures_util::future::join_all(handles.iter().map(|handle| handle.close()))).await;
     }
 }
 
