@@ -1,5 +1,5 @@
 // The display: the video canvas, sized by its container (the desktop's output takes that size), with
-// the overlays and status banners on top. Fullscreen is requested on this element, so the chrome goes away.
+// the overlays and status banners on top.
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, FolderOpen, Loader2, MonitorX, TriangleAlert } from 'lucide-react';
 import { useStore } from '../store.js';

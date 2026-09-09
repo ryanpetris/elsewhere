@@ -45,6 +45,7 @@ if (!isSecureContext) window.VideoDecoder = class {
 const server = createServer(async (req, res) => {
   try {
     const path = new URL(req.url, 'http://localhost').pathname;
+    if (path === '/api/me') { res.setHeader('Content-Type', 'application/json'); return res.end(JSON.stringify({ permissions: ['desktop.view', 'desktop.control', 'clipboard.read', 'clipboard.write'] })); }
     if (path.startsWith('/api/')) { res.setHeader('Content-Type', 'application/json'); return res.end('[]'); }
     res.setHeader('Content-Type', path.endsWith('.js') ? 'text/javascript' : path.endsWith('.css') ? 'text/css' : 'text/html');
     let data = await readFile(new URL('../dist/' + (path === '/' ? 'index.html' : path.slice(1)), import.meta.url));
@@ -140,7 +141,7 @@ try {
     let visit = 0;
     const load = async (windowMode = false, hostname = '127.0.0.1') => {
       await navigate(`http://${hostname}:${server.address().port}/?check=${++visit}${windowMode ? '&window=1' : ''}#token=test`);
-      await wait(() => js(() => !!window.elsewhere?.store && !!window.socket));
+      await wait(() => js(() => !!window.elsewhere?.store && !!window.socket)).catch(async error => { console.error(await js(() => ({ errors: window.errors, text: document.body.innerText, viewer: !!window.elsewhere }))); throw error; });
       await js((ROLE, CONFIG) => {
         packet([ROLE, 2, 0]);
         packet([CONFIG, ...new TextEncoder().encode(JSON.stringify({ streamId: 1, codec: 'vp8', width: 1280, height: 720, scale: 1 }))]);
@@ -166,6 +167,19 @@ try {
         assert.equal(await js(type => sent.filter(p => p[0] === type).length, POINTER_LOCK_LOST), 0, label);
       };
       await enter();
+      assert.equal(await js(() => [...document.querySelectorAll('button')].some(b => b.textContent === 'Show controls' && b.getBoundingClientRect().width > 0)), true);
+      key('ctrl+alt+shift+h');
+      await wait(() => js(() => !elsewhere.isFullscreen() && !document.pointerLockElement));
+      assert.equal(await js(KEY => sent.some(p => p[0] === KEY && p[1] === 35), KEY), false, 'controls shortcut H stays local');
+      await enter();
+      await js(() => document.exitPointerLock());
+      await wait(() => js(() => !document.pointerLockElement));
+      await click('#clipboard-toggle');
+      assert.equal(await js(() => document.fullscreenElement.contains(document.querySelector('#desktop-clipboard'))), true, 'fullscreen clipboard stays inside fullscreen root');
+      key('Escape');
+      await click('canvas.stage');
+      if (windowMode) await js(POINTER_LOCK => packet([POINTER_LOCK, 1]), POINTER_LOCK);
+      await captured();
       for (let i = 0; i < 3; i++) await escape('normal Escape stays captured');
       await js(() => { sent.length = 0; }); key('ctrl+alt');
       await wait(() => js(KEY => sent.filter(p => p[0] === KEY).length === 4, KEY));
@@ -276,7 +290,7 @@ try {
       console.log(name, 'pending fullscreen cancellation:', cancel);
       await load();
       await js(() => {
-        const stage = document.querySelector('canvas.stage').parentElement;
+        const stage = document.querySelector('[data-viewer]');
         const request = stage.requestFullscreen.bind(stage);
         stage.requestFullscreen = options => request(options).then(() => new Promise(resolve => { window.finishFullscreen = resolve; }));
       });
@@ -338,7 +352,7 @@ try {
       await load();
       await js(behavior => {
         Object.defineProperty(navigator, 'keyboard', { configurable: true, value: undefined });
-        const stage = document.querySelector('canvas.stage').parentElement, request = stage.requestFullscreen.bind(stage);
+        const stage = document.querySelector('[data-viewer]'), request = stage.requestFullscreen.bind(stage);
         window.fullscreenCalls = [];
         stage.requestFullscreen = options => {
           fullscreenCalls.push(options?.keyboardLock || 'none');

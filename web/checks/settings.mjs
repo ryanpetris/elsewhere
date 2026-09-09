@@ -231,6 +231,33 @@ try {
   await popup.waitForFunction(() => !!window.socket && !!window.elsewhere?.store);
   assert.equal(await popup.getByRole('button', { name: 'Settings', exact: true }).count(), 0);
   assert.equal(await popup.evaluate(() => elsewhere.store.get().elementsOn), false);
+  await page.keyboard.press('Escape');
+  for (const current of [page, popup, phone]) {
+    const stage = current.locator('canvas.stage');
+    await current.evaluate(() => { window.originalCanvas = document.querySelector('canvas.stage'); window.originalSocket = socket; });
+    await current.locator('#hide-controls').click();
+    const show = current.getByRole('button', { name: 'Show controls', exact: true });
+    await show.waitFor();
+    assert(await current.locator('footer').getByText('0 fps', { exact: true }).isVisible());
+    assert.equal(await current.locator('#hide-controls').isVisible(), false);
+    const box = await show.boundingBox();
+    assert(box.x >= 0 && box.x + box.width <= current.viewportSize().width, 'exit fits narrow viewers');
+    assert(await current.evaluate(() => originalCanvas === document.querySelector('canvas.stage') && originalSocket === socket));
+    if (current === phone) await show.tap(); else await show.click();
+    await current.locator('#hide-controls').waitFor();
+    await stage.focus();
+    await current.keyboard.press('Control+Alt+Shift+h');
+    await show.waitFor();
+    await current.keyboard.press('Control+Alt+Shift+h');
+    await current.locator('#hide-controls').waitFor();
+  }
+  await page.keyboard.down('Control'); await page.keyboard.down('Alt'); await page.keyboard.down('Shift'); await page.keyboard.down('h');
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  await page.keyboard.up('Shift'); await page.keyboard.up('Alt'); await page.keyboard.up('Control');
+  await page.keyboard.press('h');
+  assert.equal(await page.evaluate(() => elsewhere.store.get().controlsHidden), true, 'ordinary H after lost shortcut keyup does not toggle');
+  await page.reload();
+  await page.locator('#hide-controls').waitFor();
   assert.deepEqual(errors, []);
   console.log('settings defaults/persistence, overlays, local keyboard, menus, late responses, unavailable support, read-only, fullscreen, narrow layout and window popup checks passed');
 } finally {

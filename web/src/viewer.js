@@ -23,6 +23,7 @@ export function createViewer() {
     reason: '',
     // The role tracks desktop input ownership; permissions govern feature access.
     role: null,
+    controlsHidden: false,
     permissions: [],
     sessionId: null,
     stream: null, // the last Config: {streamId, codec, width, height, scale}
@@ -804,6 +805,8 @@ export function createViewer() {
     viewer.pip?.dispose();
     clipboard.dispose();
     disposed = true;
+    window.removeEventListener('keydown', controlsShortcut, true);
+    window.removeEventListener('keyup', controlsShortcut, true);
     if (decoder && decoder.state !== 'closed') decoder.close();
     decoder = null;
     cancelAnimationFrame(rafId); rafId = 0;
@@ -1143,6 +1146,27 @@ export function createViewer() {
 
   // Keys go to the desktop from anywhere in the page except its own controls (a focused button keeps Enter and Space).
   const isFormField = t => t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLButtonElement || t instanceof HTMLSelectElement;
+  function setControlsHidden(hidden) {
+    releaseInput();
+    if (document.pointerLockElement === canvas) document.exitPointerLock();
+    store.set({ controlsHidden: hidden });
+    if (!hidden && ownFullscreen()) document.exitFullscreen().catch(() => {});
+    canvas?.focus({ preventScroll: true });
+    if (hidden) notice('Show controls in the status bar, or press Ctrl+Alt+Shift+H.', 'success');
+  }
+  let controlsKey = false;
+  const controlsShortcut = e => {
+    if (PIP || disposed) return;
+    if (e.code !== 'KeyH' || !(controlsKey || e.ctrlKey && e.altKey && e.shiftKey && !e.metaKey)) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (e.type === 'keydown' && !e.repeat) {
+      controlsKey = true;
+      setControlsHidden(!(state().controlsHidden || ownFullscreen()));
+    }
+    if (e.type === 'keyup') controlsKey = false;
+  };
+  window.addEventListener('keydown', controlsShortcut, true);
+  window.addEventListener('keyup', controlsShortcut, true);
   function onKey(e) {
     if (isFormField(e.target)) return;
     if (e.type === 'keydown' && !e.repeat && isPasteKey(e) && e.target === canvas
@@ -1176,16 +1200,16 @@ export function createViewer() {
   // a deferred paste chord must not fire after its modifier was released; no key is held during a native
   // drag, and the release would let go of the drag while its files are still uploading
   const releaseInput = () => { pendingPaste = null; clearTimeout(pasteTimer); clearPasteTarget(); send(BLUR, 0); };
-  const blur = () => { if (keyboardPending) releaseKeyboard(); pendingPaste = null; if (!dragging) releaseInput(); };
+  const blur = () => { controlsKey = false; if (keyboardPending) releaseKeyboard(); pendingPaste = null; if (!dragging) releaseInput(); };
   window.addEventListener('blur', blur);
   document.addEventListener('visibilitychange', () => { if (document.hidden) blur(); });
   if (WINDOW) window.addEventListener('focus', () => sendControl({ id: +WINDOW, op: 'activate' })); // keyboard focus follows the tab
 
   // --- fullscreen ------------------------------------------------------------------------------
-  // Fullscreen (of the stage, the canvas's parent, so the chrome goes away and the output takes the
-  // screen) + Keyboard Lock: Ctrl+W, Ctrl+T, Alt+Tab… reach the Wayland clients instead of the browser.
+  // Fullscreen includes the display and status bar. Keyboard Lock: Ctrl+W, Ctrl+T, Alt+Tab… reach the Wayland clients instead of the browser.
   let keyboardEpoch = 0, keyboardWanted = false, keyboardPending = false, nativeKeyboard = false;
-  const ownFullscreen = () => !!canvas?.parentElement && document.fullscreenElement === canvas.parentElement;
+  const fullscreenTarget = () => canvas?.closest('[data-viewer]');
+  const ownFullscreen = () => !!fullscreenTarget() && document.fullscreenElement === fullscreenTarget();
   const keyboardSession = () => !disposed && state().status === 'connected' && driving();
   const keyboardEligible = () => keyboardSession() && document.hasFocus() && !document.hidden;
   function releaseKeyboard() {
@@ -1198,7 +1222,7 @@ export function createViewer() {
   }
   const unsubscribeKeyboard = store.subscribe(() => { if (keyboardWanted && !keyboardSession()) releaseKeyboard(); });
   async function fullscreen() {
-    const target = canvas?.parentElement;
+    const target = fullscreenTarget();
     if (!target || disposed) return;
     const epoch = ++keyboardEpoch;
     keyboardWanted = keyboardEligible();
@@ -1291,6 +1315,7 @@ export function createViewer() {
     retryRtc,
     setStage,
     fullscreen,
+    setControlsHidden,
     isFullscreen: ownFullscreen,
     control: sendControl,
     snapshot,

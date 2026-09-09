@@ -132,6 +132,6 @@ export function ClipboardControl({ viewer }) {
         {pending && <p role="status" className="flex items-center gap-2 text-ink-3"><LoaderCircle className="size-3 animate-spin" /> Waiting for the desktop clipboard…</p>}
         {(error || state.error) && <p role="alert" className="callout callout-bad">{error || state.error}</p>}
       </div>
-    </Popover>, document.body)}
+    </Popover>, document.querySelector('[data-viewer]') ?? document.body)}
   </>;
 }

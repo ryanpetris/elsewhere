@@ -1,5 +1,5 @@
 // The top bar: brand and context, the launchers, the connection state, and the viewer's own controls.
-import { PictureInPicture2, CornerUpLeft, Expand, Eye, Info, Hand, Keyboard, LayoutGrid, MousePointer2, PanelRightClose, PanelRightOpen, Power, Settings, Terminal } from 'lucide-react';
+import { PanelTopClose, PictureInPicture2, CornerUpLeft, Expand, Eye, Info, Hand, Keyboard, LayoutGrid, MousePointer2, PanelRightClose, PanelRightOpen, Power, Settings, Terminal } from 'lucide-react';
 import { useStore } from '../store.js';
 import { WINDOW, PIP } from '../api.js';
 import { Badge, Divider, IconButton, Logo, codecName, cx } from './ui.jsx';
@@ -50,7 +50,7 @@ function Role({ viewer, role, windowMode }) {
   return null;
 }
 
-export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, menu, onMenu, keyboard, onKeyboard, terminal, onTerminal }) {
+export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, onHideControls, menu, onMenu, keyboard, onKeyboard, terminal, onTerminal }) {
   const status = useStore(viewer.store, s => s.status);
   const stream = useStore(viewer.store, s => s.stream);
   const windowTitle = useStore(viewer.store, s => s.windowTitle);
@@ -103,6 +103,7 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, m
         )}
         <IconButton data-menu-trigger id="about-toggle" icon={Info} label="About" active={menu === 'about'} aria-haspopup="dialog" aria-expanded={menu === 'about'} aria-controls="viewer-about" onClick={() => onMenu('about')} />
         {viewer.pip.supported && <IconButton icon={PictureInPicture2} label="Picture-in-picture" onClick={() => viewer.pip.open()} />}
+        <IconButton id="hide-controls" icon={PanelTopClose} label="Hide controls (Ctrl+Alt+Shift+H)" onClick={onHideControls} />
         <IconButton icon={Expand} label="Fullscreen" onClick={onFullscreen} />
         {acts('server.manage') && (
           <>

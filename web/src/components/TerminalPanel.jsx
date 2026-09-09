@@ -7,8 +7,10 @@ import { TOKEN } from '../api.js';
 import { AUTH } from '../protocol.js';
 import { IconButton, cx } from './ui.jsx';
 
-export default function TerminalPanel({ viewer, onClose }) {
+export default function TerminalPanel({ viewer, onClose, hidden = false }) {
   const host = useRef(null);
+  const hiddenRef = useRef(hidden);
+  hiddenRef.current = hidden;
   const [status, setStatus] = useState('Connecting…');
   const [session, setSession] = useState(0);
   useEffect(() => {
@@ -22,6 +24,7 @@ export default function TerminalPanel({ viewer, onClose }) {
     const send = data => { if (socket.readyState === WebSocket.OPEN) socket.send(data); };
     const control = data => send(JSON.stringify(data));
     const size = () => {
+      if (hiddenRef.current) return;
       fit.fit();
       control({ cols: Math.min(1000, term.cols), rows: Math.min(1000, term.rows) });
     };
@@ -33,7 +36,7 @@ export default function TerminalPanel({ viewer, onClose }) {
       auth[0] = AUTH; auth.set(token, 1);
       socket.send(auth);
       size();
-      term.focus();
+      if (!hiddenRef.current) term.focus();
     };
     socket.onmessage = event => {
       if (typeof event.data === 'string') { setStatus(event.data); return; }
@@ -53,8 +56,10 @@ export default function TerminalPanel({ viewer, onClose }) {
     };
     const text = term.onData(data => input(new TextEncoder().encode(data)));
     const binary = term.onBinary(data => input(Uint8Array.from(data, character => character.charCodeAt(0) & 255)));
-    viewer.releaseInput();
-    if (document.pointerLockElement) document.exitPointerLock();
+    if (!hiddenRef.current) {
+      viewer.releaseInput();
+      if (document.pointerLockElement) document.exitPointerLock();
+    }
     setStatus('Connecting…');
     return () => {
       observer.disconnect(); text.dispose(); binary.dispose();

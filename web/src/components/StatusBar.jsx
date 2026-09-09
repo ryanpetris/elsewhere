@@ -119,7 +119,7 @@ function StreamChip({ viewer }) {
             <IconButton icon={X} label="Close stream settings" size="sm" onClick={close} />
           </div>
           <StreamControls viewer={viewer} stacked />
-        </Popover>, document.body)}
+        </Popover>, document.querySelector('[data-viewer]') ?? document.body)}
     </>
   );
 }
@@ -136,7 +136,7 @@ function Metric({ icon: Icon, value, width, title, warn = false, className = '' 
 
 const control = 'inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md px-1.5 font-sans text-[11px] font-medium text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent aria-expanded:bg-accent/15 aria-expanded:text-accent-2';
 
-export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixer }) {
+export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixer, controlsHidden, onShowControls }) {
   const s = useStore(viewer.store, st => st.stats);
   const renderer = useStore(viewer.store, st => st.renderer);
   const mic = useStore(viewer.store, st => st.mic);
@@ -164,6 +164,7 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
   // controls and the chip.
   return (
     <footer className="flex h-8 shrink-0 items-center gap-x-2 border-t border-line bg-surface px-2 font-mono text-[11px] text-ink-3 sm:gap-x-3 sm:px-3">
+      {controlsHidden && <button type="button" className="btn btn-outline btn-xs shrink-0" onFocus={viewer.releaseInput} onClick={onShowControls} title="Show controls (Ctrl+Alt+Shift+H)">Show controls</button>}
       <Metric icon={Activity} value={`${s.fps} fps`} width="w-[9ch]" title={`${s.fps} frames per second painted`} />
       <Metric value={`${s.mbps.toFixed(1)} Mbit/s`} width="w-[13ch]" title={`Measured video throughput: ${s.mbps.toFixed(1)} Mbit/s`} className="max-[26rem]:hidden" />
       <Metric value={`${s.latencyMs.toFixed(0)} ms`} width="w-[8ch]" title={`Input to the next painted frame: ${s.latencyMs.toFixed(0)} ms`} className="max-lg:hidden" />

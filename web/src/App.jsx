@@ -25,6 +25,7 @@ function usePref(key, fallback) {
 
 export function App({ viewer }) {
   const status = useStore(viewer.store, s => s.status);
+  const controlsHidden = useStore(viewer.store, s => s.controlsHidden);
   const role = useStore(viewer.store, s => s.role);
   const permissions = useStore(viewer.store, s => s.permissions);
   const [sidebar, setSidebar] = usePref('sidebar', matchMedia('(min-width: 48rem)').matches); // a phone starts with the stage alone
@@ -46,7 +47,7 @@ export function App({ viewer }) {
   const [elements, setElements] = usePref('elements', false);
   const [tab, setTab] = useState('windows');
   const filesOpen = useStore(viewer.store, s => s.filesOpen);
-  useEffect(() => { if (filesOpen) { setSidebar(true); setTab('files'); } }, [filesOpen]);
+  useEffect(() => { if (filesOpen) { viewer.setControlsHidden(false); setSidebar(true); setTab('files'); } }, [filesOpen]);
   const [menu, setMenu] = useState(null); // One top-bar menu at a time.
   const closeMenu = event => {
     setMenu(null);
@@ -54,6 +55,8 @@ export function App({ viewer }) {
   };
   const [fullscreen, setFullscreen] = useState(false); // the chrome is gone then, so nothing is collected for it
   const windowMode = !!WINDOW;
+  const hidden = controlsHidden || fullscreen;
+  useEffect(() => { if (hidden) setMenu(null); }, [hidden]);
   useEffect(() => {
     const on = () => { const full = viewer.isFullscreen(); setFullscreen(full); if (full) setMenu(null); };
     document.addEventListener('fullscreenchange', on);
@@ -61,19 +64,20 @@ export function App({ viewer }) {
   }, [viewer]);
   useEffect(() => viewer.setElementsOn(elements && !windowMode && !PIP), [viewer, elements, windowMode]);
   useEffect(() => { if (role !== 'controller') setKeyboard(false); }, [role]); // only the controller's typing counts
-  useEffect(() => viewer.setStatsOn(!PIP && sidebar && tab === 'stats' && !fullscreen), [viewer, sidebar, tab, fullscreen]);
+  useEffect(() => viewer.setStatsOn(!PIP && sidebar && tab === 'stats' && !hidden), [viewer, sidebar, tab, hidden]);
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-hidden bg-canvas font-sans text-ink-2 select-none">
-      <TopBar
+    <div data-viewer="" className="relative flex h-full w-full flex-col overflow-hidden bg-canvas font-sans text-ink-2 select-none">
+      <div hidden={hidden}><TopBar
         viewer={viewer}
         windowMode={windowMode}
         sidebar={sidebar} onSidebar={() => setSidebar(!sidebar)}
         onFullscreen={viewer.fullscreen}
+        onHideControls={() => viewer.setControlsHidden(true)}
         menu={menu} onMenu={m => setMenu(menu === m ? null : m)}
         keyboard={keyboard} onKeyboard={() => (keyboard ? focusKeyboard() : setKeyboard(true))}
         terminal={terminal} onTerminal={toggleTerminal}
-      />
+      /></div>
       {menu === 'about' && !fullscreen && <About viewer={viewer} onClose={closeMenu} />}
       {menu === 'apps' && <Launcher viewer={viewer} onClose={closeMenu} />}
       {menu === 'power' && <PowerMenu viewer={viewer} onClose={closeMenu} />}
@@ -81,12 +85,13 @@ export function App({ viewer }) {
       <div className="relative flex min-h-0 flex-1">
         <Stage viewer={viewer} windowMode={windowMode} borders={borders && !windowMode && !PIP} elements={elements && !windowMode && !PIP} />
         {/* stays mounted while hidden, so the thumbnails don't reload on every toggle */}
-        {!windowMode && !PIP && <Sidebar viewer={viewer} tab={tab} onTab={setTab} hidden={!sidebar || fullscreen} />}
+        {!windowMode && !PIP && <Sidebar viewer={viewer} tab={tab} onTab={setTab} hidden={!sidebar || hidden} />}
       </div>
       {/* the docks open under the stage and the side panel, full width, where a phone's drawer never covers them */}
+      <div hidden={hidden}>
       {keyboard && <Keyboard viewer={viewer} onClose={() => setKeyboard(false)} />}
       {terminal && permissions.includes('commands.execute') && !PIP && (TerminalPanel
-        ? <TerminalPanel viewer={viewer} onClose={closeTerminal} />
+        ? <TerminalPanel hidden={hidden} viewer={viewer} onClose={closeTerminal} />
         : (
           <div className="flex h-10 shrink-0 items-center gap-3 border-t border-line bg-surface px-3 text-xs">
             <TerminalIcon className="size-3.5 text-ink-3" />
@@ -95,9 +100,10 @@ export function App({ viewer }) {
             <IconButton icon={X} label="Close terminal" size="sm" className="ml-auto" onClick={closeTerminal} />
           </div>
         ))}
-      {audioPanel && !windowMode && <AudioPanel viewer={viewer} hidden={fullscreen} onClose={() => setAudioPanel(false)} />}
-      {mixerPanel && !windowMode && <MixerPanel viewer={viewer} hidden={fullscreen} onClose={() => { setMixerPanel(false); document.getElementById('session-mixer-toggle')?.focus(); }} />}
-      {!PIP && <StatusBar mixerPanel={mixerPanel} onMixer={!windowMode ? () => setMixerPanel(!mixerPanel) : undefined} viewer={viewer} audioPanel={audioPanel} onAudioPanel={!windowMode ? () => setAudioPanel(!audioPanel) : undefined} />}
+      </div>
+      {audioPanel && !windowMode && <AudioPanel viewer={viewer} hidden={hidden} onClose={() => setAudioPanel(false)} />}
+      {mixerPanel && !windowMode && <MixerPanel viewer={viewer} hidden={hidden} onClose={() => { setMixerPanel(false); document.getElementById('session-mixer-toggle')?.focus(); }} />}
+      {!PIP && <StatusBar controlsHidden={hidden} onShowControls={() => viewer.setControlsHidden(false)} mixerPanel={mixerPanel} onMixer={!windowMode ? () => { viewer.setControlsHidden(false); setMixerPanel(!mixerPanel); } : undefined} viewer={viewer} audioPanel={audioPanel} onAudioPanel={!windowMode ? () => { viewer.setControlsHidden(false); setAudioPanel(!audioPanel); } : undefined} />}
       {(status === 'no-token' || status === 'unauthorized') && <TokenForm viewer={viewer} />}
     </div>
   );
