@@ -678,18 +678,16 @@ impl App {
         Some(protocol::stream_state(s.codec, s.want_codec.is_none(), s.quality, s.preset, self.bitrate_kbps, s.control.effort()))
     }
 
-    /// Pick the codec for a browser whose `hw` mask passed the prefer-hardware probe and `sw` the plain one
-    /// (bit0 H.264, bit1 HEVC, bit2 VP9, bit3 AV1, bit4 VP8), among those the encoder side produces (best first):
-    /// `--codec` if both sides can, else the first the browser decodes in hardware, else at all; none is `None`.
-    fn choose_codec(&self, hw: u8, sw: u8) -> Option<Codec> {
+    /// Prefer the configured codec, then the first server-ranked codec the browser can decode.
+    fn choose_codec(&self, _hw: u8, sw: u8) -> Option<Codec> {
         let usable = |mask: u8| self.codecs.iter().copied().find(|&c| mask & bit(c) != 0);
         match self.policy {
             Some(c) if sw & bit(c) != 0 && self.codecs.contains(&c) => Some(c),
             Some(c) => {
                 tracing::warn!(?c, "the browser can't decode the requested codec or the encoder can't produce it; picking another");
-                usable(hw).or_else(|| usable(sw))
+                usable(sw)
             }
-            None => usable(hw).or_else(|| usable(sw)),
+            None => usable(sw),
         }
     }
 

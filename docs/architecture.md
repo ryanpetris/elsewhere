@@ -195,8 +195,8 @@ RGB input is full range; converted NV12 and encoded output use limited-range BT.
 
 With `--software-encoding`, the compositor supplies memory or linear DMA-buf pixels. The worker maps
 and synchronizes DMA-buf CPU access, converts through libswscale, and uses libvpx, libx264 or
-OpenH264, libx265, or libaom. The compositor clock runs at 30 Hz in this mode. Software codec
-preference is VP8, H.264, VP9, HEVC, AV1; hardware preference is AV1, HEVC, VP9, H.264. Native capability
+OpenH264, libx265, or libaom. The compositor clock runs at 30 Hz in this mode. Codec
+preference is H.264, HEVC, AV1, VP9, VP8 in both modes, filtered by the available encoders. Native capability
 probes require an actual keyframe. The browser intersects that list with its WebCodecs support;
 `--codec` wins when both sides support it. AV1 and VP9 codec levels are selected from picture size.
 
@@ -253,7 +253,7 @@ forces a keyframe with the headers needed by a fresh browser decoder. Only libx2
 changes live; other encoders reopen. Capture timestamps retain the same clock origin across reopens.
 
 Each viewer chooses a bitrate ceiling independently. Very Low, Low, Medium, High and Max use 2, 5,
-`--bitrate` at 8 by default, 12 and 25 Mbit/s. Max is the default. The rate controller halves the target
+`--bitrate` at 8 by default, 12 and 25 Mbit/s. Medium is the default. The rate controller halves the target
 under sustained output backlog, slow sends, excess RTT or browser delay/drop reports. It holds a
 reduction for two seconds and raises the target by a quarter after five clean seconds, up to the
 ceiling. Targets below 3 Mbit/s cap delivery at 30 fps. Both read-only and controlling viewers report

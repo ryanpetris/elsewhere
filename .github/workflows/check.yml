@@ -34,6 +34,7 @@ jobs:
       - name: Browser media checks
         working-directory: web
         run: |
+          npm run check:codec-negotiation
           npm run check:visualiser
           npm run check:viewer-disposal
       - name: Software broadcast and TLS checks

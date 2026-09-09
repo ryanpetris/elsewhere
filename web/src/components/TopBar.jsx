@@ -11,6 +11,7 @@ const STATUS = {
   connected: ['bg-ok', 'Connected'],
   retrying: ['bg-warn text-warn animate-glow', 'Reconnecting…'],
   unauthorized: ['bg-bad', 'Not authorized'],
+  error: ['bg-bad', 'Connection failed'],
   gone: ['bg-ink-4', 'Window closed'],
   closed: ['bg-ink-4', 'Viewer closed'],
   quit: ['bg-ink-4', 'Shut down'],

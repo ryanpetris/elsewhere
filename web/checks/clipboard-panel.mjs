@@ -21,6 +21,7 @@ const server = createServer(async (req, res) => {
   const path = new URL(req.url, 'http://localhost').pathname;
   const restricted = req.headers.authorization === 'Bearer viewer' && clipboard.mime === 'text/uri-list';
   const json = (value, code = 200) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)); };
+  if (path === '/api/codecs') return json([{ codec: 'vp8', hardware: false }]);
   if (path === '/api/me') return json({ permissions: req.headers.authorization === 'Bearer viewer' ? ['desktop.view', 'clipboard.read'] : ['desktop.view', 'desktop.control', 'clipboard.read', 'clipboard.write', 'files.upload', 'files.download'] });
   if (path === '/api/clipboard/state') return json(meta(restricted));
   if (path === '/api/clipboard' && req.method === 'PUT') {

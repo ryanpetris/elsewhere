@@ -31,8 +31,8 @@ struct Cli {
     /// Medium quality bitrate ceiling in kbit/s; other quality levels have their own ceilings.
     #[arg(long, default_value_t = 8000)]
     bitrate: u32,
-    /// Video codec: auto picks AV1, HEVC, VP9 or H.264 (or VP8 with --software-encoding) by what the
-    /// browser decodes in hardware, among what this machine encodes.
+    /// Video codec: auto prefers H.264, HEVC, AV1, VP9, then VP8 among the encoders
+    /// available on this machine that the browser can decode.
     #[arg(long, default_value = "auto", value_parser = ["auto", "h264", "hevc", "vp9", "av1", "vp8"])]
     codec: String,
     /// Encode on the CPU (libvpx, x264, x265, libaom: whichever is installed) instead of with VA-API,

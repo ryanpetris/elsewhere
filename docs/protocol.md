@@ -64,7 +64,7 @@ Config on WebSocket before video if that stream has not been configured on the s
 | Type | Name | Payload |
 |---|---|---|
 | `0x80` | Auth | the token as UTF-8. First message. |
-| `0x81` | Hello | `u8 hw` `u8 sw`: codec families the browser decodes with hardware, and at all (bit 0 H.264, bit 1 HEVC, bit 2 VP9, bit 3 AV1, bit 4 VP8); then `u8 codec` (0 Auto, else 1 H.264, 2 HEVC, 3 VP9, 4 AV1, 5 VP8) and `u8 quality` (1 very-low, 2 low, 3 medium, 4 high, 5 max; invalid means max), this viewer's choice; optional trailing `u8 effort` (0 fast, 1 balanced, 2 high; missing or invalid means fast). Picks the codec, among those this machine encodes, and starts the stream. |
+| `0x81` | Hello | `u8 hw` `u8 sw`: codec families the browser decodes with hardware, and at all (bit 0 H.264, bit 1 HEVC, bit 2 VP9, bit 3 AV1, bit 4 VP8); then `u8 codec` (0 Auto, else 1 H.264, 2 HEVC, 3 VP9, 4 AV1, 5 VP8) and `u8 quality` (1 very-low, 2 low, 3 medium, 4 high, 5 max; invalid means medium), this viewer's choice; optional trailing `u8 effort` (0 fast, 1 balanced, 2 high; missing or invalid means fast). Selection uses the shared codecs in server preference order; `hw` does not affect ranking and the viewer sends zero. Starts the stream. |
 | `0x82` | Resize | `u16 css_w` `u16 css_h` `f32 dpr`. Output = CSS size × dpr, rounded down to even, capped at 8K. |
 | `0x83` | MotionAbs | `f32 x` `f32 y` in logical (CSS) pixels. |
 | `0x84` | MotionRel | `f32 dx` `f32 dy` while pointer-locked. |

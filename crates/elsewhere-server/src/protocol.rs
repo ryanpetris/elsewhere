@@ -226,9 +226,9 @@ pub fn codec_named(name: &str) -> Option<Codec> {
 pub enum Preset {
     VeryLow = 1,
     Low = 2,
+    #[default]
     Medium = 3,
     High = 4,
-    #[default]
     Max = 5,
 }
 
@@ -438,9 +438,9 @@ mod tests {
         assert_eq!(decode(&[HELLO, 0, 16]), None);
         assert_eq!(decode(&[HELLO, 0, 16, 0]), None);
         assert_eq!(Preset::named("auto"), None);
-        assert_eq!(Preset::default(), Preset::Max);
+        assert_eq!(Preset::default(), Preset::Medium);
         for packet in [vec![HELLO, 0, 16, 0, 0], vec![HELLO, 0, 16, 0, 255]] {
-            assert_eq!(decode(&packet), Some(ClientMsg::Hello { hw: 0, sw: 16, codec: None, quality: Preset::Max, effort: EncodingEffort::Fast }));
+            assert_eq!(decode(&packet), Some(ClientMsg::Hello { hw: 0, sw: 16, codec: None, quality: Preset::Medium, effort: EncodingEffort::Fast }));
         }
     }
 

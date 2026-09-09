@@ -12,7 +12,7 @@ const server = createServer(async (req, res) => {
   const path = new URL(req.url, 'http://localhost').pathname;
   if (path.startsWith('/api/')) {
     res.setHeader('Content-Type', 'application/json');
-    return res.end(JSON.stringify(path === '/api/me' ? { permissions: ['desktop.view', 'desktop.control', 'clipboard.read', 'clipboard.write'] } : path === '/api/clipboard/state' ? { observation: 'fixture:0', operation: null, present: false, mime: null, size: 0, preview: 'empty' } : []));
+    return res.end(JSON.stringify(path === '/api/codecs' ? [{ codec: 'vp8', hardware: false }] : path === '/api/me' ? { permissions: ['desktop.view', 'desktop.control', 'clipboard.read', 'clipboard.write'] } : path === '/api/clipboard/state' ? { observation: 'fixture:0', operation: null, present: false, mime: null, size: 0, preview: 'empty' } : []));
   }
   try {
     res.setHeader('Content-Type', path.endsWith('.js') ? 'text/javascript' : path.endsWith('.css') ? 'text/css' : 'text/html');

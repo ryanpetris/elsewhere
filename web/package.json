@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "check:codec-negotiation": "node checks/codec-negotiation.mjs",
     "check:visualiser": "node checks/visualiser.mjs",
     "check:structured-input": "node checks/structured-input.mjs",
     "check:clipboard-firefox": "node checks/clipboard-firefox.mjs",

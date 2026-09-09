@@ -17,9 +17,7 @@ impl Encoders {
     pub fn probe(node: Option<&Path>) -> Result<Arc<Self>> {
         crate::init()?;
         let mut choices = Vec::new();
-        let order = if node.is_some() {
-            vec![Codec::Av1, Codec::Hevc, Codec::Vp9, Codec::H264]
-        } else { vec![Codec::Vp8, Codec::H264, Codec::Vp9, Codec::Hevc, Codec::Av1] };
+        let order = [Codec::H264, Codec::Hevc, Codec::Av1, Codec::Vp9, Codec::Vp8];
         let hardware = node.map(ProbeFrames::new).transpose()?;
         for codec in order {
             let names: &[&'static str] = match (node.is_some(), codec) {

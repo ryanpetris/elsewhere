@@ -66,8 +66,8 @@ try {
     return page;
   };
   const main = await connect(null, null);
-  assert.equal(await main.getByTitle('Quality', { exact: true }).inputValue(), 'max');
-  assert.deepEqual(await main.evaluate(() => [qualityStates[0].preset, qualityStates[0].ceiling_kbps, qualityStates[0].bitrate_kbps, hellos[0][4]]), ['max', 25000, 25000, 5]);
+  assert.equal(await main.getByTitle('Quality', { exact: true }).inputValue(), 'medium');
+  assert.deepEqual(await main.evaluate(() => [qualityStates[0].preset, qualityStates[0].ceiling_kbps, qualityStates[0].bitrate_kbps, hellos[0][4]]), ['medium', medium, medium, 3]);
   await main.evaluate(() => elsewhere.spawn('foot --app-id=quality-check'));
   await main.waitForFunction(() => elsewhere.store.get().windows.some(w => w.app_id === 'quality-check'));
   const windowId = await main.evaluate(() => elsewhere.store.get().windows.find(w => w.app_id === 'quality-check').id);
@@ -75,9 +75,9 @@ try {
   for (const id of [null, windowId]) {
     const page = id ? await connect(id, null) : main;
     const select = page.getByTitle('Quality', { exact: true });
-    assert.equal(await select.inputValue(), 'max');
+    assert.equal(await select.inputValue(), 'medium');
     assert.deepEqual(await select.locator('option').evaluateAll(options => options.map(o => o.value)), levels.map(([name]) => name));
-    assert.deepEqual(await page.evaluate(() => [qualityStates[0].preset, qualityStates[0].bitrate_kbps, hellos[0][4]]), ['max', 25000, 5]);
+    assert.deepEqual(await page.evaluate(() => [qualityStates[0].preset, qualityStates[0].bitrate_kbps, hellos[0][4]]), ['medium', medium, 3]);
     assert((await select.locator('option[value="medium"]').textContent()).includes(`${medium / 1000} Mbit/s`));
     for (const [name, wireId, ceiling] of levels) {
       await page.evaluate(() => { window.qualityStates = []; });
@@ -173,7 +173,7 @@ try {
   for (const id of [null, windowId]) {
     for (const saved of ['auto', 'invalid']) {
       const page = await connect(id, saved);
-      assert.deepEqual(await page.evaluate(() => [elsewhere.store.get().choice.quality, hellos[0][4], qualityStates[0].bitrate_kbps]), ['max', 5, 25000]);
+      assert.deepEqual(await page.evaluate(() => [elsewhere.store.get().choice.quality, hellos[0][4], qualityStates[0].bitrate_kbps]), ['medium', 3, medium]);
       await page.context().close();
     }
     for (const hello of [[0x81, 0, decoderMask], [0x81, 0, decoderMask, 0], [0x81, 0, decoderMask, 0, 0], [0x81, 0, decoderMask, 0, 255]]) {
@@ -189,7 +189,7 @@ try {
           assert.equal(state, undefined, 'short HELLO cannot start a stream');
         } else {
           await waitFor(() => state);
-          assert.equal(state.preset, 'max'); assert.equal(state.bitrate_kbps, 25000); assert.equal(state.auto_codec, true);
+          assert.equal(state.preset, 'medium'); assert.equal(state.bitrate_kbps, medium); assert.equal(state.auto_codec, true);
         }
       } finally { ws.close(); }
     }

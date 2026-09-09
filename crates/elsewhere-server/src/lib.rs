@@ -43,7 +43,7 @@ use elsewhere_core::{Bytes, Codec, Command, ControlMsg, Event, FrameSink, InputM
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager};
 use tokio::sync::mpsc;
 
-/// `None` = automatic: the first of the available codecs (best first) the browser decodes in hardware, else at all.
+/// `None` = automatic: the first available codec in server preference order that the browser can decode.
 pub type CodecPolicy = Option<Codec>;
 /// Makes an encoder for one viewer or window stream: the sink the compositor feeds and a control
 /// handle that must not keep the encoder worker alive (the stream ends when the compositor drops the sink).

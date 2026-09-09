@@ -99,7 +99,7 @@ function Banner({ viewer }) {
   if (status === 'retrying' || (status === 'connecting' && stream)) {
     return (
       <div className="absolute top-3 left-1/2 flex -translate-x-1/2 animate-pop items-center gap-2 rounded-full border border-line-2 bg-surface/90 px-3 py-1 text-xs text-ink-2 shadow-pop backdrop-blur">
-        <Loader2 className="size-3.5 animate-spin text-warn" /> Reconnecting…
+        <Loader2 className="size-3.5 animate-spin text-warn" /> {reason ? `${reason}. Retrying…` : 'Reconnecting…'}
       </div>
     );
   }
@@ -125,7 +125,7 @@ function Banner({ viewer }) {
     <div className={card}>
       <span className="flex size-12 items-center justify-center rounded-xl bg-surface-3 text-ink-3"><MonitorX className="size-6" strokeWidth={1.5} /></span>
       <div className="text-sm font-medium text-ink">{status === 'closed' ? 'Viewer closed' : reason || 'Window closed'}</div>
-      <div className="text-xs text-ink-3">{status === 'closed' ? 'Reload this page to reconnect.' : 'This tab showed one window; it is gone.'}</div>
+      <div className="text-xs text-ink-3">{status === 'closed' || status === 'error' ? 'Reload this page to reconnect.' : 'This tab showed one window; it is gone.'}</div>
     </div>
   );
 }

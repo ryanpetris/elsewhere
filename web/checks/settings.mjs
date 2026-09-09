@@ -7,6 +7,7 @@ import { chromium } from 'playwright-core';
 const server = createServer(async (req, res) => {
   try {
     const path = new URL(req.url, 'http://localhost').pathname;
+    if (path === '/api/codecs') { res.setHeader('Content-Type', 'application/json'); return res.end(JSON.stringify([{ codec: 'vp8', hardware: false }])); }
     if (path === '/api/me') { res.setHeader('Content-Type', 'application/json'); return res.end(JSON.stringify({ permissions: ['desktop.view', 'desktop.control', 'apps.launch', 'commands.execute', 'server.manage', 'clipboard.read', 'clipboard.write', 'audio.listen', 'files.browse', 'broadcasts.manage'] })); }
     if (path.startsWith('/api/')) { res.setHeader('Content-Type', 'application/json'); return res.end(path === '/api/applications' ? JSON.stringify([{ id: 'local-test.desktop', name: 'Local Test', categories: ['Utility'] }]) : '[]'); }
     const data = await readFile(new URL('../dist/' + (path === '/' ? 'index.html' : path.slice(1)), import.meta.url));
@@ -138,6 +139,7 @@ try {
   assert.equal(await page.evaluate(() => sent.filter(p => p[0] === 0x87).length), 2, 'outside dismissal restores desktop typing');
   await apps.click();
   await search.fill('Local Test');
+  await page.locator('[data-app="local-test.desktop"]').waitFor();
   await page.evaluate(() => { window.sent = []; });
   await search.press('Enter');
   await search.waitFor({ state: 'detached' });

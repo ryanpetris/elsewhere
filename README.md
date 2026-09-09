@@ -90,13 +90,15 @@ Each viewer picks its own codec, quality and encoding effort in the status bar: 
 and that browser can do ("Auto (HEVC)" shows the pick). A window narrower than 57 rem folds these controls into the
 status bar's Stream settings popover. All five quality levels adapt under their
 selected ceiling: Very Low (2 Mbit/s), Low (5), Medium (`--bitrate`, 8 by default), High (12), and
-Max (25). Max is the default. The stream starts at its ceiling; under pressure the server halves the
+Max (25). Medium is the default. The stream starts at its ceiling; under pressure the server halves the
 bitrate and holds it, then climbs back a quarter at a time. Targets below 3 Mbit/s have a 30 fps cap.
 A custom Medium ceiling is displayed as configured, even if it exceeds another level.
 Effort defaults to Fast. Balanced and High spend more encoding time for possible picture improvements
 at the same bitrate. Changes restart the viewer's stream immediately and are remembered on reconnect.
 See [encoding effort](docs/encoding-effort.md) for mappings and measured tradeoffs.
-`GET /api/codecs` lists the server's codecs. After the picture stops changing one more frame
+`GET /api/codecs` lists the server's successfully probed encoders in preference order. The viewer fetches
+this list and checks browser decoding support before opening a video connection. Hardware encoding
+mode advertises only working VA-API encoders on the selected render node. After the picture stops changing one more frame
 encodes the settled picture at the current target so text left rough by motion can sharpen.
 Frames are painted on a 2D canvas. `?renderer=webgpu` in the URL uses a WebGPU external-texture path
 instead; it is opt-in because Chromium on Linux occasionally presents a blank frame that way, which looks like flicker.
@@ -415,8 +417,7 @@ page with hot reload, proxying `/ws` and `/api` to a server started with `--no-t
 
 Useful flags: `--no-tls` (localhost or HTTPS proxy), `--url-prefix`, `--proxy-strips-prefix`, `--listen`, `--bitrate <kbps>` (Medium ceiling),
 `--codec auto|h264|hevc|vp9|av1|vp8` (what Auto resolves to when the browser decodes it; a codec this
-machine can't encode stops startup; auto prefers whatever the browser decodes in hardware, among what
-this machine encodes: AV1, then HEVC, VP9, H.264 on the GPU; VP8 first on the CPU),
+machine can't encode stops startup; Auto ranks shared codecs as H.264, HEVC, AV1, VP9, then VP8),
 `--software-encoding`, `--exec`, `--kiosk`, `--elements`, `--no-audio`, `--webcam`, `--no-rtc`, `--rtc-port`, `--rtc-addr`, `--stun`,
 `--turn`, `--turn-user`, `--turn-pass`, `--socket-name`, `--render-node` (`none` for no GPU). `--help`
 lists them all.

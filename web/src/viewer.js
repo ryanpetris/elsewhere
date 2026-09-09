@@ -13,12 +13,12 @@ import { openRtc, rtcEndpoint, RTC_TIMING } from './rtc.js';
 import { CONFIG, VIDEO, CURSOR, POINTER_LOCK, AUDIO, WINDOWS, CLIPBOARD, ROLE, NOTICE, CLIPBOARD_DATA, NOTIFICATIONS, STREAM_STATE, RTC, ROLES, CODEC_FAMILIES, EFFORTS, PRESETS, PRESET_IDS, AUTH, HELLO, RESIZE, MOTION_ABS, MOTION_REL, BUTTON, AXIS, KEY, REQUEST_KEYFRAME, BLUR, POINTER_LOCK_LOST, POINTER_LOCK_GAINED, CONTROL, SET_CLIPBOARD, TAKE_CONTROL, NOTIFY, STREAM, DRAG, INPUT, TOUCH, MIC, CAM, RTC_CLIENT, REPORT, BTN, MIXER_STATE, MIXER_LEVELS, MIXER_ERROR, MIXER_CLIENT, SESSION, HANDOFF, FILE_RESULT } from './protocol.js';
 
 const AUDIO_LEAD = 0.06;
-const qualityName = name => PRESETS.includes(name) ? name : 'max';
+const qualityName = name => PRESETS.includes(name) ? name : 'medium';
 const effortName = name => EFFORTS.includes(name) ? name : 'fast';
 
 export function createViewer() {
   const store = createStore({
-    // 'no-token' | 'connecting' | 'connected' | 'retrying' | 'unauthorized' | 'gone' | 'quit' | 'closed'
+    // 'no-token' | 'connecting' | 'connected' | 'retrying' | 'unauthorized' | 'error' | 'gone' | 'quit' | 'closed'
     status: TOKEN ? 'connecting' : 'no-token',
     reason: '',
     // The role tracks desktop input ownership; permissions govern feature access.
@@ -33,7 +33,7 @@ export function createViewer() {
     notifications: [], // open desktop notifications, oldest first
     upload: null, // { name, index, count } while files dropped on the page go up
     streamState: null, // { codec, auto_codec, preset, ceiling_kbps, medium_kbps, bitrate_kbps, max_fps, effort } from the server
-    choice: { codec: pref.getStr('codec', 'auto'), quality: qualityName(pref.getStr('quality', 'max')), effort: effortName(pref.getStr('effort', 'fast')) }, // this viewer's picks
+    choice: { codec: pref.getStr('codec', 'auto'), quality: qualityName(pref.getStr('quality', 'medium')), effort: effortName(pref.getStr('effort', 'fast')) }, // this viewer's picks
     touchMouse: pref.get('touchmouse', false), // fingers as a mouse with gestures, instead of real touch points
     audioAvailable: false,
     mixer: { available: false, generation: '', nodes: [], routing: false, error: null },
@@ -49,7 +49,7 @@ export function createViewer() {
     cam: false, // the local webcam is going to the desktop
     camAvailable: false, // the desktop takes one (--webcam)
     codecs: [], // what the server encodes, in Auto's order: [{ codec, hardware }]
-    decodable: [], // codec families this browser decodes at all
+    decodable: [], // server codec families this browser can decode
     filesPath: '@transfer', // Navigation belongs to this viewer.
     filesChange: null,
     filesOpen: 0,
@@ -167,6 +167,7 @@ export function createViewer() {
     if (disposed) return;
     clearTimeout(reconnectTimer);
     if (!TOKEN) { store.set({ status: 'no-token' }); return; }
+    let capabilities;
     try {
       const response = await api('/api/me', { signal: AbortSignal.timeout(5000) });
       if (disposed) return;
@@ -176,19 +177,23 @@ export function createViewer() {
       if (disposed) return;
       store.set({ permissions });
       if (!can('desktop.view')) { store.set({ status: 'unauthorized', reason: 'This token does not allow desktop viewing' }); return; }
-    } catch {
-      if (!disposed) { store.set({ status: 'retrying', permissions: [] }); reconnectTimer = setTimeout(connect, 1000); }
+      capabilities = await discoverCodecs();
+      if (disposed) return;
+      if (!capabilities.sw) { store.set({ status: 'error', reason: 'No video codec in common' }); return; }
+    } catch (error) {
+      if (!disposed) { store.set({ status: 'retrying', permissions: [], reason: error.message }); reconnectTimer = setTimeout(connect, 1000); }
       return;
     }
+    store.set({ reason: '' });
     audioSeq = -1; // the server kept counting while we were away
     connects++;
     const socket = ws = new WebSocket(websocketUrl(`/ws${WINDOW ? '/window/' + WINDOW : ''}`));
     ws.binaryType = 'arraybuffer';
-    ws.onopen = async () => {
+    ws.onopen = () => {
       if (disposed || ws !== socket) return;
       const t = new TextEncoder().encode(TOKEN);
       send(AUTH, t.length, dv => new Uint8Array(dv.buffer, 1).set(t));
-      await sendHello(socket);
+      sendHello(capabilities);
       if (disposed || ws !== socket || socket.readyState !== WebSocket.OPEN) return;
       if (mixerSubscribed) sendText(MIXER_CLIENT, JSON.stringify({ op: 'subscribe', enabled: true }));
       if (!WINDOW) sendResize(); // a window stream is the window's size
@@ -282,21 +287,25 @@ export function createViewer() {
   /// A window action or spawn for the compositor, as JSON.
   const sendControl = obj => { if (can(({ launch: 'apps.launch', spawn: 'commands.execute', quit: 'server.manage' })[obj.op] ?? 'desktop.control')) sendText(CONTROL, JSON.stringify(obj)); };
 
-  // Which codec families this browser decodes, in hardware and at all (bit0 H.264, bit1 HEVC, bit2 VP9,
-  // bit3 AV1, bit4 VP8), and this viewer's codec and quality choice (codec 0 = Auto; quality uses PRESET_IDS).
-  async function sendHello(socket) {
+  // Discover shared codecs before opening the streaming connection.
+  async function discoverCodecs() {
+    const codecs = await serverCodecs();
     const probes = ['avc1.640028', 'hev1.1.6.L120.90', 'vp09.00.40.08', 'av01.0.09M.08', 'vp8'];
-    let hw = 0, sw = 0;
+    let sw = 0;
     for (const [i, codec] of probes.entries()) {
-      const ok = async hardwareAcceleration => (await VideoDecoder.isConfigSupported({ codec, hardwareAcceleration }).catch(() => ({}))).supported;
-      if (await ok('prefer-hardware')) hw |= 1 << i;
-      if (await ok('no-preference')) sw |= 1 << i;
+      if (!globalThis.VideoDecoder || !codecs.some(entry => entry.codec === CODEC_FAMILIES[i])) continue;
+      if ((await VideoDecoder.isConfigSupported({ codec, hardwareAcceleration: 'no-preference' }).catch(() => ({}))).supported) sw |= 1 << i;
     }
-    if (disposed || ws !== socket || socket.readyState !== WebSocket.OPEN) return;
-    store.set({ decodable: CODEC_FAMILIES.filter((_, i) => sw & (1 << i)) });
-    const { codec, quality, effort } = state().choice;
-    send(HELLO, 5, dv => { dv.setUint8(1, hw); dv.setUint8(2, sw); dv.setUint8(3, CODEC_FAMILIES.indexOf(codec) + 1); dv.setUint8(4, PRESET_IDS[quality]); dv.setUint8(5, EFFORTS.indexOf(effort)); });
-    if (!state().codecs.length) serverCodecs().then(list => store.set({ codecs: list })).catch(() => {});
+    if (!disposed) store.set({ codecs, decodable: CODEC_FAMILIES.filter((_, i) => sw & (1 << i)) });
+    return { sw };
+  }
+  function sendHello({ sw }) {
+    let { codec, quality, effort } = state().choice;
+    if (codec !== 'auto' && !state().decodable.includes(codec)) {
+      codec = 'auto';
+      store.set({ choice: { ...state().choice, codec } });
+    }
+    send(HELLO, 5, dv => { dv.setUint8(1, 0); dv.setUint8(2, sw); dv.setUint8(3, CODEC_FAMILIES.indexOf(codec) + 1); dv.setUint8(4, PRESET_IDS[quality]); dv.setUint8(5, EFFORTS.indexOf(effort)); });
   }
   // A new codec, quality or effort for this session, remembered for the next connection.
   function setChoice(patch) {
