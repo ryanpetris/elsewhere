@@ -109,8 +109,7 @@ pub struct App {
     active_tokens: Mutex<HashMap<uuid::Uuid, Weak<auth::Access>>>,
     input_owner: Mutex<Option<(uuid::Uuid, u64)>>,
     batches: Mutex<HashMap<String, Key>>,
-    mcp_owners: Mutex<HashMap<String, Key>>,
-    mcp_sessions: Arc<LocalSessionManager>,
+    mcp_sessions: Arc<mcp::sessions::Sessions>,
     commands: calloop::channel::Sender<Command>,
     policy: CodecPolicy,
     codecs: Vec<Codec>,
@@ -240,10 +239,9 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
         active_tokens: Mutex::default(),
         input_owner: Mutex::default(),
         batches: Mutex::default(),
-        mcp_owners: Mutex::default(),
         // No event store: rmcp's session-less Last-Event-ID replay must stay unavailable.
         // Enabling one requires authorization for replay requests without a session ID.
-        mcp_sessions: Arc::new(LocalSessionManager::default()),
+        mcp_sessions: Arc::new(mcp::sessions::Sessions::default()),
         commands,
         policy: cfg.codec,
         codecs: cfg.codecs,
@@ -281,6 +279,7 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
     tokio::spawn(files::sweep(app.clone()));
     tokio::spawn(broadcast::sweep(Arc::downgrade(&app)));
     tokio::spawn(auth::sweep(Arc::downgrade(&app)));
+    tokio::spawn(mcp::sessions::sweep(Arc::downgrade(&app.mcp_sessions)));
 
     let router = Router::new()
         .route("/", get(index))
@@ -320,7 +319,7 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
                 .route("/api/clipboard/state", get(api_clipboard_state))
                 .route("/api/clipboard/files", post(api_clipboard_files))
                 .route("/api/clipboard/files/{index}", get(api_clipboard_file))
-                .nest("/mcp", Router::new().fallback_service(mcp_service(app.clone())).layer(middleware::from_fn(mcp::validate_capture_body)).layer(middleware::from_fn_with_state(app.clone(), mcp::bind_session)))
+                .nest("/mcp", Router::new().fallback_service(mcp_service(app.clone())).layer(middleware::from_fn(mcp::validate_capture_body)).layer(middleware::from_fn_with_state(app.mcp_sessions.clone(), mcp::sessions::bind)))
                 .layer(middleware::from_fn_with_state(app.clone(), bearer)),
         )
         .route("/skill/SKILL.md", get(|| async { markdown(mcp::SKILL) }))
@@ -404,7 +403,7 @@ fn markdown(src: &'static str) -> Response {
 
 /// MCP over Streamable HTTP; the bearer middleware in front of it replaces rmcp's host allow-list.
 fn mcp_service(app: Arc<App>) -> StreamableHttpService<mcp::Mcp, LocalSessionManager> {
-    let sessions = app.mcp_sessions.clone();
+    let sessions = app.mcp_sessions.manager.clone();
     StreamableHttpService::new(move || Ok(mcp::Mcp::new(app.clone())), sessions, StreamableHttpServerConfig::default().disable_allowed_hosts())
 }
 

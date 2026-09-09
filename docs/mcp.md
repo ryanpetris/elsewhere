@@ -8,6 +8,15 @@ generated schemas.
 With `--url-prefix`, external clients prepend the public prefix to `/mcp` and HTTP routes.
 See [reverse proxy setup](reverse-proxy.md) for both path-forwarding modes.
 
+Sessions expire after 15 minutes without an open HTTP request or response stream. Each authenticated
+request keeps its session active until its response finishes or disconnects, including cached replies
+and resumed SSE streams. The idle clock starts when the last request or stream closes. Clients must
+initialize a new session after expiry; a session ID without a live owner returns `403`.
+
+Cleanup runs every 30 seconds. Initialization has a 30-second deadline, and cleanup waits for
+in-progress initialization before discarding sessions without owners. A cancelled initialization
+therefore leaves no permanent session. Token revocation and expiry also discard owned sessions.
+
 ## Decisions
 
 | Question | Decision |

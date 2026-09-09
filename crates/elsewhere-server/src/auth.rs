@@ -99,14 +99,7 @@ impl App {
         }
         self.stop_token_broadcasts(id);
         self.batches.lock().unwrap().retain(|_, key| key.metadata.id != id);
-        let sessions: Vec<_> = {
-            let mut owners = self.mcp_owners.lock().unwrap();
-            let sessions = owners.iter().filter(|(_, key)| key.metadata.id == id).map(|(session, _)| session.clone()).collect::<Vec<_>>();
-            owners.retain(|_, key| key.metadata.id != id);
-            sessions
-        };
-        use rmcp::transport::streamable_http_server::session::SessionManager;
-        for session in sessions { let _ = self.mcp_sessions.close_session(&session.into()).await; }
+        self.mcp_sessions.revoke(id).await;
         if let Some(hub) = &self.rtc { for session in rtc_keys { hub.close(session).await; } }
     }
     pub(crate) async fn key_for(&self, secret: &str) -> Result<Option<Key>, ApiError> {
