@@ -26,8 +26,8 @@ pub const NOTIFICATIONS: u8 = 0x0B;
 /// JSON `{"codec","auto_codec","preset","ceiling_kbps","medium_kbps","bitrate_kbps","max_fps"}`: what this session's encoder does right now;
 /// after every `Config` and whenever the rate controller steps the quality.
 pub const STREAM_STATE: u8 = 0x0C;
-/// `[RTC][JSON]`: WebRTC signalling, server side: `{"ice_servers": [...]}` once the session is up (the
-/// browser may then offer), `{"answer": "<sdp>"}` to its offer.
+/// `[RTC][JSON]`: WebRTC signalling: `{"ice_servers": [...], "port": 8443}` with an optional
+/// `"host"` address override once the session is up; `{"answer": "<sdp>", "g": 1}` to its offer.
 pub const RTC: u8 = 0x0D;
 /// `[FRAGMENT][u32 id][u16 index][u16 count][bytes]`: on the data channel only, a piece of one WebSocket
 /// message (a video frame), reassembled by id.

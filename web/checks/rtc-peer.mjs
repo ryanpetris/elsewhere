@@ -1,6 +1,6 @@
 // Run inside the Docker rig: node checks/rtc-peer.mjs.
 import assert from 'node:assert/strict';
-import { openRtc, pageEndpoint } from '../src/rtc.js';
+import { openRtc, rtcEndpoint } from '../src/rtc.js';
 
 for (const [url, address, port] of [
   ['https://desktop.example:9443/', 'desktop.example', '9443'],
@@ -8,8 +8,11 @@ for (const [url, address, port] of [
   ['http://localhost/', 'localhost', '80'],
   ['https://[2001:db8::1]:9443/', '2001:db8::1', '9443'],
 ]) {
-  assert.deepEqual(pageEndpoint(new URL(url)), { host: address, port: Number(port) });
+  assert.deepEqual(rtcEndpoint(new URL(url), { port: Number(port) }), { host: address, port: Number(port) });
 }
+
+assert.deepEqual(rtcEndpoint(new URL('https://viewer.example:9443'), { port: 19502 }), { host: 'viewer.example', port: 19502 });
+assert.deepEqual(rtcEndpoint(new URL('https://viewer.example'), { host: '192.0.2.5', port: 19502 }), { host: '192.0.2.5', port: 19502 });
 
 let pc;
 const timers = new Map();
@@ -40,9 +43,14 @@ assert.deepEqual([messages, opens, failures.length, offers.length], [0, 0, 0, 0]
 peer = start();
 pc.offerReady({ sdp: 'current' });
 await settle();
-assert.deepEqual(offers, [{ offer: 'current', g: 7, endpoint: { host: 'localhost', port: 8080 } }]);
+assert.deepEqual(offers, [{ offer: 'current', g: 7 }]);
 pc.channel.onopen();
 assert.equal(opens, 1);
+const sdp = 'v=0\r\na=ice-ufrag:test\r\na=candidate:1 1 udp 123 192.0.2.1 8443 typ host\r\na=candidate:2 1 udp 456 2001:db8::1 8443 typ host\r\na=end-of-candidates\r\n';
+peer.answer(sdp);
+assert.equal(pc.remoteDescription.sdp, sdp.replace('192.0.2.1 8443', 'localhost 8080').replace('a=candidate:2 1 udp 456 2001:db8::1 8443 typ host\r\n', ''));
+await settle();
+failures = [];
 peer.answer('bad');
 assert.equal(pc.remoteDescription.sdp, 'bad');
 await settle();

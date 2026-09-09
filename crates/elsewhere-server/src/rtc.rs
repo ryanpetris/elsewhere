@@ -5,7 +5,8 @@
 //! host candidates), DTLS and SCTP without I/O of its own; one hub task drives every session's peer
 //! connection over one UDP socket per local address (a received packet's destination must be one of the
 //! candidates, so a socket per address knows it). Signalling goes over the session's WebSocket (`RTC`
-//! messages: the browser's offer, our answer); the frame path in `ws.rs` hands frames to the hub while
+//! messages: the browser's offer, our answer). The UI applies its endpoint to the answer's candidates;
+//! the frame path in `ws.rs` hands frames to the hub while
 //! the session's channel is open and to the socket otherwise. A frame goes as numbered fragments the page
 //! reassembles, admitted one fragment at a time at a rate derived from the stream target. The SCTP
 //! send buffer (128 kB, freed by the browser's acknowledgements) must also have room. A refused write
@@ -38,10 +39,8 @@ const FRAGMENT: usize = 16 * 1024;
 /// What the CLI decided: the UDP port, the address to advertise, and the ICE servers the browser should use.
 pub struct Config {
     pub port: u16,
-    /// Explicit UDP port to advertise with the browser hostname; otherwise use its page port.
-    pub page_port: Option<u16>,
     /// The one address browsers reach us at, when it isn't ours (a Docker bridge maps the host's port to
-    /// the container); without it the answer uses the viewer's page hostname and the selected port.
+    /// the container); the viewer uses this address when applying the ICE answer.
     pub addr: Option<IpAddr>,
     /// STUN and TURN servers as the page's `RTCPeerConnection` wants them (`urls`, `username`, `credential`).
     pub ice_servers: Vec<serde_json::Value>,
@@ -50,7 +49,7 @@ pub struct Config {
 enum Msg {
     /// A session's browser offered (`g` numbers its attempt; the answer carries it back through `reply`,
     /// the session's own event queue).
-    Offer { session: u64, sdp: String, g: u64, reply: mpsc::Sender<Bytes>, endpoint: Option<Vec<SocketAddr>> },
+    Offer { session: u64, sdp: String, g: u64, reply: mpsc::Sender<Bytes> },
     /// A frame for a session's channel.
     Frame { session: u64, config: Bytes, data: Bytes, bitrate_kbps: u32 },
     /// The session ended, or went back to its socket.
@@ -64,9 +63,7 @@ pub struct Hub {
     /// Channel claims and pressure. Closed claims remain until acknowledged, so even a pending
     /// browser attempt that missed its final frame can request a refresh.
     open: Arc<Open>,
-    pub ice_servers: Arc<Vec<serde_json::Value>>,
-    page_endpoint: bool,
-    page_port: Option<u16>,
+    pub config: serde_json::Value,
 }
 
 impl Hub {
@@ -92,7 +89,9 @@ impl Hub {
         }
         anyhow::ensure!(!sockets.is_empty(), "no local address to listen on");
         let (tx, rx) = mpsc::channel(256);
-        let hub = Hub { tx, open: Default::default(), ice_servers: Arc::new(cfg.ice_servers), page_endpoint: cfg.addr.is_none(), page_port: cfg.page_port };
+        let mut config = serde_json::json!({ "ice_servers": cfg.ice_servers, "port": cfg.port });
+        if let Some(addr) = cfg.addr { config["host"] = serde_json::json!(addr); }
+        let hub = Hub { tx, open: Default::default(), config };
         tokio::spawn(run(sockets, rx, hub.open.clone()));
         tracing::info!(port = cfg.port, "WebRTC: data channels on UDP");
         Ok(hub)
@@ -105,18 +104,8 @@ impl Hub {
 
     /// Signalling waits for room in the queue: an offer without an answer, or a close that never arrives,
     /// would be a stuck viewer or a lingering peer.
-    pub async fn offer(&self, session: u64, sdp: String, g: u64, reply: mpsc::Sender<Bytes>, endpoint: Option<&serde_json::Value>) {
-        let endpoint = if self.page_endpoint {
-            match resolve_endpoint(endpoint, self.page_port).await {
-                Ok(endpoint) => Some(endpoint),
-                Err(e) => {
-                    tracing::warn!(session, "WebRTC endpoint refused: {e:#}");
-                    let _ = reply.try_send(protocol::rtc(&serde_json::json!({ "close": true, "g": g, "reason": "Page endpoint resolution failed" })));
-                    return;
-                }
-            }
-        } else { None };
-        let _ = self.tx.send(Msg::Offer { session, sdp, g, reply, endpoint }).await;
+    pub async fn offer(&self, session: u64, sdp: String, g: u64, reply: mpsc::Sender<Bytes>) {
+        let _ = self.tx.send(Msg::Offer { session, sdp, g, reply }).await;
     }
 
     /// A frame for the session's channel; one that doesn't fit the hub's mailbox is dropped (the page asks
@@ -138,41 +127,6 @@ impl Hub {
     pub async fn close(&self, session: u64) {
         let _ = self.tx.send(Msg::Close { session, g: None, reply: None }).await;
     }
-}
-
-/// Resolve outside the shared hub so a slow DNS lookup cannot stall other viewers.
-async fn resolve_endpoint(value: Option<&serde_json::Value>, port: Option<u16>) -> Result<Vec<SocketAddr>> {
-    let value = value.context("page endpoint is required")?;
-    #[derive(serde::Deserialize)]
-    struct Endpoint { host: String, port: u16 }
-    let endpoint: Endpoint = serde_json::from_value(value.clone())?;
-    anyhow::ensure!(!endpoint.host.is_empty() && endpoint.host.len() <= 253 && endpoint.port != 0, "invalid page endpoint");
-    let mut addrs: Vec<_> = tokio::time::timeout(Duration::from_secs(2), tokio::net::lookup_host((endpoint.host.as_str(), port.unwrap_or(endpoint.port))))
-        .await.context("page endpoint DNS timeout")??.collect();
-    addrs.sort_unstable();
-    addrs.dedup();
-    anyhow::ensure!(!addrs.is_empty(), "page endpoint has no addresses");
-    for addr in &addrs { Candidate::host(*addr, "udp").context("invalid page endpoint address")?; }
-    Ok(addrs)
-}
-
-/// Only the wire SDP uses external candidates. ICE receives packets on the actual local sockets.
-fn advertise_endpoint(sdp: &str, addrs: &[SocketAddr]) -> Result<String> {
-    anyhow::ensure!(sdp.lines().any(|line| line.starts_with("a=candidate:")), "answer has no candidate line");
-    let candidates = addrs.iter().map(|addr| Candidate::host(*addr, "udp")
-        .map(|c| format!("a={}\r\n", c.to_sdp_string()))).collect::<Result<Vec<_>, _>>()?.concat();
-    let mut out = String::new();
-    let mut inserted = false;
-    for line in sdp.lines() {
-        if line.starts_with("m=") { inserted = false; }
-        if line.starts_with("a=candidate:") {
-            if !inserted { out.push_str(&candidates); inserted = true; }
-        } else {
-            out.push_str(line);
-            out.push_str("\r\n");
-        }
-    }
-    Ok(out)
 }
 
 /// Include loopback for viewers opened locally. Link-local IPv6 needs an interface scope.
@@ -334,10 +288,10 @@ async fn run(sockets: HashMap<SocketAddr, Arc<UdpSocket>>, mut rx: mpsc::Receive
                 }
             }
             msg = rx.recv() => match msg {
-                Some(Msg::Offer { session, sdp, g, reply, endpoint }) => {
+                Some(Msg::Offer { session, sdp, g, reply }) => {
                     peers.remove(&session);
                     open.lock().unwrap().remove(&session);
-                    match answer(&sdp, g, &addrs, reply.clone(), endpoint.as_deref()) {
+                    match answer(&sdp, g, &addrs, reply.clone()) {
                         Ok(peer) => {
                             peers.insert(session, peer); // a second offer replaces the first connection
                         }
@@ -370,9 +324,8 @@ async fn run(sockets: HashMap<SocketAddr, Arc<UdpSocket>>, mut rx: mpsc::Receive
     }
 }
 
-/// ICE lite uses local candidates internally. The wire answer advertises the page endpoint unless
-/// --rtc-addr supplied the advertised address. The answer goes out through `reply`.
-fn answer(sdp: &str, g: u64, addrs: &[SocketAddr], reply: mpsc::Sender<Bytes>, endpoint: Option<&[SocketAddr]>) -> Result<Peer> {
+/// ICE lite uses local candidates. The viewer applies its endpoint to the answer sent through `reply`.
+fn answer(sdp: &str, g: u64, addrs: &[SocketAddr], reply: mpsc::Sender<Bytes>) -> Result<Peer> {
     let offer = SdpOffer::from_sdp_string(sdp).context("offer")?;
     let mut rtc = Rtc::builder().set_ice_lite(true).set_stats_interval(None).build(Instant::now());
     for addr in addrs {
@@ -381,10 +334,6 @@ fn answer(sdp: &str, g: u64, addrs: &[SocketAddr], reply: mpsc::Sender<Bytes>, e
         }
     }
     let answer = rtc.sdp_api().accept_offer(offer).context("accept offer")?.to_sdp_string();
-    let answer = match endpoint {
-        Some(addrs) => advertise_endpoint(&answer, addrs)?,
-        None => answer,
-    };
     let _ = reply.try_send(protocol::rtc(&serde_json::json!({ "answer": answer, "g": g })));
     Ok(Peer { rtc, channel: None, frame_id: 0, queue: VecDeque::new(), config: None, sent: 0, front_since: Instant::now(), progress: SendProgress::default(), pacer: Pacer::new(Instant::now()), reply, g, close_reason: "Peer connection closed" })
 }
@@ -503,7 +452,7 @@ fn flush(peer: &mut Peer, open: &Open, session: u64) -> Option<Instant> {
 }
 
 #[cfg(test)]
-mod endpoint_tests {
+mod tests {
     use super::*;
 
     #[tokio::test]
@@ -542,7 +491,7 @@ mod endpoint_tests {
 
         // A full hub mailbox can lose the first key; the next admitted delta still announces its configuration.
         let (tx, mut rx) = mpsc::channel(1);
-        let hub = Hub { tx, open: Default::default(), ice_servers: Default::default(), page_endpoint: true, page_port: None };
+        let hub = Hub { tx, open: Default::default(), config: serde_json::json!({}) };
         hub.open.lock().unwrap().insert(1, Claim { g: 1, active: true, dropped: 0, blocked: false });
         assert!(hub.tx.try_send(Msg::Close { session: 1, g: None, reply: None }).is_ok());
         hub.frame(1, config.clone(), key.clone(), 8000);
@@ -630,49 +579,4 @@ mod endpoint_tests {
         assert_eq!(progress.since, Some(now + Duration::from_secs(100)));
     }
 
-    #[tokio::test]
-    async fn endpoint_failure_does_not_wait_on_full_events_and_override_skips_dns() {
-        let (tx, mut rx) = mpsc::channel(1);
-        let (reply, _events) = mpsc::channel(1);
-        reply.try_send(protocol::rtc(&serde_json::json!({}))).unwrap();
-        let mut hub = Hub { tx, open: Default::default(), ice_servers: Default::default(), page_endpoint: true, page_port: None };
-        let invalid = serde_json::json!({"host": "", "port": 0});
-        tokio::time::timeout(Duration::from_millis(100), hub.offer(1, String::new(), 1, reply.clone(), Some(&invalid))).await.unwrap();
-        assert!(rx.try_recv().is_err());
-        tokio::time::timeout(Duration::from_millis(100), hub.offer(1, String::new(), 1, reply.clone(), None)).await.unwrap();
-        assert!(rx.try_recv().is_err());
-        hub.page_endpoint = false;
-        hub.offer(1, String::new(), 1, reply.clone(), Some(&invalid)).await;
-        assert!(matches!(rx.recv().await, Some(Msg::Offer { endpoint: None, .. })));
-        hub.offer(1, String::new(), 1, reply, None).await;
-        assert!(matches!(rx.recv().await, Some(Msg::Offer { endpoint: None, .. })));
-    }
-
-    #[tokio::test]
-    async fn endpoint_resolution_and_wire_candidates() {
-        assert!(resolve_endpoint(None, None).await.is_err());
-        for value in [serde_json::json!({"host": "", "port": 443}), serde_json::json!({"host": "localhost", "port": 0}), serde_json::json!({"host": "localhost", "port": 65536})] {
-            assert!(resolve_endpoint(Some(&value), None).await.is_err());
-        }
-        assert!(resolve_endpoint(Some(&serde_json::json!({"host": "0.0.0.0", "port": 443})), None).await.is_err());
-        let mut endpoints = vec![vec!["192.0.2.1:443".parse().unwrap(), "[2001:db8::1]:443".parse().unwrap()]];
-        for host in ["127.0.0.1", "::1", "localhost"] {
-            let value = serde_json::json!({"host": host, "port": 9443});
-            let addrs = resolve_endpoint(Some(&value), None).await.unwrap();
-            assert!(addrs.iter().all(|addr| addr.port() == 9443 && addr.ip().is_loopback()));
-            endpoints.push(addrs);
-            let addrs = resolve_endpoint(Some(&value), Some(19501)).await.unwrap();
-            assert!(addrs.iter().all(|addr| addr.port() == 19501 && addr.ip().is_loopback()));
-            endpoints.push(addrs);
-        }
-        assert!(advertise_endpoint("v=0\r\n", &endpoints[0]).is_err());
-        for addrs in endpoints {
-            let sdp = "v=0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=ice-ufrag:test\r\na=candidate:1 1 udp 1 192.0.2.1 8443 typ host\r\na=candidate:2 1 udp 1 192.0.2.2 8443 typ host\r\na=end-of-candidates\r\n";
-            let wire = advertise_endpoint(sdp, &addrs).unwrap();
-            assert!(wire.contains("a=ice-ufrag:test\r\n"));
-            assert!(wire.ends_with("a=end-of-candidates\r\n"));
-            let candidates: Vec<_> = wire.lines().filter_map(|l| l.strip_prefix("a=candidate:")).map(|c| Candidate::from_sdp_string(&format!("candidate:{c}")).unwrap().addr()).collect();
-            assert_eq!(candidates, addrs);
-        }
-    }
 }

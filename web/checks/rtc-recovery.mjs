@@ -79,7 +79,7 @@ try {
             const v = JSON.parse(new TextDecoder().decode(bytes.subarray(1)));
             if (v.offer) {
               rtcTest.offers.push(v.g);
-              if (rtcTest.rejectOffers > 0) { rtcTest.rejectOffers--; data = new Uint8Array([0x95, ...new TextEncoder().encode(JSON.stringify({ offer: 'invalid test SDP', g: v.g, endpoint: v.endpoint }))]); }
+              if (rtcTest.rejectOffers > 0) { rtcTest.rejectOffers--; data = new Uint8Array([0x95, ...new TextEncoder().encode(JSON.stringify({ offer: 'invalid test SDP', g: v.g }))]); }
             }
           }
           super.send(data);
@@ -145,7 +145,7 @@ try {
       send({close: true});
       for (const invalid of [null, '1', -1, 1.5, true]) send({close: true, g: invalid});
       send({close: true, g: g - 1});
-      send({offer: 'invalid SDP', endpoint: {host: 'localhost', port: 8089}});
+      send({offer: 'invalid SDP'});
     }, accepted);
     const frames = await page.evaluate(() => rtcTest.rtcFrames);
     await keyframe(page);

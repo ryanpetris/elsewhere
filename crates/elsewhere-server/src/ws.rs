@@ -207,7 +207,7 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
         let _ = send(&mut socket, &key, msg).await;
     }
     if let Some(hub) = &app.rtc {
-        let _ = send(&mut socket, &key, protocol::rtc(&serde_json::json!({ "ice_servers": *hub.ice_servers }))).await; // the page may offer now
+        let _ = send(&mut socket, &key, protocol::rtc(&hub.config)).await; // the page may offer now
     }
     let _ = key.with(&[P::DesktopView], || { let _ = app.commands.send(Command::ViewerStream { key: id, sink: Some(sink) }); Ok(()) });
 
@@ -305,7 +305,7 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
                             if !send(&mut socket, &key, state).await { break None }
                         }
                         Some(ClientMsg::Rtc { g, message: v }) => match (&app.rtc, v.get("offer").and_then(|o| o.as_str())) {
-                            (Some(hub), Some(sdp)) => tokio::select! { biased; _ = key.ended() => {}, _ = hub.offer(id, sdp.to_string(), g, etx.clone(), v.get("endpoint")) => {} },
+                            (Some(hub), Some(sdp)) => tokio::select! { biased; _ = key.ended() => {}, _ = hub.offer(id, sdp.to_string(), g, etx.clone()) => {} },
                             (Some(hub), None) if v.get("close").and_then(|b| b.as_bool()) == Some(true) => {
                                 if hub.close_attempt(id, g).await {
                                     if !send(&mut socket, &key, protocol::rtc(&serde_json::json!({ "keyframe": true, "g": g }))).await { break None; }
@@ -410,7 +410,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
     }
     let rtc_key = stream | 1 << 63; // the hub's sessions: desktop ids below, window streams above
     if let Some(hub) = &app.rtc {
-        let _ = send(&mut socket, &key, protocol::rtc(&serde_json::json!({ "ice_servers": *hub.ice_servers }))).await;
+        let _ = send(&mut socket, &key, protocol::rtc(&hub.config)).await;
     }
     let _ = key.with(&[P::DesktopView], || { let _ = app.commands.send(Command::WindowStream { key: stream, window: id, sink: Some(sink) }); Ok(()) });
 
@@ -513,7 +513,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                         }
                         Some(ClientMsg::Rtc { g, message: v }) => {
                             match (&app.rtc, v.get("offer").and_then(|o| o.as_str())) {
-                                (Some(hub), Some(sdp)) => tokio::select! { biased; _ = key.ended() => {}, _ = hub.offer(rtc_key, sdp.to_string(), g, etx.clone(), v.get("endpoint")) => {} },
+                                (Some(hub), Some(sdp)) => tokio::select! { biased; _ = key.ended() => {}, _ = hub.offer(rtc_key, sdp.to_string(), g, etx.clone()) => {} },
                                 (Some(hub), None) if v.get("close").and_then(|b| b.as_bool()) == Some(true) => {
                                     if hub.close_attempt(rtc_key, g).await {
                                         if !send(&mut socket, &key, protocol::rtc(&serde_json::json!({ "keyframe": true, "g": g }))).await { break None; }

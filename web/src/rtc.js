@@ -1,6 +1,6 @@
 // Video over an ordered, reliable WebRTC data channel. Lost packets hold later frames until
-// retransmission. The page offers one channel; the ICE-lite server answers with candidates for the
-// page endpoint, unless --rtc-addr overrides it. Numbered fragments carry up to 16 KiB of frame data,
+// retransmission. The page offers one channel and applies the configured endpoint to the ICE answer.
+// The browser resolves its hostname. Numbered fragments carry up to 16 KiB of frame data,
 // reassembled here and handed to the same message handler as the socket's.
 export const RTC_TIMING = { gather: 1500, gatherWithServers: 5000, attempt: 10000, retry: 1000, retryMax: 30000, healthy: 10000 };
 
@@ -39,14 +39,24 @@ export function openRtc({ iceServers, endpoint, g, signal, onMessage, onOpen, on
   };
   // the offer goes out with the candidates in it, once gathering is done (host ones come at once; a STUN
   // or TURN one takes a round trip or an allocation, so the wait is longer with servers configured): the
-  // server answers with the reachable endpoint and does no trickle; `g` comes back with the answer
-  const offer = () => { if (!offered && !closed && pc.localDescription) { offered = true; clearTimeout(gatherTimer); signal({ offer: pc.localDescription.sdp, g, endpoint }); } };
+  // server does no trickle; `g` comes back with the answer
+  const offer = () => { if (!offered && !closed && pc.localDescription) { offered = true; clearTimeout(gatherTimer); signal({ offer: pc.localDescription.sdp, g }); } };
   pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') offer(); };
   pc.createOffer().then(o => { if (!closed) return pc.setLocalDescription(o); }).then(() => {
     if (!closed && !offered) gatherTimer = setTimeout(offer, iceServers.length ? RTC_TIMING.gatherWithServers : RTC_TIMING.gather);
   }).catch(() => fail('Offer failed'));
   return {
-    answer: sdp => { if (!closed) pc.setRemoteDescription({ type: 'answer', sdp }).catch(() => fail('Answer rejected')); },
+    answer: sdp => {
+      if (closed) return;
+      let candidate = false;
+      // The video channel has one endpoint, shared by all of the server's local sockets.
+      sdp = sdp.replace(/^(a=candidate:\S+ \d+ \S+ \d+) \S+ \d+([^\r\n]*)(\r?\n|$)/gm, (_, prefix, rest, end) => {
+        if (candidate) return '';
+        candidate = true;
+        return `${prefix} ${endpoint.host} ${endpoint.port}${rest}${end}`;
+      });
+      pc.setRemoteDescription({ type: 'answer', sdp }).catch(() => fail('Answer rejected'));
+    },
     close: () => {
       closed = true;
       clearTimeout(gatherTimer);
@@ -68,7 +78,7 @@ export function openRtc({ iceServers, endpoint, g, signal, onMessage, onOpen, on
   };
 }
 
-// The page endpoint includes Docker's external port. The server resolves hostnames for ICE.
-export function pageEndpoint({ hostname, port, protocol }) {
-  return { host: hostname.replace(/^\[|\]$/g, ''), port: Number(port || (protocol === 'https:' ? 443 : 80)) };
+// The server supplies the UDP port and an optional address override.
+export function rtcEndpoint({ hostname }, { host, port }) {
+  return { host: host || hostname.replace(/^\[|\]$/g, ''), port };
 }

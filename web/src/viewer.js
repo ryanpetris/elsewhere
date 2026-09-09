@@ -9,7 +9,7 @@ import { TOKEN, WINDOW, PIP, api, elementsOf, snapshot, control, uploadFile, cli
 import { createStore } from './store.js';
 import { startMic, stopMic } from './mic.js';
 import { startCam, stopCam } from './cam.js';
-import { openRtc, pageEndpoint, RTC_TIMING } from './rtc.js';
+import { openRtc, rtcEndpoint, RTC_TIMING } from './rtc.js';
 import { CONFIG, VIDEO, CURSOR, POINTER_LOCK, AUDIO, WINDOWS, CLIPBOARD, ROLE, NOTICE, CLIPBOARD_DATA, NOTIFICATIONS, STREAM_STATE, RTC, ROLES, CODEC_FAMILIES, EFFORTS, PRESETS, PRESET_IDS, AUTH, HELLO, RESIZE, MOTION_ABS, MOTION_REL, BUTTON, AXIS, KEY, REQUEST_KEYFRAME, BLUR, POINTER_LOCK_LOST, POINTER_LOCK_GAINED, CONTROL, SET_CLIPBOARD, TAKE_CONTROL, NOTIFY, STREAM, DRAG, INPUT, TOUCH, MIC, CAM, RTC_CLIENT, REPORT, BTN, MIXER_STATE, MIXER_LEVELS, MIXER_ERROR, MIXER_CLIENT, SESSION, HANDOFF, FILE_RESULT } from './protocol.js';
 
 const AUDIO_LEAD = 0.06;
@@ -43,7 +43,7 @@ export function createViewer() {
     mic: false, // the local microphone is going to the desktop
     micAvailable: false, // the desktop takes one (audio is on there)
     transport: pref.getStr('transport') === 'webrtc' ? 'webrtc' : 'websocket', // this viewer's pick
-    rtcAvailable: false, // the server does WebRTC (it sent ICE servers)
+    rtcAvailable: false, // the server sent its RTC configuration
     videoVia: 'websocket', // where the video comes from now
     rtcRecovery: { state: 'unavailable', reason: 'Waiting for desktop connection', retries: 0, nextAt: 0 },
     cam: false, // the local webcam is going to the desktop
@@ -204,7 +204,7 @@ export function createViewer() {
       store.set({ mixer: { available: false, generation: '', nodes: [], routing: false, error: 'Desktop disconnected.' }, mixerLevels: {}, mixerError: '' });
       micStop(); camStop(); // nobody hears or sees them now, and the role is whatever the next connection says
       closeRtc(false);
-      iceServers = [];
+      rtcConfig = null;
       recovery('unavailable', 'WebSocket disconnected');
       uploadAbort?.abort();
       store.set({ permissions: [], sessionId: null, role: null, playback: null, audioAvailable: false, micAvailable: false, camAvailable: false, rtcAvailable: false, videoVia: 'websocket' });
@@ -434,7 +434,7 @@ export function createViewer() {
         break;
       case RTC: {
         const v = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 1)));
-        if (v.ice_servers) { iceServers = v.ice_servers; store.set({ rtcAvailable: true }); maybeRtc(); }
+        if (v.ice_servers) { rtcConfig = v; store.set({ rtcAvailable: true }); maybeRtc(); }
         if (v.keyframe && v.g === rtcGen) awaitingKey = true;
         if (v.answer && v.g === rtcGen) rtc?.answer(v.answer); // an answer to an attempt since given up is no use
         if (v.close && rtc && v.g === rtcGen) failRtc(v.reason || 'Server queue stalled');
@@ -689,7 +689,7 @@ export function createViewer() {
   // --- WebRTC transport ------------------------------------------------------------------------
   // Socket video continues between channel attempts. Failures preserve the selected transport;
   // only a sustained healthy channel resets the retry backoff. Each attempt belongs to one socket.
-  let rtc = null, iceServers = [], rtcTimer, rtcGen = 0;
+  let rtc = null, rtcConfig = null, rtcTimer, rtcGen = 0;
   let rtcAttempt = null, retryTimer, healthyTimer, retryFailures = 0, rtcRetries = 0;
   function recovery(status, reason = '', nextAt = 0) {
     store.set({ rtcRecovery: { state: status, reason, retries: rtcRetries, nextAt } });
@@ -717,7 +717,7 @@ export function createViewer() {
     rtcTimer = setTimeout(() => { if (current()) failRtc('Connection attempt timed out'); }, RTC_TIMING.attempt);
     try {
       rtc = openRtc({
-        iceServers, endpoint: pageEndpoint(location), g: attempt.g,
+        iceServers: rtcConfig.ice_servers, endpoint: rtcEndpoint(location, rtcConfig), g: attempt.g,
         signal: o => { if (current()) sendText(RTC_CLIENT, JSON.stringify(o)); },
         onMessage: (buf, arrival) => { if (current()) onMessage(buf, 'webrtc', arrival); },
         onOpen: () => {

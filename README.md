@@ -213,7 +213,7 @@ HTTPS hostname, TLS termination with `--no-tls`, and separate UDP ports for opti
 
 The video travels on the WebSocket. A viewer can move it to a WebRTC data channel (UDP, ordered and
 reliable) with the Transport select in the status bar. The page offers and the server answers with
-candidates for the page's hostname and port, with `--rtc-port` overriding the port and `--rtc-addr` overriding the address. The frames move to the channel once it opens; input, audio, events and the signalling
+candidates that the UI addresses using the page's hostname and the server's UDP port, with `--rtc-addr` overriding the hostname. The frames move to the channel once it opens; input, audio, events and the signalling
 stay on the WebSocket either way, so the socket is needed whatever carries the video.
 
 The server paces data-channel fragments according to each viewer's stream target to limit bursts.
@@ -233,11 +233,11 @@ or browser without WebRTC support stays on the socket without retrying, preservi
 Quality selection and its adaptive ceiling are independent of transport recovery.
 
 The server listens on UDP on the listen port's number. `--rtc-port` sets both the local and advertised UDP port while keeping the browser's hostname.
-By default, the browser sends WebRTC traffic to the page's hostname and port. The backend resolves
-the hostname to IP addresses for ICE, so the hostname must resolve to the reachable address from
-inside the container too. Use `--rtc-addr` if the browser and backend see different DNS results.
-An omitted page port means 443 for HTTPS or 80 for HTTP. Docker needs both TCP and UDP published, for example `-p 8443:8443 -p 8443:8443/udp`. If the page uses a different
-external port, publish UDP on that same external port too.
+The server supplies its UDP port and optional `--rtc-addr` to the UI. The UI applies that endpoint
+to the ICE answer, using the page's hostname when no address is configured. The browser resolves the hostname. Use a fully qualified hostname: browser ICE resolution does not use DNS search suffixes.
+For dual-stack hostnames, make UDP reachable over both IPv4 and IPv6.
+Browsers that cannot use hostname candidates recover through the existing WebSocket path.
+Docker needs both TCP and UDP published, for example `-p 8443:8443 -p 8443:8443/udp`. Forward the UDP port unchanged; the page can use a different TCP port.
 
 When UDP uses a different port from the page, such as behind an HTTPS-only proxy, set
 `--rtc-port` and forward that port unchanged. Set `--rtc-addr <reachable IP>` only to override the hostname. This advertises that IP with `--rtc-port`,

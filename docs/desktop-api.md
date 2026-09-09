@@ -434,8 +434,9 @@ lease, so the slot is free when the last encoder is done) and encodes nothing wh
 Frames go from each session's own channel to its socket in order, with a ten-second send deadline, the
 way window streams do; audio and events are broadcast with `try_send`. A session's video goes to its
 WebRTC data channel instead while one is open (`rtc.rs`: the page's offer arrives as an `Rtc` message,
-the page includes its hostname and port in the offer, which the server resolves for the answer
-unless `--rtc-addr` sets the advertised endpoint. The hub answers as an ICE-lite str0m peer. The hub drives every
+the server supplies the UDP port and optional address override. The UI keeps the first answer candidate,
+sets its address to the configured address or page hostname and its port to the supplied UDP port,
+and drops the other candidates. The browser resolves the hostname. The hub answers as an ICE-lite str0m peer. The hub drives every
 session's peer connection over one UDP socket per local address, and paces frame-data fragments of
 up to 16 KiB plus a nine-byte header using each viewer's stream target; `Hub::pressure` reports active channels and
 their drops or native send-buffer blockage; window sessions use the same

@@ -123,9 +123,9 @@ Bob:   --rtc-port 50002
 
 Also add `-p 50001:50001/udp` to Alice's Docker options and `-p 50002:50002/udp` to Bob's, before the
 image name. Open or forward those UDP ports on the firewall or router without changing port numbers.
-Each instance advertises the browser's hostname with its explicit RTC port. The hostname must resolve
-to the reachable address from inside the container. Add `--rtc-addr <reachable-ip>` only when the
-UDP address differs from the page hostname or the container sees different DNS results.
+Each instance supplies its RTC port to the UI, which uses the page's hostname in the ICE answer.
+The browser resolves the hostname, which should be fully qualified. Add `--rtc-addr <reachable-ip>` only when the UDP address
+differs from the page hostname.
 
 URL prefixes do not route UDP traffic. nginx's HTTP proxy is not in this video path.
 
