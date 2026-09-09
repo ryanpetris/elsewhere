@@ -27,8 +27,12 @@ impl CursorTheme {
         Self { theme: xcursor::CursorTheme::load(&name), size, cache: HashMap::new() }
     }
 
+    fn image(&mut self, icon: CursorIcon) -> CursorImage {
+        self.themed_image(icon).or_else(|| self.themed_image(CursorIcon::Default)).unwrap_or_else(fallback_arrow)
+    }
+
     // ponytail: always the 1x image; a HiDPI browser gets a slightly soft cursor. Send per-dpr sizes if it bothers anyone.
-    fn image(&mut self, icon: CursorIcon) -> Option<CursorImage> {
+    fn themed_image(&mut self, icon: CursorIcon) -> Option<CursorImage> {
         let (theme, size) = (&self.theme, self.size);
         self.cache
             .entry(icon)
@@ -48,6 +52,25 @@ impl CursorTheme {
                 logical_h: img.height,
                 rgba: unpremultiply(img.pixels_rgba.chunks_exact(4).map(|p| (p[0], p[1], p[2], p[3]))),
             })
+    }
+}
+
+/// A black arrow with a white outline, available even without an installed cursor theme.
+fn fallback_arrow() -> CursorImage {
+    let rows = [
+        "W...........", "WW..........", "WBW.........", "WBBW........",
+        "WBBBW.......", "WBBBBW......", "WBBBBBW.....", "WBBBBBBW....",
+        "WBBBBBBBW...", "WBBBBBBBBW..", "WBBBBBBBBBW.", "WBBBBWWWWWW.",
+        "WBBWBW......", "WBW.WBW.....", "WW..WBW.....", ".....WBW....",
+        ".....WBW....", "......W.....",
+    ];
+    CursorImage {
+        width: 12, height: 18, hot_x: 0, hot_y: 0, logical_w: 12, logical_h: 18,
+        rgba: rows.iter().flat_map(|row| row.bytes()).flat_map(|pixel| match pixel {
+            b'W' => [255, 255, 255, 255],
+            b'B' => [0, 0, 0, 255],
+            _ => [0, 0, 0, 0],
+        }).collect(),
     }
 }
 
@@ -110,9 +133,30 @@ impl State {
     pub fn cursor_image(&mut self) -> Option<CursorImage> {
         match &self.cursor_status {
             CursorImageStatus::Hidden => None,
-            // a theme may lack some of the shapes cursor-shape-v1 lets clients name: show an arrow, not nothing
-            CursorImageStatus::Named(icon) => self.cursor.image(*icon).or_else(|| self.cursor.image(CursorIcon::Default)),
+            CursorImageStatus::Named(icon) => Some(self.cursor.image(*icon)),
             CursorImageStatus::Surface(surface) => surface_cursor(surface),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_theme_images_use_visible_arrow() {
+        let mut theme = CursorTheme::load();
+        // Cached misses exercise the same path regardless of the machine's installed themes.
+        theme.cache.insert(CursorIcon::Default, None);
+        theme.cache.insert(CursorIcon::Text, None);
+        for icon in [CursorIcon::Default, CursorIcon::Text] {
+            let image = theme.image(icon);
+            assert_eq!(image.rgba.len(), (image.width * image.height * 4) as usize);
+            assert!(image.rgba.chunks_exact(4).any(|p| p == [0, 0, 0, 255]));
+            assert!(image.rgba.chunks_exact(4).any(|p| p == [255, 255, 255, 255]));
+            assert!(image.rgba.chunks_exact(4).any(|p| p[3] == 0));
+            assert!(image.hot_x >= 0 && image.hot_x < image.width as i32);
+            assert!(image.hot_y >= 0 && image.hot_y < image.height as i32);
         }
     }
 }
