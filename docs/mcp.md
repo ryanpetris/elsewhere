@@ -65,6 +65,11 @@ the embedded viewer needs) and cannot silently drift.
 
 ## Verification
 
+- In the Docker rig, `cargo test -p elsewhere-server mcp::sessions` checks repeated disconnects,
+  cancellation between rmcp initialization and owner registration, handler destruction, idle expiry,
+  active and resumed streams, cached notifications, ownership, deletion and revocation. Tokio's test
+  clock advances the idle deadline. `python3 scripts/check-token.py` also exercises MCP disconnects
+  and revocation of an open stream against the running compositor.
 - A scripted MCP handshake with curl against a test compositor: `initialize` (server info,
   capabilities, instructions), `tools/list` matching the generated tool reference, `resources/list`
   and `resources/read`, and `tools/call` for `windows`, `elements`, `click`, `type` (text appeared in the editor) and `snapshot`

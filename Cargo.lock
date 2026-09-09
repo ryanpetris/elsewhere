@@ -977,6 +977,7 @@ dependencies = [
  "str0m",
  "tokio",
  "tokio-util",
+ "tower",
  "tracing",
  "uuid",
  "zbus",

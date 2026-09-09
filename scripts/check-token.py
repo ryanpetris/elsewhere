@@ -4,6 +4,7 @@ import concurrent.futures
 from contextlib import closing
 import shutil
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path
@@ -49,6 +50,28 @@ with tempfile.TemporaryDirectory(prefix='elsewhere-tokens-') as directory:
         assert result['metadata']['permissions'] == sorted(set(permissions))
         assert str(uuid.UUID(result['metadata']['id'], version=4)) == result['metadata']['id']
         return result
+    def mcp(token, message=None, session=None, method='POST', event=None):
+        connection = http.client.HTTPConnection('127.0.0.1', 18444, timeout=5)
+        headers = {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json',
+                   'Accept': 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-03-26'}
+        if session:
+            headers['Mcp-Session-Id'] = session
+        if event:
+            headers['Last-Event-ID'] = event
+        connection.request(method, '/mcp', json.dumps(message) if message else None, headers)
+        return connection, connection.getresponse()
+    def initialize_mcp(token):
+        connection, response = mcp(token, {'jsonrpc': '2.0', 'id': 0, 'method': 'initialize', 'params': {
+            'protocolVersion': '2025-03-26', 'capabilities': {}, 'clientInfo': {'name': 'fixture', 'version': '1'}}})
+        assert response.status == 200, response.read()
+        session = response.getheader('Mcp-Session-Id')
+        response.read()
+        connection.close()
+        connection, response = mcp(token, {'jsonrpc': '2.0', 'method': 'notifications/initialized'}, session)
+        assert response.status == 202, response.read()
+        response.read()
+        connection.close()
+        return session
     def start(log):
         server = subprocess.Popen([binary, '--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codec', 'vp8',
             '--screen-size', '320x240', '--listen', '127.0.0.1:18444'], env=env, stdout=log, stderr=subprocess.STDOUT)
@@ -125,7 +148,24 @@ with tempfile.TemporaryDirectory(prefix='elsewhere-tokens-') as directory:
             assert request('/api/tokens/' + self_revoking['metadata']['id'], self_revoking['token'], 'DELETE')[0] == 204
             assert request('/api/me', self_revoking['token'])[0] == 401
             victim = create(['desktop.view'])
+            # Each handshake disconnects without DELETE, as an abandoned client would.
+            for _ in range(32):
+                initialize_mcp(victim['token'])
+            session = initialize_mcp(victim['token'])
+            for method in ['GET', 'DELETE']:
+                connection, response = mcp(empty['token'], session=session, method=method)
+                assert response.status == 403
+                response.read()
+                connection.close()
+            stream_connection, stream = mcp(victim['token'], session=session, method='GET')
+            assert stream.status == 200
             assert request('/api/tokens/' + victim['metadata']['id'], admin, 'DELETE')[0] == 204
+            assert b'"jsonrpc"' not in stream.read()
+            stream_connection.close()
+            connection, response = mcp(admin, session=session, method='GET', event='0')
+            assert response.status == 403
+            response.read()
+            connection.close()
             assert request('/api/me', victim['token'])[0] == 401
             listing = request('/api/tokens', admin)[1]
             assert 'secret_hash' not in json.dumps(listing) and admin not in json.dumps(listing)
@@ -158,4 +198,4 @@ with tempfile.TemporaryDirectory(prefix='elsewhere-tokens-') as directory:
     assert failed.returncode != 0 and not failed.stdout and failed.stderr
     output = (root / 'server.log').read_text()
     assert 'elsewhere token create --admin' in output and admin not in output
-    print('SQLite CLI/API creation, permission gates, batch ownership, expiry, revocation and restart passed')
+    print('SQLite CLI/API creation, permission gates, batch ownership, MCP disconnects and stream revocation, expiry and restart passed')

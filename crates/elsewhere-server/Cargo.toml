@@ -30,3 +30,7 @@ schemars = "1"
 base64 = "0.22"
 libc = "0.2"
 str0m = { version = "0.23", default-features = false, features = ["aws-lc-rs"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+tokio = { workspace = true, features = ["test-util"] }
