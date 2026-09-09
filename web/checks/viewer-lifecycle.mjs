@@ -1,3 +1,4 @@
+import { createToken } from './token-fixture.mjs';
 // Run in Docker with the release build, Chromium and Wayland development tools.
 // --colors checks decoded charts only; ELSEWHERE_SOFTWARE_ENCODING retains GPU rendering.
 import assert from 'node:assert/strict';
@@ -58,8 +59,8 @@ let browser;
 const samples = [];
 try {
   await wait(async () => { try { return (await fetch(origin)).ok; } catch { return false; } });
-  const token = (await readFile(root + '/config/elsewhere/token', 'utf8')).trim();
-  const viewerToken = (await readFile(root + '/config/elsewhere/viewer-token', 'utf8')).trim();
+  const token = await createToken(root);
+  const viewerToken = await createToken(root, ['desktop.view', 'audio.listen', 'clipboard.read']);
   browser = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--no-sandbox'] });
   const errors = [];
   const connect = async (id, quality = 'high', readOnly = false) => {

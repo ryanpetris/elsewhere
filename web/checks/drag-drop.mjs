@@ -1,3 +1,4 @@
+import { createToken } from './token-fixture.mjs';
 // Docker rig: release binary, GTK 3, Python GObject bindings and Chromium. No GPU required.
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
@@ -49,9 +50,10 @@ const touch = (kind, x, y) => {
 };
 try {
   await wait(async () => {
-    try { token = (await readFile(root + '/config/elsewhere/token', 'utf8')).trim(); return true; }
+    try { return (await fetch(origin)).ok; }
     catch { return false; }
   }, 'server startup');
+  token = await createToken(root);
   socket = new WebSocket(origin.replace('http', 'ws') + '/ws');
   socket.binaryType = 'arraybuffer';
   socket.addEventListener('message', ({data}) => packets.push(Buffer.from(data)));

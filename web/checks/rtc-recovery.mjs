@@ -1,3 +1,4 @@
+import { createToken, revokeToken } from './token-fixture.mjs';
 // Run in the Docker rig with the mounted release binary; optionally pass the Medium ceiling.
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
@@ -16,7 +17,7 @@ const root = await mkdtemp(tmpdir() + '/elsewhere-rtc-recovery-');
 await mkdir(root + '/home'); await mkdir(root + '/runtime', { mode: 0o700 });
 const log = await open(root + '/desktop.log', 'w');
 const origin = 'http://127.0.0.1:8089';
-const desktop = spawn('/src/target/release/elsewhere', ['--no-audio', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--bitrate', String(medium), '--listen', '127.0.0.1:8089', '--socket-name', 'wayland-rtc-check'], {
+const desktop = spawn((process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere'), ['--no-audio', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--bitrate', String(medium), '--listen', '127.0.0.1:8089', '--socket-name', 'wayland-rtc-check'], {
   env: { ...process.env, HOME: root + '/home', XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime', RUST_LOG: 'info,elsewhere_stream::viewer=debug' },
   stdio: ['ignore', log.fd, log.fd],
 });
@@ -26,8 +27,8 @@ const waitFor = async predicate => {
 };
 let browser;
 try {
-  await waitFor(async () => { try { await readFile(root + '/config/elsewhere/token'); return (await fetch(origin)).ok; } catch { return false; } });
-  const token = (await readFile(root + '/config/elsewhere/token', 'utf8')).trim();
+  await waitFor(async () => { try {  return (await fetch(origin)).ok; } catch { return false; } });
+  const token = await createToken(root);
   browser = await chromium.launch({ executablePath: '/usr/bin/chromium', env: { ...process.env, XDG_CONFIG_HOME: root + '/browser-config' }, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
   const errors = [];
   const connect = async id => {
@@ -344,7 +345,7 @@ try {
   await bounded.context().close();
   const revoked = await connect();
   await revoked.evaluate(() => { rtcTest.holdOffers = true; elsewhere.setTransport('webrtc'); });
-  await fetch(origin + '/api/token/rotate', { method: 'POST', headers: { Authorization: 'Bearer ' + token } });
+  await revokeToken(origin, token);
   await revoked.waitForFunction(() => elsewhere.store.get().status === 'unauthorized');
   const revokedCount = await revoked.evaluate(() => rtcTest.peers.length);
   await revoked.waitForTimeout(1500);

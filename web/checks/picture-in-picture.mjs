@@ -1,3 +1,4 @@
+import { createToken, revokeToken } from './token-fixture.mjs';
 // Run in the Docker rig with a headed display at :95 and the release binary.
 // Chromium check also needs wev; Firefox check needs geckodriver listening on port 4445.
 import assert from 'node:assert/strict';
@@ -12,7 +13,7 @@ await mkdir(root + '/runtime', {mode: 0o700});
 const log = await open(root + '/server.log', 'w');
 const origin = 'http://127.0.0.1:8093';
 const server = spawn(
-    '/src/target/release/elsewhere',
+    (process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere'),
     [
       '--no-rtc', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--listen', '127.0.0.1:8093',
       '--socket-name', 'wayland-pip-probe'
@@ -38,12 +39,12 @@ let browser, inputClient, inputLog;
 try {
   await wait(async () => {
     try {
-      return (await fetch(origin)).ok && !!await readFile(root + '/config/elsewhere/token')
+      return (await fetch(origin)).ok
     } catch {
       return false
     }
   });
-  const token = (await readFile(root + '/config/elsewhere/token', 'utf8')).trim();
+  const token = await createToken(root);
   browser = await chromium.launch({
     headless: false,
     executablePath: '/usr/bin/chromium',
@@ -275,7 +276,7 @@ try {
   await frame.getByRole('button', { name: 'Open folder', exact: true }).click();
   await page.waitForFunction(() => window.elsewhere?.store.get().role === 'controller');
   await page.locator('[data-file-name="pip-drop.txt"]').waitFor();
-  const viewerToken = (await readFile(root + '/config/elsewhere/viewer-token', 'utf8')).trim();
+  const viewerToken = await createToken(root, ['desktop.view', 'audio.listen', 'clipboard.read']);
   const readOnly = await context.newPage();
   await readOnly.goto(origin + '/#token=' + viewerToken);
   await readOnly.waitForFunction(() => window.elsewhere?.store.get().role === 'viewer');
@@ -409,12 +410,11 @@ try {
   await page.getByRole('button', {name: 'Picture-in-picture', exact: true}).first().click();
   const authPip = await authNext;
   await authPip.waitForTimeout(300);
-  const rotated = await fetch(
-      origin + '/api/token/rotate', {method: 'POST', headers: {Authorization: 'Bearer ' + token}});
-  assert.equal(rotated.status, 200);
+  const revoked = await revokeToken(origin, token);
+  assert.equal(revoked.status, 204);
   await wait(() => Promise.resolve(authPip.isClosed()));
   await page.waitForFunction(() => elsewhere.store.get().status === 'unauthorized');
-  console.log('token rotation closes PiP');
+  console.log('token revocation closes PiP');
 
 
 

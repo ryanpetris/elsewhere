@@ -1,3 +1,4 @@
+import { createToken } from './token-fixture.mjs';
 // Docker GPU check: a headed Wayland Chromium exposes the actual VAAPI HEVC decoder.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -28,7 +29,7 @@ async function desktop(name, port, software) {
 try {
   const host = await desktop('browser-host', 8848, true);
   const target = await desktop('hevc-source', 8849, false);
-  const token = (await readFile(target + '/config/elsewhere/token', 'utf8')).trim();
+  const token = await createToken(target);
   browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: false,
     args: ['--no-sandbox', '--ozone-platform=wayland'],
     env: { ...process.env, XDG_RUNTIME_DIR: host, WAYLAND_DISPLAY: 'browser-host' } });

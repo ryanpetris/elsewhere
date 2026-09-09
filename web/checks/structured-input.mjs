@@ -1,3 +1,4 @@
+import { createToken } from './token-fixture.mjs';
 // Run in the Docker rig with Chromium, foot and the mounted release binary.
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, open, readFile, rm } from 'node:fs/promises';
@@ -19,9 +20,9 @@ const wait = async (fn, label = 'server readiness') => {
 const contents = path => readFile(path, 'utf8').catch(() => null);
 let browser;
 try {
-  await wait(async () => { try { return (await fetch(origin)).ok && !!await contents(root + '/config/elsewhere/token'); } catch { return false; } });
-  const token = (await contents(root + '/config/elsewhere/token')).trim();
-  const viewerToken = (await contents(root + '/config/elsewhere/viewer-token')).trim();
+  await wait(async () => { try { return (await fetch(origin)).ok; } catch { return false; } });
+  const token = await createToken(root);
+  const viewerToken = await createToken(root, ['desktop.view', 'audio.listen', 'clipboard.read']);
   browser = await chromium.launch({ executablePath: '/usr/bin/chromium', env: { ...process.env, XDG_CONFIG_HOME: root + '/chromium' }, args: ['--no-sandbox'] });
   const connect = async (token, id) => {
     const context = await browser.newContext();
@@ -56,14 +57,14 @@ try {
       await observer.waitForFunction(quality => elsewhere.store.get().streamState?.preset === quality, quality);
     }
     await page.evaluate(() => { elsewhere.type('second'); elsewhere.key('Return'); });
-    await wait(async () => await contents(output) === 'first\nsecond\n', `${label} viewer-token rejection`);
+    await wait(async () => await contents(output) === 'first\nsecond\n', `${label} view permission rejection`);
     await page.evaluate(() => elsewhere.key('ctrl+d'));
     // A subsequent shell command proves the key chord reached the running app.
     const done = `${root}/done-${index}`;
     await page.evaluate(done => { elsewhere.type(`touch ${done}`); elsewhere.key('Return'); }, done);
     await wait(async () => await contents(done) === '', `${label} Ctrl+D and subsequent command`);
     assert.equal(await contents(output), 'first\nsecond\n', 'view-only structured input must not reach the app');
-    console.log(`${index ? 'window' : 'desktop'} structured text, Return and Ctrl+D round trips; desktop and window viewer tokens rejected`);
+    console.log(`${index ? 'window' : 'desktop'} structured text, Return and Ctrl+D round trips; desktop and window tokens without desktop.control rejected`);
   }
   const focused = `${root}/focused`;
   await desktop.evaluate(command => elsewhere.spawn(command), `foot --app-id=input-focus sh -c 'cat > ${focused}'`);

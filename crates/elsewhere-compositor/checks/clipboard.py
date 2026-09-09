@@ -23,7 +23,7 @@ env = {**os.environ, "XDG_RUNTIME_DIR": str(root / "runtime"), "XDG_CONFIG_HOME"
 command, payload = root / "command", root / "payload"
 command.write_text(""); payload.write_bytes(b"")
 log = (root / "server.log").open("wb")
-server = subprocess.Popen([os.environ.get("ELSEWHERE_BINARY", "/src/target/release/elsewhere"), "--no-audio", "--no-rtc", "--no-tls", "--render-node", "none", "--codec", "vp8", "--listen", "127.0.0.1:8098", "--socket-name", "wayland-clipboard-check", "--exec", shlex.join([str(root / "owner"), str(command), str(payload)])], env=env, stdout=log, stderr=log, start_new_session=True)
+server = subprocess.Popen([os.environ.get("ELSEWHERE_BINARY", "/src/target/release/elsewhere"), "--files-dir", str(root), "--no-audio", "--no-rtc", "--no-tls", "--render-node", "none", "--codec", "vp8", "--listen", "127.0.0.1:8098", "--socket-name", "wayland-clipboard-check", "--exec", shlex.join([str(root / "owner"), str(command), str(payload)])], env=env, stdout=log, stderr=log, start_new_session=True)
 token = ""
 
 def request(path, data=None, mime="application/json", key=None, headers=None):
@@ -44,7 +44,10 @@ def api(path, body=None):
 def wait(predicate, seconds=6):
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
-        value = predicate()
+        try:
+            value = predicate()
+        except urllib.error.URLError:
+            value = None
         if value:
             return value
         time.sleep(.03)
@@ -77,10 +80,9 @@ def put(data, mime="text/plain;charset=utf-8"):
     return operation
 
 try:
-    token_file = root / "config/elsewhere/token"
-    wait(lambda: token_file.exists())
-    token = token_file.read_text().strip()
-    viewer = (root / "config/elsewhere/viewer-token").read_text().strip()
+    token = subprocess.check_output([os.environ.get("ELSEWHERE_BINARY", "/src/target/release/elsewhere"), "token", "create", "--admin"], env=env, text=True).strip()
+    wait(lambda: request("/api/me")[0] == 200)
+    viewer = api("/api/tokens", {"label": "Clipboard reader", "permissions": ["desktop.view", "clipboard.read"]})["token"]
     owner = wait(lambda: next((w for w in api("/api/windows") if w["app_id"] == "clipboard-source"), None))
     api("/api/control", {"id": owner["id"], "op": "activate"})
     assert state()["present"] is False

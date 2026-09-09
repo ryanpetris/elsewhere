@@ -1,3 +1,4 @@
+import { createToken } from './token-fixture.mjs';
 // Docker with NET_ADMIN: Wayland Chromium -> compositor -> RTC -> decoded clock markers.
 // Default: 3 x 60 seconds for H.264/AV1 at 720p/1080p, with a stable 12 Mbit/s, 20 ms link.
 // RELIABILITY_PROFILE=capacity,loss,burst-loss,fallback runs those cases separately. Use clean for smoke checks.
@@ -116,7 +117,7 @@ try {
     let browser, remote; const consumers = [], consumerLogs = [], extraViewers = [];
     try {
       await wait(async () => { try { return (await fetch(origin)).ok; } catch { return false; } });
-      const token = (await readFile(directory + '/config/elsewhere/token', 'utf8')).trim();
+      const token = await createToken(directory);
       browser = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--no-sandbox', '--disable-background-timer-throttling'] });
       const context = await browser.newContext({ viewport: { width: 1600, height: 1200 } });
       const page = await context.newPage();
@@ -265,7 +266,7 @@ try {
         for (let index = 0; index < blockedCount; index++) {
           const path = `${directory}/${codec}-${selectedScene}-${repeat}-consumer-${index}.log`;
           const file = await open(path, 'w'); consumerLogs.push(file); consumerFiles.push(path);
-          consumers.push(spawn('python3', [fileURLToPath(new URL('./reliability-consumer.py', import.meta.url)), String(port), directory + '/config/elsewhere/token', codec, consumerPresets[index]], { stdio: ['ignore', file.fd, file.fd] }));
+          consumers.push(spawn('python3', [fileURLToPath(new URL('./reliability-consumer.py', import.meta.url)), String(port), token, codec, consumerPresets[index]], { stdio: ['ignore', file.fd, file.fd] }));
         }
         await wait(async () => (await Promise.all(consumerFiles.map(path => readFile(path, 'utf8')))).every(text => text.includes('\"blocked\"')));
         await page.waitForTimeout(warmup * 1000);

@@ -1,3 +1,4 @@
+import { createToken, revokeToken } from './token-fixture.mjs';
 // Run inside the Docker rig with the mounted release binary.
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, readdir, rm, open, writeFile } from 'node:fs/promises';
@@ -10,7 +11,7 @@ const disabled = process.argv.includes('--no-audio');
 const root = await mkdtemp(tmpdir() + '/elsewhere-private-check-');
 await mkdir(root + '/home'); await mkdir(root + '/runtime', { mode: 0o700 });
 const log = await open(root + '/desktop.log', 'w');
-const desktop = spawn('/src/target/release/elsewhere', [...(disabled ? ['--no-audio'] : []), '--no-tls', '--no-rtc', '--render-node', 'none', '--listen', '127.0.0.1:8088', '--socket-name', 'wayland-private-check'], {
+const desktop = spawn((process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere'), [...(disabled ? ['--no-audio'] : []), '--no-tls', '--no-rtc', '--render-node', 'none', '--listen', '127.0.0.1:8088', '--socket-name', 'wayland-private-check'], {
   env: { ...process.env, HOME: root + '/home', XDG_RUNTIME_DIR: root + '/runtime', XDG_CONFIG_HOME: root + '/config', PULSE_SINK: 'inherited-wrong-sink', PULSE_SOURCE: 'inherited-wrong-source', PIPEWIRE_NODE: '99999' },
   stdio: ['ignore', log.fd, log.fd],
 });
@@ -23,11 +24,10 @@ try {
   await waitFor(async () => (await readFile(root + '/desktop.log', 'utf8')).includes('compositor ready'));
   await waitFor(async () => {
     try {
-      await readFile(root + '/config/elsewhere/token');
       return (await fetch('http://127.0.0.1:8088/')).ok;
     } catch { return false; }
   });
-  const token = (await readFile(root + '/config/elsewhere/token', 'utf8')).trim();
+  const token = await createToken(root);
   browser = await chromium.launch({ executablePath: '/usr/bin/chromium', env: { ...process.env, HOME: root + '/home', XDG_CONFIG_HOME: root + '/browser-config', XDG_RUNTIME_DIR: root + '/runtime' }, args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
   const page = await browser.newPage();
   await page.addInitScript(() => {
@@ -93,7 +93,7 @@ try {
     const bytes = new Uint8Array(json.length + 1); bytes[0] = 0x97; bytes.set(json, 1);
     checkSocket.send(bytes);
   }, command);
-  const observer = await connect((await readFile(root + '/config/elsewhere/viewer-token', 'utf8')).trim());
+  const observer = await connect(await createToken(root, ['desktop.view', 'audio.listen', 'clipboard.read']));
   const participant = await connect(token);
   assert.equal(await observer.evaluate(() => elsewhere.store.get().role), 'viewer');
   assert.equal(await participant.evaluate(() => elsewhere.store.get().role), 'participant');
@@ -202,10 +202,10 @@ try {
   await panel.getByRole('group', { name: 'OtherBrowser Output', exact: true }).getByRole('button', { name: 'Make default', exact: true }).click();
   await page.waitForFunction(id => elsewhere.store.get().mixer.nodes.find(n => n.id === id).is_default, otherId);
   console.log('graph reconnect refreshes UI IDs; target/default widgets route real signal');
-  const rotated = await fetch('http://127.0.0.1:8088/api/token/rotate', { method: 'POST', headers: { Authorization: 'Bearer ' + token } });
-  assert.equal(rotated.status, 200);
+  const revoked = await revokeToken('http://127.0.0.1:8088', token);
+  assert.equal(revoked.status, 204);
   await page.waitForFunction(() => elsewhere.store.get().status !== 'connected' && elsewhere.store.get().mixer.nodes.length === 0);
-  await observer.waitForFunction(() => elsewhere.store.get().status !== 'connected' && elsewhere.store.get().mixer.nodes.length === 0);
+  await observer.waitForFunction(() => elsewhere.store.get().status === 'connected' && elsewhere.store.get().mixer.nodes.length > 0);
   const rejected = new WebSocket('ws://127.0.0.1:8088/ws');
   rejected.binaryType = 'arraybuffer';
   const leaked = []; let closed = 0;
@@ -217,7 +217,7 @@ try {
   rejected.send(new Uint8Array([0x81, 0, 16, 5, 0]));
   await waitFor(() => closed);
   assert.equal(closed, 4001); assert.equal(leaked.length, 0);
-  console.log('token rotation clears mixer UI; revoked credentials receive no mixer snapshot or levels');
+  console.log('token revocation clears mixer UI; revoked credentials receive no mixer snapshot or levels');
 
 
 

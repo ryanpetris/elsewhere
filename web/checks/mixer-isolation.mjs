@@ -1,3 +1,4 @@
+import { createToken } from './token-fixture.mjs';
 // Called by the Docker isolation rig while both private desktops and the outside graph are live.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -12,7 +13,7 @@ const waitFor = async predicate => {
 const viewers = [];
 try {
   for (const [index, home] of process.argv.slice(2).entries()) {
-    const token = (await readFile(home + '/config/elsewhere/token', 'utf8')).trim();
+    const token = await createToken(home);
     const socket = new WebSocket(`ws://127.0.0.1:${8090 + index}/ws`);
     socket.binaryType = 'arraybuffer';
     const viewer = { socket, state: null, error: '' };

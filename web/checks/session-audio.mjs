@@ -1,4 +1,4 @@
-// Docker live-session check. ELSEWHERE_TEST_TOKEN_FILE points at the rig's control token.
+// Docker live-session check. ELSEWHERE_TEST_TOKEN_FILE points at the rig's admin token.
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { readFile, mkdtemp, rm } from 'node:fs/promises';

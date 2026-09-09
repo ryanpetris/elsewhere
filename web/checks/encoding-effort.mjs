@@ -1,3 +1,4 @@
+import { createToken } from './token-fixture.mjs';
 // Run in Docker with Chromium, foot, FFmpeg encoders and a mounted release binary.
 // ELSEWHERE_RENDER_NODE selects hardware; ELSEWHERE_SOFTWARE_ENCODING keeps GPU rendering.
 import assert from 'node:assert/strict';
@@ -23,7 +24,7 @@ const wait = async predicate => {
 let browser;
 try {
   await wait(async () => { try { return (await fetch(origin)).ok; } catch { return false; } });
-  const token = (await readFile(root + '/config/elsewhere/token', 'utf8')).trim();
+  const token = await createToken(root);
   browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: true, args: ['--no-sandbox'] });
   const context = await browser.newContext({ viewport: { width: 960, height: 720 } });
   const errors = [];

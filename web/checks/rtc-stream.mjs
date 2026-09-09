@@ -1,3 +1,4 @@
+import { createToken } from './token-fixture.mjs';
 // Run in Docker with the release build, Chromium and mpv.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -10,7 +11,7 @@ const log = await open(root + '/server.log', 'w');
 const port = process.env.ELSEWHERE_TEST_PORT ?? '8855';
 const origin = `http://127.0.0.1:${port}`;
 const environment = { ...process.env, XDG_RUNTIME_DIR: root + '/runtime', XDG_CONFIG_HOME: root + '/config', WAYLAND_DISPLAY: 'wayland-rtc-stream' };
-const startServer = (fixedSize = false) => spawn(process.env.ELSEWHERE_BINARY ?? '/src/target/release/elsewhere', [
+const startServer = (fixedSize = false) => spawn(process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere', [
   '--no-audio', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--bitrate', '8000',
   ...(fixedSize ? ['--screen-size', '640x360'] : []),
   '--listen', `127.0.0.1:${port}`, '--socket-name', 'wayland-rtc-stream',
@@ -30,7 +31,7 @@ try {
     assert.equal(server.exitCode, null, await readFile(root + '/server.log', 'utf8'));
     await new Promise(resolve => setTimeout(resolve, 50));
   }
-  const token = (await readFile(root + '/config/elsewhere/token', 'utf8')).trim();
+  const token = await createToken(root);
   source = spawn('mpv', ['--no-config', '--no-audio', '--vo=wlshm', '--title=elsewhere-rtc-stream',
     'av://lavfi:testsrc2=size=640x360:rate=30'], { env: environment, stdio: ['ignore', log.fd, log.fd] });
   await new Promise((resolve, reject) => { source.once('spawn', resolve); source.once('error', reject); });

@@ -9,11 +9,11 @@ import struct
 import sys
 import time
 
-port, token_file, codec = sys.argv[1:4]
+port, secret, codec = sys.argv[1:4]
 preset = sys.argv[4] if len(sys.argv) > 4 else "medium"
 preset_id = {"very-low": 1, "medium": 3}[preset]
 blocked_seconds = 30 if preset == "very-low" else 20
-token = Path(token_file).read_bytes().strip()
+token = secret.encode()
 choice = ["h264", "hevc", "vp9", "av1", "vp8"].index(codec) + 1
 
 

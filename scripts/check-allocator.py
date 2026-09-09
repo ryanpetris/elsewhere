@@ -49,6 +49,7 @@ int mallopt(int parameter, int value) {
         env.update(XDG_CONFIG_HOME=str(case / 'config'), XDG_RUNTIME_DIR=str(runtime),
                    LD_PRELOAD=str(library), ELSEWHERE_ALLOCATOR_LOG=str(receipt))
         env.update(overrides)
+        token = subprocess.check_output([binary, 'token', 'create', '--admin'], env={**os.environ, 'XDG_CONFIG_HOME': str(case / 'config')}, text=True).strip()
         with (case / 'server.log').open('wb') as log:
             server = subprocess.Popen([binary, '--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none',
                                        '--codec', 'vp8', '--screen-size', '320x240', '--listen', '127.0.0.1:18445'],
@@ -57,7 +58,6 @@ int mallopt(int parameter, int value) {
                 for _ in range(100):
                     assert server.poll() is None, (case / 'server.log').read_text()
                     try:
-                        token = (case / 'config' / 'elsewhere' / 'token').read_text().strip()
                         request = urllib.request.Request('http://127.0.0.1:18445/api/windows',
                                                          headers={'Authorization': 'Bearer ' + token})
                         with urllib.request.urlopen(request, timeout=1) as response:

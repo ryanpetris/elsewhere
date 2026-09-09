@@ -22,17 +22,17 @@ trap 'cleanup' EXIT
 trap 'exit 1' HUP INT TERM
 export XDG_CONFIG_HOME="$work/config" XDG_RUNTIME_DIR="$work/runtime"
 mkdir -m 700 "$XDG_RUNTIME_DIR"
+elsewhere token create --admin >"$work/credential"
 elsewhere --render-node none --software-encoding --codec vp8 --no-audio --no-rtc \
     --no-tls --listen 127.0.0.1:18443 --screen-size 320x240 >"$work/server.log" 2>&1 &
 pid=$!
 for _ in $(seq 1 30); do
     if ! kill -0 "$pid" 2>/dev/null; then break; fi
-    if [ -s "$XDG_CONFIG_HOME/elsewhere/token" ] &&
-        curl --fail --silent --max-time 2 \
-            -H "Authorization: Bearer $(cat "$XDG_CONFIG_HOME/elsewhere/token")" \
+    if curl --fail --silent --max-time 2 \
+            -H "Authorization: Bearer $(cat "$work/credential")" \
             http://127.0.0.1:18443/api/screenshot.png -o "$work/frame.png"; then
         test -s "$work/frame.png"
-        python3 scripts/check-release-video.py 18443 "$XDG_CONFIG_HOME/elsewhere/token"
+        python3 scripts/check-release-video.py 18443 "$work/credential"
         printf 'Release version, screenshot, and encoded viewer video verified\n'
         exit 0
     fi

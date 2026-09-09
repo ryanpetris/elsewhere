@@ -1,3 +1,4 @@
+import { createToken } from './token-fixture.mjs';
 // Run in the Docker desktop rig with FFmpeg, Chromium, nginx, Node and the current binary.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:net';
@@ -31,10 +32,11 @@ const settings = (id, port, fps = 30) => ({ request_id: id, label: id, url: `rtm
 async function ingest(port, name) {
   return start('ffmpeg', ['-hide_banner', '-loglevel', 'warning', '-listen', '1', '-i', `rtmp://127.0.0.1:${port}/live/secret-sentinel`, '-c', 'copy', '-y', root + '/' + name + '.flv'], process.env, name);
 }
-let mcpSession;
+const mcpSessions = new Map();
 async function mcp(method, params, auth = token) {
+  const mcpSession = mcpSessions.get(auth);
   const response = await fetch(base + '/mcp', { method: 'POST', headers: { Authorization: `Bearer ${auth}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', ...(mcpSession ? { 'Mcp-Session-Id': mcpSession } : {}) }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
-  if (response.headers.get('mcp-session-id')) mcpSession = response.headers.get('mcp-session-id');
+  if (response.headers.get('mcp-session-id')) mcpSessions.set(auth, response.headers.get('mcp-session-id'));
   const text = await response.text();
   assert.ok(!text.includes('secret-sentinel'), 'MCP leaked credential');
   const data = text.startsWith('data:') || text.includes('\ndata:') ? text.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trim()).join('') : text;
@@ -44,8 +46,8 @@ try {
   await mkdir(root + '/runtime', { mode: 0o700 });
   const desktop = await start(process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere', [...(!withAudio ? ['--no-audio', '--screen-size', '640x480'] : []), '--no-tls', ...(process.env.BROADCAST_GPU === '1' ? [] : ['--render-node', 'none', '--codec', 'vp8']), '--listen', '127.0.0.1:8097', '--rtc-port', '50997', '--socket-name', 'wayland-broadcast-check'], { ...process.env, XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime' }, 'desktop');
   await wait('desktop startup', async () => { try { return (await fetch(base)).ok; } catch { return false; } });
-  token = (await readFile(root + '/config/elsewhere/token', 'utf8')).trim();
-  viewerToken = (await readFile(root + '/config/elsewhere/viewer-token', 'utf8')).trim();
+  token = await createToken(root);
+  viewerToken = await createToken(root, ['desktop.view', 'audio.listen', 'clipboard.read']);
   assert.equal((await api('/capabilities')).body.available, true);
   assert.equal((await api('/start', settings('denied', 19357), viewerToken)).status, 403);
   if (!withAudio) assert.equal((await api('/start', { ...settings('audio-unavailable', 19357), audio: 'desktop' })).status, 503);
@@ -64,6 +66,7 @@ try {
   await mcp('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'broadcast-check', version: '1' } });
   const tools = await mcp('tools/list', {});
   assert.ok(tools.result.tools.some(t => t.name === 'broadcast_start'));
+  await mcp('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'broadcast-check', version: '1' } }, viewerToken);
   const denied = await mcp('tools/call', { name: 'broadcast_start', arguments: settings('mcp-denied', 19357) }, viewerToken);
   assert.equal(denied.result.isError, true);
   const sinkA = await ingest(19357, 'capture-a'), sinkB = await ingest(19358, 'capture-b');
@@ -186,6 +189,18 @@ try {
   const hanging = await api('/start', { ...settings('stop-during-start', 19359), audio: 'silence' });
   await api('/' + hanging.body.id + '/stop', {});
   await wait('stop during start', async () => (await api('/' + hanging.body.id)).body.state === 'stopped');
+  const ownerA = await createToken(root), ownerB = await createToken(root);
+  const ownedSinkA = await ingest(19360, 'owned-a'), ownedSinkB = await ingest(19361, 'owned-b');
+  await sleep(500);
+  const ownedA = await api('/start', { ...settings('owned-a', 19360), audio: 'silence' }, ownerA);
+  const ownedB = await api('/start', { ...settings('owned-b', 19361), audio: 'silence' }, ownerB);
+  await wait('owned outputs sending', async () => (await api('/' + ownedA.body.id)).body.state === 'sending' && (await api('/' + ownedB.body.id)).body.state === 'sending');
+  const { metadata } = await (await fetch(base + '/api/me', { headers: { Authorization: 'Bearer ' + ownerA } })).json();
+  assert.equal((await fetch(base + '/api/tokens/' + metadata.id, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } })).status, 204);
+  await wait('revoked owner stopped', async () => (await api('/' + ownedA.body.id)).body.state === 'stopped');
+  assert.equal((await api('/' + ownedB.body.id)).body.state, 'sending');
+  await api('/' + ownedB.body.id + '/stop', {});
+  ownedSinkA.kill('SIGINT'); ownedSinkB.kill('SIGINT');
   const log = await readFile(root + '/desktop.log', 'utf8');
   assert.ok(!log.includes('secret-sentinel'), 'server diagnostics leaked key');
   console.log('Broadcast backend checks passed. Artifacts: ' + root);

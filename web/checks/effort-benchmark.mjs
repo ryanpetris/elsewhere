@@ -1,3 +1,4 @@
+import { createToken } from './token-fixture.mjs';
 // Docker: real Wayland Chromium scene -> compositor/encoder -> browser canvas.
 // Optional EFFORT_CODECS=vp8,h264 and EFFORT_SECONDS=6 narrow the measurement.
 import assert from 'node:assert/strict';
@@ -38,7 +39,7 @@ const nativeRates = trace => [...trace.matchAll(/ffmpeg video rate[^\n]*stream_t
 let browser, remote;
 try {
   await wait(async () => { try { return (await fetch(origin)).ok; } catch { return false; } });
-  const token = (await readFile(root + '/config/elsewhere/token', 'utf8')).trim();
+  const token = await createToken(root);
   browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: true, args: ['--no-sandbox'] });
   const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
   await page.addInitScript(({ width, height }) => {

@@ -1,3 +1,4 @@
+import { createToken } from './token-fixture.mjs';
 // Run inside the Docker rig with the mounted release binary.
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, readdir, rm, open, writeFile } from 'node:fs/promises';
@@ -10,7 +11,7 @@ const rtc = process.argv.includes('--rtc');
 const root = await mkdtemp(tmpdir() + '/elsewhere-private-check-');
 await mkdir(root + '/home'); await mkdir(root + '/runtime', { mode: 0o700 });
 const log = await open(root + '/desktop.log', 'w');
-const desktop = spawn('/src/target/release/elsewhere', ['--no-tls', ...(rtc ? [] : ['--no-rtc']), '--render-node', 'none', '--listen', '127.0.0.1:8088', '--socket-name', 'wayland-private-check'], {
+const desktop = spawn((process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere'), ['--no-tls', ...(rtc ? [] : ['--no-rtc']), '--render-node', 'none', '--listen', '127.0.0.1:8088', '--socket-name', 'wayland-private-check'], {
   env: { ...process.env, HOME: root + '/home', XDG_RUNTIME_DIR: root + '/runtime', XDG_CONFIG_HOME: root + '/config', PULSE_SINK: 'inherited-wrong-sink', PULSE_SOURCE: 'inherited-wrong-source', PIPEWIRE_NODE: '99999' },
   stdio: ['ignore', log.fd, log.fd],
 });
@@ -33,11 +34,10 @@ try {
   await waitFor(async () => (await readFile(root + '/desktop.log', 'utf8')).includes('compositor ready'));
   await waitFor(async () => {
     try {
-      await readFile(root + '/config/elsewhere/token');
       return (await fetch('http://127.0.0.1:8088/')).ok;
     } catch { return false; }
   });
-  const token = (await readFile(root + '/config/elsewhere/token', 'utf8')).trim();
+  const token = await createToken(root);
   browser = await chromium.launch({ executablePath: '/usr/bin/chromium', env: { ...process.env, HOME: root + '/home', XDG_CONFIG_HOME: root + '/browser-config', XDG_RUNTIME_DIR: root + '/runtime' }, args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--use-file-for-fake-audio-capture=' + root + '/microphone.wav'] });
   const page = await browser.newPage();
   await page.addInitScript(() => {

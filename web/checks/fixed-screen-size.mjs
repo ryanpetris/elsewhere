@@ -1,3 +1,4 @@
+import { createToken } from './token-fixture.mjs';
 // Run in the Docker rig after building the release binary.
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, open, readFile, rm } from 'node:fs/promises';
@@ -6,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { chromium } from 'playwright-core';
 import { MOTION_ABS } from '../src/protocol.js';
 
-const binary = '/src/target/release/elsewhere';
+const binary = (process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere');
 for (const size of ['0x1080', '1921x1080', '1920x1', '8194x1080', '1920', 'ax1080', '1920x1080x2']) {
   const result = spawnSync(binary, ['--screen-size', size], { encoding: 'utf8' });
   assert.equal(result.status, 2, size);
@@ -29,8 +30,8 @@ for (const fixed of [true, false]) {
   });
   let browser;
   try {
-    await wait(async () => { try { return (await fetch(origin)).ok && !!await readFile(root + '/config/elsewhere/token'); } catch { return false; } });
-    const token = (await readFile(root + '/config/elsewhere/token', 'utf8')).trim();
+    await wait(async () => { try { return (await fetch(origin)).ok; } catch { return false; } });
+    const token = await createToken(root);
     const nativeSize = async () => {
       const response = await fetch(origin + '/api/screenshot.png', { headers: { Authorization: `Bearer ${token}` } });
       assert.equal(response.status, 200);

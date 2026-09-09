@@ -1,3 +1,4 @@
+import { createToken } from './token-fixture.mjs';
 // Run in the Docker rig with a headed display at :95 and the release binary.
 // Chromium check also needs wev; Firefox check needs geckodriver listening on port 4445.
 import assert from 'node:assert/strict';
@@ -10,7 +11,7 @@ await mkdir(root + '/runtime', {mode: 0o700});
 const log = await open(root + '/server.log', 'w');
 const origin = 'http://127.0.0.1:8093';
 const server = spawn(
-    '/src/target/release/elsewhere',
+    (process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere'),
     [
       '--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--listen',
       '127.0.0.1:8093', '--socket-name', 'wayland-pip-probe'
@@ -45,12 +46,12 @@ const wd = async (path, body, method = body ? 'POST' : 'GET') => {
 try {
   await wait(async () => {
     try {
-      return (await fetch(origin)).ok && !!await readFile(root + '/config/elsewhere/token')
+      return (await fetch(origin)).ok
     } catch {
       return false
     }
   });
-  const token = (await readFile(root + '/config/elsewhere/token', 'utf8')).trim();
+  const token = await createToken(root);
   session = (await wd('/session', {
               capabilities: {
                 alwaysMatch: {

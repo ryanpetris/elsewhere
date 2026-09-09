@@ -1,3 +1,4 @@
+import { createToken } from './token-fixture.mjs';
 // Run in the Docker rig after building the release binary.
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, open, readFile, rm } from 'node:fs/promises';
@@ -9,7 +10,7 @@ const root = await mkdtemp(tmpdir() + '/elsewhere-sizing-');
 await mkdir(root + '/runtime', { mode: 0o700 });
 const log = await open(root + '/server.log', 'w');
 const origin = 'http://127.0.0.1:8093';
-const server = spawn('/src/target/release/elsewhere', ['--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--listen', '127.0.0.1:8093', '--socket-name', 'wayland-sizing'], {
+const server = spawn((process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere'), ['--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--listen', '127.0.0.1:8093', '--socket-name', 'wayland-sizing'], {
   env: { ...process.env, HOME: root, XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime', RUST_LOG: 'elsewhere_server::api=debug' }, stdio: ['ignore', log.fd, log.fd],
 });
 const wait = async fn => {
@@ -19,9 +20,9 @@ const wait = async fn => {
 const dimensions = png => [png.readUInt32BE(16), png.readUInt32BE(20)];
 let browser;
 try {
-  await wait(async () => { try { return (await fetch(origin)).ok && !!await readFile(root + '/config/elsewhere/token'); } catch { return false; } });
-  const token = (await readFile(root + '/config/elsewhere/token', 'utf8')).trim();
-  const viewerToken = (await readFile(root + '/config/elsewhere/viewer-token', 'utf8')).trim();
+  await wait(async () => { try { return (await fetch(origin)).ok; } catch { return false; } });
+  const token = await createToken(root);
+  const viewerToken = await createToken(root, ['desktop.view', 'audio.listen', 'clipboard.read']);
   const headers = { Authorization: `Bearer ${viewerToken}` };
   assert.equal((await fetch(origin + '/api/screenshot.png')).status, 401);
   let session, rpcId = 0;

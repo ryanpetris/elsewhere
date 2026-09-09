@@ -1,3 +1,4 @@
+import { createToken } from './token-fixture.mjs';
 // Docker rig: release build and Chromium. Exercises HTTP permissions,
 // filesystem races, and two viewers.
 import assert from 'node:assert/strict';
@@ -39,7 +40,7 @@ await chmod(root + '/blocked', 0);
 const log = await open(root + '/server.log', 'w');
 const origin = 'http://127.0.0.1:8094';
 const server =
-    spawn('/src/target/release/elsewhere',
+    spawn((process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere'),
           [
             '--no-rtc', '--no-tls', '--render-node', 'none', '--codec', 'vp8',
             '--listen', '127.0.0.1:8094', '--socket-name', 'wayland-files-check'
@@ -65,16 +66,15 @@ let browser, inputClient, inputLog;
 try {
   await wait(async () => {
     try {
-      return !!await readFile(root + '/config/elsewhere/token');
+      return (await fetch(origin)).ok;
     } catch {
       return false;
     }
   });
   const token =
-      (await readFile(root + '/config/elsewhere/token', 'utf8')).trim();
+      await createToken(root);
   const viewerToken =
-      (await readFile(root + '/config/elsewhere/viewer-token', 'utf8'))
-          .trim();
+      await createToken(root, ['desktop.view', 'audio.listen', 'clipboard.read']);
   const request = (url, options = {}, key = token) => fetch(origin + url, {
     ...options,
     headers : {...options.headers, Authorization : `Bearer ${key}`}

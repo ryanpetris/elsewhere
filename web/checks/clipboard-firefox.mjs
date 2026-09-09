@@ -1,3 +1,4 @@
+import { createToken } from './token-fixture.mjs';
 // Docker rig: Firefox, foot, Xvfb and geckodriver on port 4445 with a headed display.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -24,9 +25,9 @@ const wd = async (path, body, method = body ? 'POST' : 'GET') => {
 };
 let route;
 try {
-  await wait(async () => { try { return (await fetch(origin)).ok && !!await contents(root + '/config/elsewhere/token'); } catch { return false; } });
-  const token = (await contents(root + '/config/elsewhere/token')).trim();
-  const viewerToken = (await contents(root + '/config/elsewhere/viewer-token')).trim();
+  await wait(async () => { try { return (await fetch(origin)).ok; } catch { return false; } });
+  const token = await createToken(root);
+  const viewerToken = await createToken(root, ['desktop.view', 'audio.listen', 'clipboard.read']);
   const session = await wd('/session', { capabilities: { alwaysMatch: { browserName: 'firefox', 'moz:firefoxOptions': { binary: '/usr/bin/firefox' } } } });
   route = '/session/' + session.sessionId;
   console.log(session.capabilities.browserName, session.capabilities.browserVersion);

@@ -1,3 +1,4 @@
+import { createToken } from './token-fixture.mjs';
 // Run inside the Docker rig: node checks/rtc-endpoint.mjs.
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, open, readFile, rm } from 'node:fs/promises';
@@ -18,7 +19,7 @@ try {
     ['localhost', ['--rtc-addr', '127.0.0.1', '--rtc-port', '8098'], 8098],
   ]) {
     const log = await open(root + '/desktop.log', 'w');
-    const desktop = spawn('/src/target/release/elsewhere', ['--no-audio', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--listen', '[::]:8097', ...args], {
+    const desktop = spawn((process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere'), ['--no-audio', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--listen', '[::]:8097', ...args], {
       env: { ...process.env, XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime' },
       stdio: ['ignore', log.fd, log.fd],
     });
@@ -32,7 +33,7 @@ try {
         await new Promise(resolve => setTimeout(resolve, 50));
       }
       assert(ready, await readFile(root + '/desktop.log', 'utf8'));
-      const token = (await readFile(root + '/config/elsewhere/token', 'utf8')).trim();
+      const token = await createToken(root);
       await context.addInitScript(() => {
         window.endpointReplies = [];
         let omit = true;

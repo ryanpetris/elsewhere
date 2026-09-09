@@ -1,3 +1,4 @@
+import { createToken, revokeToken } from './token-fixture.mjs';
 // Run in Docker with Chromium, foot, the audio stack and a mounted release build.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -19,9 +20,9 @@ const wait = async (label, predicate) => {
 };
 let browser;
 try {
-  await wait('server startup', async () => { try { return (await fetch(origin)).ok && !!await contents(root + '/config/elsewhere/token'); } catch { return false; } });
-  const token = (await contents(root + '/config/elsewhere/token')).trim();
-  const viewerToken = (await contents(root + '/config/elsewhere/viewer-token')).trim();
+  await wait('server startup', async () => { try { return (await fetch(origin)).ok; } catch { return false; } });
+  const token = await createToken(root);
+  const viewerToken = await createToken(root, ['desktop.view', 'audio.listen', 'clipboard.read']);
   browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: true, args: ['--no-sandbox'] });
   const page = await browser.newPage({ viewport: { width: 1100, height: 850 } });
   await page.addInitScript(() => {
@@ -142,11 +143,11 @@ try {
   await command('echo $$ > revokedpid');
   await wait('revoked shell PID', () => contents(root + '/revokedpid'));
   const revokedpid = (await contents(root + '/revokedpid')).trim();
-  const rotated = await fetch(origin + '/api/token/rotate', { method: 'POST', headers: { Authorization: 'Bearer ' + token } });
-  assert.equal(rotated.ok, true);
-  await wait('token rotation shell cleanup', async () => await contents('/proc/' + revokedpid + '/status') === null);
+  const revoked = await revokeToken(origin, token);
+  assert.equal(revoked.ok, true);
+  await wait('token revocation shell cleanup', async () => await contents('/proc/' + revokedpid + '/status') === null);
   assert.deepEqual(errors, []);
-  console.log('terminal: read-only denial and token rotation passed');
+  console.log('terminal: read-only denial and token revocation passed');
 } catch (error) {
   console.error(error, await contents(root + '/server.log'));
   throw error;

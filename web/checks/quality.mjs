@@ -1,3 +1,4 @@
+import { createToken } from './token-fixture.mjs';
 // Run in Docker; optionally pass the Medium ceiling. ELSEWHERE_RENDER_NODE and
 // ELSEWHERE_CODEC select hardware coverage; ELSEWHERE_SOFTWARE_ENCODING keeps GPU rendering.
 import assert from 'node:assert/strict';
@@ -26,8 +27,8 @@ const waitFor = async predicate => {
 };
 let browser;
 try {
-  await waitFor(async () => { try { await readFile(root + '/config/elsewhere/token'); return (await fetch(origin)).ok; } catch { return false; } });
-  const token = (await readFile(root + '/config/elsewhere/token', 'utf8')).trim();
+  await waitFor(async () => { try {  return (await fetch(origin)).ok; } catch { return false; } });
+  const token = await createToken(root);
   browser = await chromium.launch({ executablePath: '/usr/bin/chromium', env: { ...process.env, XDG_CONFIG_HOME: root + '/browser-config' }, args: ['--no-sandbox'] });
   const errors = [];
   const levels = [['very-low', 1, 2000], ['low', 2, 5000], ['medium', 3, medium], ['high', 4, 12000], ['max', 5, 25000]];

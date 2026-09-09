@@ -1,3 +1,4 @@
+import { createToken } from './token-fixture.mjs';
 // Run in the Docker rig with nginx, OpenSSL, Chromium, foot and a current Elsewhere binary.
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
@@ -45,7 +46,7 @@ try {
     await wait(instance.name + ' startup', async () => {
       try { return (await fetch(backend + (instance.strip ? '' : instance.prefix) + '/')).ok; } catch { return false; }
     });
-    instance.token = (await contents(dir + '/config/elsewhere/token')).trim();
+    instance.token = await createToken(dir);
     assert.ok(instance.token);
     assert.equal(await contents(dir + '/config/elsewhere/cert.pem'), '', '--no-tls needs no HTTPS certificate');
     if (instance.prefix && !instance.strip) {
@@ -216,7 +217,7 @@ try {
   await alice.page.getByText('Shared edited preset', { exact: true }).waitFor();
   await alice.page.getByRole('button', { name: 'Remove', exact: true }).click();
   await wait('preset removed in other instance', async () => await bob.page.getByText('Shared edited preset', { exact: true }).count() === 0);
-  console.log('Broadcast presets share across instance paths; participant control-token start/stop and host-specific status passed');
+  console.log('Broadcast presets share across instance paths; participant broadcast start/stop and host-specific status passed');
 
   assert.notEqual(await alice.popup.evaluate(() => window.name), await bob.popup.evaluate(() => window.name));
   assert.ok(!alice.popup.isClosed() && !bob.popup.isClosed(), 'both instance popups remain open');

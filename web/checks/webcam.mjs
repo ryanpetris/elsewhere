@@ -1,3 +1,4 @@
+import { createToken } from './token-fixture.mjs';
 // Run in the Docker image with ELSEWHERE_TEST_WEBCAM pointing to an idle, passed-through v4l2loopback device.
 // Build the release binary first; the image must include its guvcview launcher.
 import assert from 'node:assert/strict';
@@ -17,7 +18,7 @@ const log = await open(root + '/server.log', 'w');
 const errorLibrary = root + '/device-errors.so';
 execFileSync('cc', ['-shared', '-fPIC', new URL('./webcam-errors.c', import.meta.url).pathname, '-ldl', '-o', errorLibrary]);
 const origin = 'http://127.0.0.1:8093';
-const server = spawn('/src/target/release/elsewhere', ['--webcam', device, '--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--listen', '127.0.0.1:8093', '--socket-name', 'wayland-webcam'], {
+const server = spawn((process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere'), ['--webcam', device, '--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codec', 'vp8', '--listen', '127.0.0.1:8093', '--socket-name', 'wayland-webcam'], {
   env: { ...process.env, HOME: root, XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime', RUST_LOG: 'elsewhere_server::api=debug',
     LD_PRELOAD: errorLibrary, ELSEWHERE_WEBCAM_TEST_DEVICE: device, ELSEWHERE_WEBCAM_TEST_FAILURE: 'ENODEV', ELSEWHERE_WEBCAM_TEST_ARM: root + '/device-loss' }, stdio: ['ignore', log.fd, log.fd],
 });
@@ -27,8 +28,8 @@ const wait = async fn => {
 };
 let browser;
 try {
-  await wait(async () => { try { return (await fetch(origin)).ok && !!await readFile(root + '/config/elsewhere/token'); } catch { return false; } });
-  const token = (await readFile(root + '/config/elsewhere/token', 'utf8')).trim();
+  await wait(async () => { try { return (await fetch(origin)).ok; } catch { return false; } });
+  const token = await createToken(root);
   browser = await chromium.launch({ env: { ...process.env, XDG_CONFIG_HOME: root + '/chromium' }, executablePath: '/usr/bin/chromium', args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
   const page = await browser.newPage();
   await page.goto(origin + '/#token=' + token);
