@@ -77,7 +77,9 @@ export default function TerminalPanel({ viewer, onClose }) {
         {!live && <button type="button" className="btn btn-outline btn-xs" onClick={() => setSession(value => value + 1)}><RotateCw className="size-3" /> New shell</button>}
         <IconButton icon={X} label="Close terminal" size="sm" onClick={onClose} />
       </header>
-      <div ref={host} className="min-h-0 flex-1 px-3 pt-2 pb-1 select-text" />
+      <div className="min-h-0 flex-1 px-3 pt-2 pb-1">
+        <div ref={host} className="h-full select-text" />
+      </div>
     </section>
   );
 }
