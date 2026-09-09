@@ -40,7 +40,7 @@ function BarButton({ icon: Icon, label, active = false, onClick, className = '',
 
 function Role({ viewer, role, windowMode }) {
   if (!windowMode && role === 'participant') return (
-    <button type="button" onClick={e => { viewer.takeControl(); e.currentTarget.blur(); }} title="Drive the desktop; it takes this window's size" className="btn btn-primary btn-sm mr-1">
+    <button type="button" aria-label="Take control" onClick={e => { viewer.takeControl(); e.currentTarget.blur(); }} title="Drive the desktop; it takes this window's size" className="btn btn-primary btn-sm mr-1 max-sm:mr-0 max-sm:p-0">
       <MousePointer2 className="size-3.5" /> <span className="hidden sm:inline">Take control</span>
     </button>
   );
@@ -72,15 +72,15 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, m
     </header>
   );
   return (
-    <header onClick={event => { if (!event.target.closest('[data-menu-trigger]')) onMenu(null); }} className="flex h-12 shrink-0 items-center gap-1.5 border-b border-line bg-surface px-2 sm:gap-2 sm:px-3">
-      <div className="flex min-w-0 shrink items-center gap-2.5 pr-1">
+    <header onClick={event => { if (!event.target.closest('[data-menu-trigger]')) onMenu(null); }} className="flex h-12 shrink-0 items-center border-b border-line bg-surface px-1 max-sm:[&_button]:size-7 max-sm:[&_button]:px-0 sm:gap-2 sm:px-3">
+      <div className="hidden min-w-0 shrink items-center gap-2.5 pr-1 sm:flex">
         <Logo />
         <span className="hidden min-w-0 truncate text-sm font-semibold tracking-tight text-ink md:inline">{title}</span>
       </div>
       {(acts('apps.launch') || acts('commands.execute')) && <Divider className="hidden sm:block" />}
       {acts('apps.launch') && <BarButton data-menu-trigger id="apps-toggle" icon={LayoutGrid} label="Applications" active={menu === 'apps'} onClick={() => onMenu('apps')} />}
       {acts('commands.execute') && <BarButton id="terminal-toggle" icon={Terminal} label="Terminal" active={terminal} onClick={onTerminal} />}
-      <div className="ml-1 flex min-w-0 shrink items-center gap-2 rounded-full border border-line bg-surface-2 py-1 pr-3 pl-2.5 text-xs text-ink-2" title={stream && status === 'connected' ? `${text} · ${codecName(stream.codec)} ${stream.width}×${stream.height}` : text}>
+      <div className="flex min-w-0 shrink items-center rounded-full px-1 py-1 text-xs text-ink-2 sm:ml-1 sm:gap-2 sm:border sm:border-line sm:bg-surface-2 sm:pr-3 sm:pl-2.5" title={stream && status === 'connected' ? `${text} · ${codecName(stream.codec)} ${stream.width}×${stream.height}` : text}>
         <span className={`size-2 shrink-0 rounded-full ${dot}`} />
         <span className="hidden truncate sm:inline">{text}</span>
         {stream && status === 'connected' && (
@@ -89,7 +89,7 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, m
           </span>
         )}
       </div>
-      <div className="ml-auto flex shrink-0 items-center gap-0.5">
+      <div className="ml-auto flex shrink-0 items-center sm:gap-0.5">
         <Role viewer={viewer} role={role} windowMode={windowMode} />
         {!windowMode && viewer.touch && role === 'controller' && <IconButton icon={Keyboard} label="On-screen keyboard" active={keyboard} onClick={onKeyboard} />}
         {!windowMode && viewer.touch && <IconButton icon={Hand} label="Touch as mouse: tap, hold for the right button, two fingers scroll, pinch to zoom (off: applications get the touch points)" active={touchMouse} onClick={() => viewer.setTouchMouse(!touchMouse)} />}
@@ -97,7 +97,7 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, m
           <>
             <IconButton data-menu-trigger id="settings-toggle" icon={Settings} label="Settings" active={menu === 'settings'} aria-haspopup="dialog" aria-expanded={menu === 'settings'} aria-controls="viewer-settings" onClick={() => onMenu('settings')} />
             <IconButton icon={sidebar ? PanelRightClose : PanelRightOpen} label="Windows and statistics" active={sidebar} onClick={onSidebar} />
-            <Divider />
+            <Divider className="hidden sm:block" />
           </>
         )}
         <IconButton data-menu-trigger id="about-toggle" icon={Info} label="About" active={menu === 'about'} aria-haspopup="dialog" aria-expanded={menu === 'about'} aria-controls="viewer-about" onClick={() => onMenu('about')} />
@@ -105,7 +105,7 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, m
         <IconButton icon={Expand} label="Fullscreen" onClick={onFullscreen} />
         {acts('server.manage') && (
           <>
-            <Divider />
+            <Divider className="hidden sm:block" />
             <IconButton data-menu-trigger id="power-toggle" icon={Power} label="Quit Elsewhere" active={menu === 'power'} tone="danger" onClick={() => onMenu('power')} />
           </>
         )}
