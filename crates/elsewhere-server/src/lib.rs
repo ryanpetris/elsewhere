@@ -241,6 +241,8 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
         input_owner: Mutex::default(),
         batches: Mutex::default(),
         mcp_owners: Mutex::default(),
+        // No event store: rmcp's session-less Last-Event-ID replay must stay unavailable.
+        // Enabling one requires authorization for replay requests without a session ID.
         mcp_sessions: Arc::new(LocalSessionManager::default()),
         commands,
         policy: cfg.codec,

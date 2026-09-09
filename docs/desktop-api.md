@@ -529,7 +529,7 @@ transfer folder. Composition checks inject a browser composition commit; they do
 installed operating-system IME. Window PiP keeps the ordinary window viewer's keyboard behavior.
 
 Chromium checks additionally cover pairwise audio ownership, stopped microphone capture, third-party
-control, read-only tokens and handoff targets, rejected/unsupported APIs, ordinary popups/fullscreen,
+control, tokens without desktop control and handoff targets, rejected/unsupported APIs, ordinary popups/fullscreen,
 content replacement, reconnection, viewport resize, held-key release, navigation and token revocation.
 Browser size hints remain subject to clamping; the viewer uses the dimensions it actually receives.
 Requests for a 100,000-pixel square PiP were clamped to 1280×720 in Chromium and 1280×800 in Firefox
