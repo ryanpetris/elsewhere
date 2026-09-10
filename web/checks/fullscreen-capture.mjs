@@ -110,9 +110,10 @@ try {
           packet([CONFIG, ...new TextEncoder().encode(JSON.stringify({ streamId: 1, codec: 'vp8', width: 640, height: 480, scale: 1 }))]);
           elsewhere.setCaptureOnClick(true);
         }, { ROLE, CONFIG });
-        assert.equal(await frame.locator('.mouse-capture-hint').count(), 0);
+        assert.equal(await frame.locator('[data-mouse-capture]').count(), 0);
         assert.equal(await frame.getByRole('button', { name: 'Fullscreen', exact: true }).count(), 0);
         await frame.locator('canvas.stage').click();
+        await frame.locator('[data-mouse-capture]').waitFor();
         key('a');
         await frame.waitForFunction(KEY => sent.filter(p => p[0] === KEY && p[1] === 30).length === 2, KEY);
         key('Escape');
@@ -186,7 +187,7 @@ try {
       await wait(() => js(KEY => sent.filter(p => p[0] === KEY).length === 4, KEY));
       assert.equal(await js(() => !!document.pointerLockElement), true);
       assert.deepEqual((await js(KEY => sent.filter(p => p[0] === KEY).map(p => [p[1], p[3]]), KEY)).sort(), [[29, 0], [29, 1], [56, 0], [56, 1]].sort());
-      assert.equal(await js(() => document.querySelectorAll('.mouse-capture-hint').length), 0);
+      assert.equal(await js(() => document.querySelector('[data-mouse-capture]')?.checkVisibility()), false, 'fullscreen hides the top bar and its warning');
 
       // A remote application can release and request capture again when its menu closes.
       await js(POINTER_LOCK => { packet([POINTER_LOCK, 1]); elsewhere.setCaptureOnClick(false); packet([POINTER_LOCK, 0]); }, POINTER_LOCK);

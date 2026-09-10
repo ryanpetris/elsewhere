@@ -50,6 +50,14 @@ function Role({ viewer, role, windowMode }) {
   return null;
 }
 
+/// The mouse is inside the desktop and Escape is the way out. It stays until capture ends, so it is
+/// the bar's own warning rather than a notice that fades.
+const Capture = () => (
+  <Badge tone="warn" role="status" data-mouse-capture className="mr-1" title="Press Escape to release the mouse">
+    <MousePointer2 className="size-3" /> <span className="max-sm:sr-only">Mouse Captured</span>
+  </Badge>
+);
+
 export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, onHideControls, menu, onMenu, keyboard, onKeyboard }) {
   const status = useStore(viewer.store, s => s.status);
   const stream = useStore(viewer.store, s => s.stream);
@@ -66,7 +74,7 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, o
       <span className={`size-2 shrink-0 rounded-full ${dot}`} title={text} />
       <span className="min-w-0 flex-1 truncate font-medium text-ink">{windowMode ? windowTitle || `Window ${WINDOW}` : 'Remote Desktop'}</span>
       <span className="shrink-0 text-ink-3">{status === 'connected' ? role === 'viewer' ? 'View Only' : role === 'controller' ? 'Controlling' : 'Watching' : text}</span>
-      {locked && <MousePointer2 className="size-3.5 shrink-0 text-accent-2" aria-label="Pointer Captured" />}
+      {locked && <MousePointer2 data-mouse-capture className="size-3.5 shrink-0 text-warn" role="img" aria-label="Mouse Captured" />}
       {!windowMode && role === 'participant' && <button type="button" className="btn btn-primary btn-xs" onClick={() => viewer.takeControl()}>Take Control</button>}
       {!windowMode && role === 'controller' && <IconButton icon={Keyboard} label="On-Screen Keyboard" size="sm" active={keyboard} onClick={onKeyboard} />}
       <IconButton icon={CornerUpLeft} label="Return to Viewer" size="sm" onClick={() => window.parent.elsewhereReturn?.()} />
@@ -90,6 +98,7 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, o
         )}
       </div>
       <div className="ml-auto flex shrink-0 items-center sm:gap-0.5">
+        {locked && <Capture />}
         <Role viewer={viewer} role={role} windowMode={windowMode} />
         {!windowMode && viewer.touch && role === 'controller' && <IconButton icon={Keyboard} label="On-Screen Keyboard" active={keyboard} onClick={onKeyboard} />}
         {!windowMode && viewer.touch && <IconButton icon={Hand} label="Touch as Mouse" active={touchMouse} onClick={() => viewer.setTouchMouse(!touchMouse)} />}

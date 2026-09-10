@@ -9,7 +9,10 @@ const root = await mkdtemp('/tmp/elsewhere-capture-');
 const server = createServer(async (req, res) => {
   try {
     const path = new URL(req.url, 'http://localhost').pathname;
-    if (path.startsWith('/api/')) { res.setHeader('Content-Type', 'application/json'); return res.end('[]'); }
+    if (path.startsWith('/api/')) {
+      res.setHeader('Content-Type', 'application/json');
+      return res.end(path === '/api/me' ? JSON.stringify({ permissions: ['desktop.view', 'desktop.control'] }) : '[]');
+    }
     res.setHeader('Content-Type', path.endsWith('.js') ? 'text/javascript' : path.endsWith('.css') ? 'text/css' : 'text/html');
     res.end(await readFile(new URL('../dist/' + (path === '/' ? 'index.html' : path.slice(1)), import.meta.url)));
   } catch { res.writeHead(404).end(); }
@@ -66,7 +69,7 @@ try {
   await canvas.click(); await captured();
   assert.equal(await page.evaluate(type => sent.filter(p => p[0] === type).length, POINTER_LOCK_GAINED), 1, 'successful capture notifies the desktop once');
   assert.equal((await mousePackets()).filter(p => p[0] === BUTTON).length, 0, 'capture click is not sent to the game');
-  assert.equal(await page.locator('.mouse-capture-hint').count(), 0);
+  assert(await page.locator('[data-mouse-capture]').isVisible(), 'the top bar warns while the mouse is captured');
   assert.deepEqual(await canvas.boundingBox(), before, 'capture does not resize the desktop');
   assert(await page.locator('[data-captured-cursor]').isVisible());
   const clicks = async () => {
@@ -103,6 +106,7 @@ try {
   await page.evaluate(() => { sent.length = 0; });
   await page.keyboard.press('ControlLeft+AltLeft'); await captured();
   await page.evaluate(() => document.exitPointerLock()); await released();
+  assert.equal(await page.locator('[data-mouse-capture]').count(), 0, 'the warning goes with the capture');
   assert.deepEqual(await mousePackets(), [], 'release leaves the remote pointer in place');
   assert.deepEqual(await page.evaluate(type => sent.filter(p => p[0] === type), POINTER_LOCK_LOST), [[POINTER_LOCK_LOST]], 'release notifies the desktop even without an application lock acknowledgement');
   // Responses to capture can arrive after the user has already released it.
@@ -143,7 +147,7 @@ try {
   await page.getByRole('button', { name: /fullscreen/i }).click();
   await page.waitForFunction(() => !!document.fullscreenElement);
   await canvas.click(); await captured();
-  assert.equal(await page.locator('.mouse-capture-hint').count(), 0);
+  assert.equal(await page.locator('[data-mouse-capture]').isVisible(), false, 'fullscreen hides the top bar and its warning');
   await page.evaluate(() => { sent.length = 0; });
   await page.evaluate(() => {
     const c = document.querySelector('canvas.stage');

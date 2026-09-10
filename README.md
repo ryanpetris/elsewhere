@@ -218,6 +218,8 @@ The page says when the server closed its socket with a token dialog ("wrong toke
 
 In Settings, enable **Capture Mouse on Click** for games that use edge scrolling. The first click
 captures the mouse; movement, clicks, and the mouse wheel reach the desktop only while captured.
+A **Mouse Captured** warning sits in the top bar for as long as capture lasts; fullscreen and hidden
+controls take the bar and the warning with them.
 Use the application's fullscreen button to send normal Escape presses to the remote application
 while keeping the mouse captured in supported browsers. Hold Escape to use the browser's release
 gesture. Outside supported fullscreen, normal Escape may release capture; browser-only F11 fullscreen
