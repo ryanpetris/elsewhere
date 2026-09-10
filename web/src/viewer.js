@@ -375,10 +375,10 @@ export function createViewer() {
     });
     d.configure({ codec: stream.codec, optimizeForLatency: true });
     decoder = d;
+    awaitingKey = true;
   }
   function resync() {
     newDecoder();
-    awaitingKey = true;
     send(REQUEST_KEYFRAME, 0);
   }
 
@@ -392,13 +392,15 @@ export function createViewer() {
         if (configuredSocket === ws && stream?.streamId === next.streamId) break;
         // A new socket configuration owns subsequent video; pending RTC callbacks belong to the old stream.
         if (via === 'websocket' && state().videoVia === 'webrtc') failRtc('Video resumed over WebSocket');
+        const initialSocketConfig = via === 'websocket' && configuredSocket !== ws && rtcGen === 0;
         stream = next;
         configuredSocket = ws;
         videoSeq = -1; // a new stream counts from 0
         delayBase = []; delaySec = Infinity; lastPts = 0; // measure the new stream against a fresh lateness baseline
         if (pendingFrame) { pendingFrame.close(); pendingFrame = null; }
         fitCanvas();
-        resync();
+        // Before any RTC attempt, the first WebSocket CONFIG accompanies a recovery keyframe.
+        if (initialSocketConfig) newDecoder(); else resync();
         store.set({ stream, status: 'connected' });
         if (state().transport === 'webrtc') maybeRtc();
         fetchElements(); // the scale may have changed
