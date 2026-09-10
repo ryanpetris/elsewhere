@@ -13,7 +13,6 @@ import { About } from './components/About.jsx';
 import { Settings } from './components/Settings.jsx';
 import { MixerPanel } from './components/MixerPanel.jsx';
 import { AudioPanel } from './components/AudioPanel.jsx';
-import { Keyboard, focusKeyboard } from './components/Keyboard.jsx';
 import { IconButton } from './components/ui.jsx';
 import '@xterm/xterm/css/xterm.css';
 
@@ -32,6 +31,16 @@ export function App({ viewer }) {
   const [audioPanel, setAudioPanel] = useState(false);
   const [mixerPanel, setMixerPanel] = useState(false);
   const [keyboard, setKeyboard] = useState(false);
+  const [Keyboard, setKeyboardComponent] = useState(null);
+  const [keyboardError, setKeyboardError] = useState(null);
+  const toggleKeyboard = () => {
+    setKeyboard(!keyboard);
+    if (!keyboard && !Keyboard) {
+      setKeyboardError(null);
+      import('./components/Keyboard.jsx').then(module => setKeyboardComponent(() => module.Keyboard))
+        .catch(() => setKeyboardError('Keyboard could not load. Reload the page to retry.'));
+    }
+  };
   const [terminal, setTerminal] = useState(false);
   const [TerminalPanel, setTerminalPanel] = useState(null);
   const [terminalError, setTerminalError] = useState(null);
@@ -64,7 +73,8 @@ export function App({ viewer }) {
     return () => document.removeEventListener('fullscreenchange', on);
   }, [viewer]);
   useEffect(() => viewer.setElementsOn(elements && !windowMode && !PIP), [viewer, elements, windowMode]);
-  useEffect(() => { if (role !== 'controller') setKeyboard(false); }, [role]); // only the controller's typing counts
+  const canType = status === 'connected' && permissions.includes('desktop.control') && (windowMode || role === 'controller');
+  useEffect(() => { if (!canType) setKeyboard(false); }, [canType]);
   useEffect(() => viewer.setStatsOn(!PIP && sidebar && tab === 'stats' && !hidden), [viewer, sidebar, tab, hidden]);
 
   return (
@@ -76,20 +86,23 @@ export function App({ viewer }) {
         onFullscreen={viewer.fullscreen}
         onHideControls={() => viewer.setControlsHidden(true)}
         menu={menu} onMenu={m => setMenu(menu === m ? null : m)}
-        keyboard={keyboard} onKeyboard={() => (keyboard ? focusKeyboard() : setKeyboard(true))}
+        keyboard={keyboard} onKeyboard={toggleKeyboard} canType={canType}
       /></div>
       {menu === 'about' && !fullscreen && <About viewer={viewer} onClose={closeMenu} />}
       {menu === 'apps' && <Launcher viewer={viewer} onClose={closeMenu} />}
       {menu === 'power' && <PowerMenu viewer={viewer} onClose={closeMenu} />}
       {menu === 'settings' && !windowMode && !fullscreen && <Settings viewer={viewer} borders={borders} onBorders={setBorders} elements={elements} onElements={setElements} onClose={closeMenu} />}
       <div className="relative flex min-h-0 flex-1">
-        <Stage viewer={viewer} windowMode={windowMode} borders={borders && !windowMode && !PIP} elements={elements && !windowMode && !PIP} />
+        <Stage viewer={viewer} windowMode={windowMode} borders={borders && !windowMode && !PIP} elements={elements && !windowMode && !PIP}>
+          {keyboard && canType && !hidden && <div className="absolute inset-x-0 bottom-0 z-20 max-h-full overflow-y-auto">
+            {Keyboard ? <Keyboard viewer={viewer} onClose={() => setKeyboard(false)} /> : <div role="status" className="border-t border-line bg-surface p-3 text-xs">{keyboardError || 'Opening keyboard…'}</div>}
+          </div>}
+        </Stage>
         {/* stays mounted while hidden, so the thumbnails don't reload on every toggle */}
         {!windowMode && !PIP && <Sidebar viewer={viewer} tab={tab} onTab={setTab} hidden={!sidebar || hidden} />}
       </div>
       {/* the docks open under the stage and the side panel, full width, where a phone's drawer never covers them */}
       <div hidden={hidden}>
-      {keyboard && <Keyboard viewer={viewer} onClose={() => setKeyboard(false)} />}
       {terminal && permissions.includes('commands.execute') && !PIP && (TerminalPanel
         ? <TerminalPanel hidden={hidden} viewer={viewer} onClose={closeTerminal} />
         : (

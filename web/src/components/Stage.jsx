@@ -6,7 +6,7 @@ import { useStore } from '../store.js';
 import { hue, windowColor, codecName } from './ui.jsx';
 import { Notifications } from './Notifications.jsx';
 
-export function Stage({ viewer, windowMode, borders, elements }) {
+export function Stage({ viewer, windowMode, borders, elements, children }) {
   const releasedMouse = useStore(viewer.store, s => s.captureOnClick && !s.locked);
   const el = useRef(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -36,6 +36,7 @@ export function Stage({ viewer, windowMode, borders, elements }) {
       <Banner viewer={viewer} />
       <Notice viewer={viewer} />
       <Notifications viewer={viewer} />
+      {children}
     </div>
   );
 }

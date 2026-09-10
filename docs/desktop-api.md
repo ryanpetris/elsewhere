@@ -505,7 +505,8 @@ not the remote application. Closing the remote application closes its window PiP
 The PiP document hosts a same-origin iframe with the existing viewer. Its keyboard, pointer, clipboard,
 renderer, resize observer and media objects all belong to that iframe's document. Authentication uses
 the existing URL fragment and session storage. The compact toolbar shows title, connection/control
-status and Return. Desktop controllers can open the existing keyboard row for composition input.
+status and Return. Desktop controllers and window viewers with control permission can open the
+on-screen keyboard, including its device-IME field.
 Fullscreen remains available in the normal viewer.
 
 Desktop control transfers only from its current owner to a live desktop.control connection, using the
@@ -532,7 +533,7 @@ Docker checks used headed Chromium 152.0.7977.82 and Firefox 155.0.1 on a virtua
 manager. Both opened desktop and window viewers, accepted real keyboard input, rendered changing
 content while the opener was backgrounded and minimized, and returned control. Native Wayland event
 logs confirmed clicks and wheel input in both browsers, plus touch in Chromium. Both browsers accepted
-pointer lock, composition commits through the desktop keyboard row, and unclaimed file drops into the
+pointer lock, composition commits through the keyboard IME field, and unclaimed file drops into the
 transfer folder. Composition checks inject a browser composition commit; they do not exercise every
 installed operating-system IME. Window PiP keeps the ordinary window viewer's keyboard behavior.
 
@@ -630,14 +631,19 @@ read it with `useSyncExternalStore` and send actions back through the engine.
   follow it. Layout: under 48 rem the side panel is a drawer over the stage (off by default there), the
   top bar and status bar keep icons and the few numbers that fit, `#root` is `100dvh` and the viewport
   meta says `interactive-widget=resizes-content`, so the phone's keyboard shrinks the stage (a desktop
-  resize) instead of covering it. The keyboard button (touch devices, the controller) opens a row: a
-  field that keeps the phone's keyboard up (taking the focus releases any key held on the stage), whose
-  native `beforeinput` turns `insertText` and `insertFromPaste` into `{"type": "text"}` (composition
-  waits for `compositionend`), `insertLineBreak` into Return and the deletions into BackSpace, Delete
-  and their Ctrl word forms; physical keys that aren't text (`KEYSYM`) and modifier chords go
-  as `{"type": "key"}`; and buttons for Esc, Tab, sticky Ctrl/Alt/Super (the next key or character is a
-  chord), the arrows and Del. Both go on the WebSocket as `Input` (`0x91`), the `InputMsg` of
-  `POST /api/input`, so they type through the compositor's keymap in order with the pointer.
+  resize) instead of covering it. The on-screen keyboard button is available on touch and non-touch
+  devices when connected with desktop.control: desktop controllers, or any window viewer. It also
+  appears in desktop and window PiP. The react-simple-keyboard panel overlays the picture, so opening
+  it does not resize the stage or streamed window. Focusing the device-IME field can shrink a phone
+  viewport; in window mode that resizes and un-maximizes the application under the ordinary popup
+  resize rules. Dismissing the phone keyboard resizes it again to match the restored viewport. The panel offers
+  letters, digits, punctuation, named keys
+  and sticky Shift/Ctrl/Alt/Super for the next on-screen key or IME input. Text uses viewer.type; named keys and modifier chords
+  use viewer.key. Buttons preserve canvas focus, and physical keyboard forwarding remains active.
+  The device-IME field releases held stage input when focused. Native beforeinput sends text and paste
+  through viewer.type, composition waits for compositionend, and line breaks and deletions use
+  viewer.key. Both methods send Input (0x91), the InputMsg of POST /api/input, through the WebSocket
+  and the compositor's keymap in order with pointer input. View-only sessions have no keyboard control.
 - **Application menu** (`Launcher.jsx`): the installed launchers from `GET /api/applications`, grouped by
   their freedesktop main category (`Network` shows as Internet, `Utility` as Accessories, and so on), with
   a search box that filters by name and comment and launches the first match on Enter; a click sends

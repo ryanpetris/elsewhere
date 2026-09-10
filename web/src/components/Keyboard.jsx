@@ -1,27 +1,40 @@
-// The on-screen keyboard's helper row: an invisible text field that keeps the phone's keyboard up and
-// turns what it produces into typed text, and the keys such keyboards lack. Ctrl, Alt and Super are
-// sticky: the next key or character goes with them.
+// An on-screen keyboard and a device-IME field, both sending input through the compositor's layout.
 import { useEffect, useRef, useState } from 'react';
+import SimpleKeyboard from 'react-simple-keyboard';
+import 'react-simple-keyboard/build/css/index.css';
 import { X } from 'lucide-react';
-import { IconButton, cx } from './ui.jsx';
-
-/// Bring the phone's keyboard back for the row that is open (its own hide button dismissed it, and left
-/// the field focused, so a plain focus() would do nothing).
-export const focusKeyboard = () => { const el = document.querySelector('[data-keyboard]'); el?.blur(); el?.focus(); };
+import { IconButton } from './ui.jsx';
 
 // DOM key names to xkb keysym names, for the keys that aren't text
 const KEYSYM = { Escape: 'Escape', Tab: 'Tab', Enter: 'Return', Backspace: 'BackSpace', Delete: 'Delete', ArrowLeft: 'Left', ArrowRight: 'Right', ArrowUp: 'Up', ArrowDown: 'Down', Home: 'Home', End: 'End', PageUp: 'Prior', PageDown: 'Next' };
-const MODS = ['ctrl', 'alt', 'super'];
-const KEYS = [['Esc', 'Escape'], ['Tab', 'Tab'], ['Ctrl', 'ctrl'], ['Alt', 'alt'], ['Super', 'super'], ['←', 'Left'], ['↑', 'Up'], ['↓', 'Down'], ['→', 'Right'], ['Del', 'Delete']];
+const MODS = ['ctrl', 'alt', 'super', 'shift'];
+const NAMED = { '{esc}': 'Escape', '{tab}': 'Tab', '{enter}': 'Return', '{bksp}': 'BackSpace', '{del}': 'Delete', '{left}': 'Left', '{right}': 'Right', '{up}': 'Up', '{down}': 'Down' };
+const LAYOUT = {
+  default: ['{esc} 1 2 3 4 5 6 7 8 9 0 {bksp}', 'q w e r t y u i o p', '{tab} a s d f g h j k l {enter}', '{shift} z x c v b n m , . {shift}', "` - = [ ] \\ ; ' /", '{ctrl} {alt} {super} {space} {left} {down} {up} {right} {del}'],
+  shift: ['{esc} ! @ # $ % ^ & * ( ) {bksp}', 'Q W E R T Y U I O P', '{tab} A S D F G H J K L {enter}', '{shift} Z X C V B N M < > {shift}', '~ _ + { } | : " ?', '{ctrl} {alt} {super} {space} {left} {down} {up} {right} {del}'],
+};
+const DISPLAY = { '{esc}': 'Esc', '{tab}': 'Tab', '{enter}': 'Return', '{bksp}': '⌫', '{del}': 'Del', '{ctrl}': 'Ctrl', '{alt}': 'Alt', '{super}': 'Super', '{shift}': 'Shift', '{space}': 'Space', '{left}': '←', '{down}': '↓', '{up}': '↑', '{right}': '→' };
 
 export function Keyboard({ viewer, onClose }) {
   const field = useRef(null);
+  const keyboard = useRef(null);
   const [mods, setMods] = useState([]);
-  const sticky = useRef(mods); // what the native listeners below see
-  sticky.current = mods;
-  const chord = keys => { viewer.key([...sticky.current, keys].join('+')); setMods([]); };
+  const sticky = useRef([]);
+  const setSticky = next => { sticky.current = next; setMods(next); };
+  const chord = keys => { viewer.key([...sticky.current, keys].join('+')); setSticky([]); };
   // text goes through the layout; with a sticky modifier its first character is a chord instead
-  const typed = text => { if (sticky.current.length) { chord(text[0] === '+' ? 'plus' : text[0]); if (text.length > 1) viewer.type(text.slice(1)); } else viewer.type(text); };
+  const typed = text => {
+    const [first, ...rest] = [...text];
+    if (!first) return;
+    if (sticky.current.some(mod => mod !== 'shift')) { chord(first === '+' ? 'plus' : first === ' ' ? 'space' : first); if (rest.length) viewer.type(rest.join('')); }
+    else { viewer.type((sticky.current.includes('shift') ? first.toUpperCase() : first) + rest.join('')); setSticky([]); }
+  };
+  const press = key => {
+    const mod = key.slice(1, -1);
+    if (MODS.includes(mod)) setSticky(sticky.current.includes(mod) ? sticky.current.filter(m => m !== mod) : [...sticky.current, mod]);
+    else if (NAMED[key]) chord(NAMED[key]);
+    else typed(key === '{space}' ? ' ' : key);
+  };
   // native listeners: React's onBeforeInput is a polyfill without inputType
   useEffect(() => {
     const el = field.current;
@@ -39,7 +52,9 @@ export function Keyboard({ viewer, onClose }) {
     const compositionEnd = e => { if (e.data) typed(e.data); el.value = ''; };
     el.addEventListener('beforeinput', beforeInput);
     el.addEventListener('compositionend', compositionEnd);
-    el.focus();
+    viewer.releaseInput();
+    if (document.pointerLockElement) document.exitPointerLock();
+    document.querySelector('canvas.stage')?.focus({ preventScroll: true });
     return () => { el.removeEventListener('beforeinput', beforeInput); el.removeEventListener('compositionend', compositionEnd); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // a physical keyboard's keys that aren't text (and its modifier chords) go as chords; phone keyboards
@@ -49,19 +64,19 @@ export function Keyboard({ viewer, onClose }) {
     if (KEYSYM[e.key]) { e.preventDefault(); chord(KEYSYM[e.key]); }
     else if ((e.ctrlKey || e.altKey || e.metaKey) && e.key.length === 1) { e.preventDefault(); viewer.key(`${e.ctrlKey ? 'ctrl+' : ''}${e.altKey ? 'alt+' : ''}${e.metaKey ? 'super+' : ''}${e.shiftKey ? 'shift+' : ''}${e.key === '+' ? 'plus' : e.key}`); }
   };
-  const keep = e => e.preventDefault(); // a tap on a key must not take the focus (and the phone's keyboard) away
   return (
-    <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-t border-line bg-surface px-2 py-1.5 text-xs">
-      {KEYS.map(([label, key]) => (
-        <button key={key} type="button" onPointerDown={keep} onClick={() => (MODS.includes(key) ? setMods(mods.includes(key) ? mods.filter(m => m !== key) : [...mods, key]) : chord(key))}
-          className={cx('h-7 shrink-0 rounded-md border px-2 font-medium transition-colors', mods.includes(key) ? 'border-accent/50 bg-accent/15 text-accent-2' : 'border-line-2 bg-surface-3 text-ink-2 shadow-card active:bg-surface-4')}>
-          {label}
-        </button>
-      ))}
-      <input ref={field} data-keyboard="" onKeyDown={onKeyDown} onFocus={viewer.releaseInput}
-        aria-label="Type Into Desktop" autoCapitalize="off" autoCorrect="off" autoComplete="off" spellCheck={false}
-        className="h-7 w-0 min-w-0 flex-1 rounded-md border border-dashed border-line-2 bg-transparent px-1 text-transparent caret-transparent outline-none focus:border-accent" />
-      <IconButton icon={X} label="Hide Keyboard" size="sm" onClick={onClose} />
-    </div>
+    <section aria-label="On-Screen Keyboard" className="border-t border-line bg-surface p-2 text-xs shadow-pop">
+      <div className="mb-2 flex items-center gap-2">
+        <input ref={field} data-keyboard="" onKeyDown={onKeyDown} onFocus={viewer.releaseInput}
+          aria-label="Device keyboard / IME" title="Type Into Desktop" placeholder="Device keyboard / IME" autoCapitalize="off" autoCorrect="off" autoComplete="off" spellCheck={false}
+          className="h-8 min-w-0 flex-1 rounded-md border border-line-2 bg-surface-2 px-2 text-ink outline-none focus:border-accent" />
+        <IconButton icon={X} label="Hide Keyboard" size="sm" onClick={onClose} />
+      </div>
+      <SimpleKeyboard keyboardRef={instance => { keyboard.current = instance; }} layout={LAYOUT} layoutName={mods.includes('shift') ? 'shift' : 'default'} display={DISPLAY}
+        theme="hg-theme-default elsewhere-keyboard" useButtonTag useMouseEvents preventMouseDownDefault disableButtonHold enableLayoutCandidates={false}
+        buttonTheme={[{ class: 'osk-selected', buttons: mods.map(mod => `{${mod}}`).join(' ') }]}
+        buttonAttributes={[...MODS.map(mod => ({ attribute: 'aria-pressed', value: String(mods.includes(mod)), buttons: `{${mod}}` })), ...Object.entries(NAMED).map(([buttons, name]) => ({ attribute: 'aria-label', value: name === 'BackSpace' ? 'Backspace' : name, buttons }))]}
+        onKeyPress={press} onChange={() => keyboard.current?.clearInput()} />
+    </section>
   );
 }

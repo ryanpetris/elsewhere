@@ -66,7 +66,7 @@ const Capture = () => (
   </Badge>
 );
 
-export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, onHideControls, menu, onMenu, keyboard, onKeyboard }) {
+export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, onHideControls, menu, onMenu, keyboard, onKeyboard, canType }) {
   const status = useStore(viewer.store, s => s.status);
   const stream = useStore(viewer.store, s => s.stream);
   const windowTitle = useStore(viewer.store, s => s.windowTitle);
@@ -84,7 +84,7 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, o
       <PopupRole status={status} role={role} text={text} />
       {locked && <MousePointer2 data-mouse-capture className="size-3.5 shrink-0 text-warn" role="img" aria-label="Mouse Captured" />}
       {!windowMode && role === 'participant' && <button type="button" className="btn btn-primary btn-xs" onClick={() => viewer.takeControl()}>Take Control</button>}
-      {!windowMode && role === 'controller' && <IconButton icon={Keyboard} label="On-Screen Keyboard" size="sm" active={keyboard} onClick={onKeyboard} />}
+      {canType && <IconButton icon={Keyboard} label="On-Screen Keyboard" size="sm" active={keyboard} onClick={onKeyboard} />}
       <IconButton icon={CornerUpLeft} label="Return to Viewer" size="sm" onClick={() => window.parent.elsewhereReturn?.()} />
     </header>
   );
@@ -112,7 +112,7 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, o
       <div className="ml-auto flex shrink-0 items-center sm:gap-0.5">
         {locked && <Capture />}
         <Role viewer={viewer} role={role} windowMode={windowMode} />
-        {!windowMode && viewer.touch && role === 'controller' && <IconButton icon={Keyboard} label="On-Screen Keyboard" active={keyboard} onClick={onKeyboard} />}
+        {canType && <IconButton icon={Keyboard} label="On-Screen Keyboard" active={keyboard} onClick={onKeyboard} />}
         {!windowMode && viewer.touch && <IconButton icon={Hand} label="Touch as Mouse" active={touchMouse} onClick={() => viewer.setTouchMouse(!touchMouse)} />}
         {!windowMode && (
           <>

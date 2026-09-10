@@ -191,6 +191,14 @@ try {
       return false
     }
   });
+  const windowStage = await frame.locator('canvas.stage').boundingBox();
+  await frame.getByRole('button', { name: 'On-Screen Keyboard', exact: true }).click();
+  for (const key of ['p', 'i', 'p', '{space}', 'k', 'e', 'y', 's', '{enter}']) {
+    await frame.locator('[data-skbtn=' + JSON.stringify(key) + ']').first().click();
+  }
+  await wait(async () => (await readFile(root + '/typed', 'utf8')).includes('pip keys'));
+  assert.deepEqual(await frame.locator('canvas.stage').boundingBox(), windowStage, 'window PiP keyboard overlays its stage');
+  await frame.getByRole('button', { name: 'Hide Keyboard', exact: true }).click();
   console.log('window PiP input');
   await page.bringToFront();
   await page.getByRole('button', {name: 'Picture-in-Picture', exact: true}).first().click();
@@ -224,7 +232,7 @@ try {
     }
   });
   await frame.getByRole('button', {name: 'Hide Keyboard'}).click();
-  console.log('PiP composition commit reaches terminal through keyboard row');
+  console.log('PiP composition commit reaches terminal through keyboard field');
   await frame.locator('canvas').evaluate(async el => {
     try {
       await el.requestPointerLock();

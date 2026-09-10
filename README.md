@@ -318,11 +318,15 @@ drawn title bar drags with a finger. The hand button switches to "touch as mouse
 handle touch badly: a tap clicks, a finger drags, a hold of half a second right-clicks, two fingers
 scroll, and a pinch zooms the picture on the phone (the desktop keeps the phone's size; two fingers pan
 while zoomed, pinching back undoes it). The side panel slides over the stage, the top bar
-keeps its icons, and on touch devices a keyboard button opens a row with a field that brings up the
-phone's keyboard, whose text goes through the desktop's keyboard layout, and the keys such keyboards
-lack: Esc, Tab, Ctrl, Alt and Super (sticky, for the next key), the arrows, Del. Fullscreen works where
-the browser allows it (Android; iOS Safari has no fullscreen for pages, and needs Safari 26 for
-WebCodecs).
+keeps its icons. The keyboard button opens a full on-screen keyboard on any device. It is available to
+desktop controllers and to window viewers with control permission, including Picture-in-Picture.
+Letters and punctuation follow the desktop's keyboard layout. Shift, Ctrl, Alt and Super stay selected
+for the next on-screen key or IME input; Esc, Tab, Return, Backspace, arrows and Del are also available. The keyboard overlays
+the picture without resizing the desktop or streamed window. Its device-keyboard field supports phone
+keyboards and IME composition. A phone's own keyboard can shrink the browser viewport. In a window
+popup this resizes the application and clears maximized or fullscreen state, just like resizing the
+popup itself. Closing the phone keyboard resizes it again to match the restored viewport. Fullscreen works where the browser allows it, including Android.
+iOS Safari has no fullscreen for pages and needs Safari 26 for WebCodecs.
 
 ## Window streams
 
@@ -342,7 +346,7 @@ When you control the desktop, control and its dimensions follow the PiP viewport
 control in the main viewer, returns that presentation to the main window. Another viewer's control is
 not displaced just by opening or closing PiP. Desktop playback moves to PiP; microphone and camera
 capture stop on handoff and must be restarted explicitly in the main viewer. Window PiP has no audio.
-PiP cannot use fullscreen keyboard capture. Use the keyboard row for desktop composition input and
+PiP cannot use fullscreen keyboard capture. Use the on-screen keyboard or its IME field for desktop and window input, and
 return to the normal viewer for copied-file downloads or capture controls. Browser checks and known
 interaction limits are recorded in [the desktop UI notes](docs/desktop-api.md#document-picture-in-picture).
 
