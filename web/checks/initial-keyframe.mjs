@@ -123,6 +123,42 @@ try {
       await context.close();
     }
   }
+  // Actual token expiry retires a configured decoder; signing in again starts fresh video.
+  const response = await fetch(origin + '/api/tokens', { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label: 'Decoder expiry', permissions: ['desktop.view'], expires_at_ms: Date.now() + 20000 }) });
+  assert.equal(response.status, 201);
+  const expiring = await response.json();
+  const expiryContext = await browser.newContext();
+  await expiryContext.addInitScript(() => {
+    const probe = window.expiryProbe = { outputs: 0, requests: 0, decoders: [], errors: [] };
+    addEventListener('error', event => probe.errors.push(event.message));
+    addEventListener('unhandledrejection', event => probe.errors.push(String(event.reason)));
+    const Decoder = VideoDecoder;
+    window.VideoDecoder = class extends Decoder {
+      constructor(init) { super({ ...init, output: frame => { probe.outputs++; init.output(frame); } }); probe.decoders.push(this); probe.output = init.output; probe.error = init.error; }
+    };
+    const send = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (data) { if (new Uint8Array(data)[0] === 0x88) probe.requests++; return send.call(this, data); };
+  });
+  const expiryPage = await expiryContext.newPage();
+  await expiryPage.goto(origin + '/#token=' + expiring.token);
+  await expiryPage.waitForFunction(() => expiryProbe.outputs > 0 && elsewhere.store.get().status === 'connected');
+  await expiryPage.waitForFunction(() => elsewhere.store.get().status === 'unauthorized', null, { timeout: 40000 });
+  const expiry = await expiryPage.evaluate(async () => {
+    const requests = expiryProbe.requests, count = expiryProbe.decoders.length;
+    const frame = new VideoFrame(document.createElement('canvas'), { timestamp: 1 });
+    expiryProbe.output(frame); expiryProbe.error(Error('queued callback after real expiry'));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    return { released: frame.codedWidth === 0, states: expiryProbe.decoders.map(decoder => decoder.state),
+      newDecoders: expiryProbe.decoders.length - count, requests: expiryProbe.requests - requests, errors: expiryProbe.errors };
+  });
+  assert(expiry.released && expiry.states.every(state => state === 'closed'));
+  assert.equal(expiry.newDecoders, 0); assert.equal(expiry.requests, 0); assert.deepEqual(expiry.errors, []);
+  await expiryPage.getByPlaceholder('token', { exact: true }).fill(token);
+  await Promise.all([expiryPage.waitForNavigation(), expiryPage.getByRole('button', { name: 'Connect', exact: true }).click()]);
+  await expiryPage.waitForFunction(() => expiryProbe.outputs > 0 && elsewhere.store.get().status === 'connected' && elsewhere.store.get().stats.frames > 0);
+  await expiryContext.close();
+  console.log('real token expiry retires decoding; reauthentication resumes native video');
 } catch (error) {
   console.error(await readFile(root + '/server.log', 'utf8'));
   throw error;

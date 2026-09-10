@@ -102,6 +102,7 @@ export function createViewer() {
     if (!rafId) rafId = requestAnimationFrame(() => { rafId = 0; const f = pendingFrame; pendingFrame = null; if (f) paintNow(f); });
   }
   function paintNow(frame) {
+    if (!videoActive()) { frame.close(); return; }
     const pts = frame.timestamp; // before draw() closes the frame
     try {
       // Keep the previous picture until its replacement can be painted in this turn.
@@ -211,6 +212,7 @@ export function createViewer() {
     ws.onmessage = e => { if (!disposed && ws === socket && socket.readyState === WebSocket.OPEN) onMessage(e.data); };
     ws.onclose = e => {
       if (disposed || ws !== socket) return;
+      retireVideo();
       forwardedKeys.clear();
       wantLock = false;
       if (document.pointerLockElement === canvas) document.exitPointerLock();
@@ -224,7 +226,6 @@ export function createViewer() {
       uploadAbort?.abort();
       store.set({ display: null, permissions: [], sessionId: null, role: null, playback: null, audioAvailable: false, micAvailable: false, camAvailable: false, rtcAvailable: false, videoVia: 'websocket' });
       if (e.code === 4001 || e.code === 4004) {
-        stream = null;
         if (e.code === 4001) forgetToken();
         if (document.fullscreenElement) document.exitFullscreen(); // restore the viewer controls for authentication
         store.set({ status: 'unauthorized', reason: e.reason || 'wrong token', stream: null });
@@ -358,8 +359,9 @@ export function createViewer() {
   // controller that is the stage itself; another viewer sees the controller's desktop letterboxed; a
   // window popup shows its window 1:1 unless smaller.
   function fitCanvas() {
-    if (!stream || !canvas || !stage.w) return;
-    const w = stream.width / stream.scale, h = stream.height / stream.scale;
+    const geometry = stream ?? state().stream;
+    if (!geometry || !canvas || !stage.w) return;
+    const w = geometry.width / geometry.scale, h = geometry.height / geometry.scale;
     let k = Math.min(stage.w / w, stage.h / h);
     if (WINDOW) k = Math.min(1, k);
     canvas.style.width = `${w * k}px`;
@@ -367,13 +369,24 @@ export function createViewer() {
     drawCapturedCursor();
   }
 
+  const videoActive = () => !disposed && stream && configuredSocket === ws && ws?.readyState === WebSocket.OPEN;
+  function retireVideo() {
+    stream = null; configuredSocket = null;
+    const previous = decoder; decoder = null;
+    if (previous && previous.state !== 'closed') previous.close();
+    cancelAnimationFrame(rafId); rafId = 0;
+    pendingFrame?.close(); pendingFrame = null;
+    inflight.clear();
+  }
+
   // A decode error closes the decoder for good, so recovery means a fresh one plus a keyframe.
   function newDecoder() {
+    if (!videoActive()) return false;
     if (decoder && decoder.state !== 'closed') decoder.close();
     const config = stream;
     const d = new VideoDecoder({
       output: f => {
-        if (disposed || d !== decoder || stream?.attempt < state().streamState?.attempt) { f.close(); return; }
+        if (!videoActive() || d !== decoder || stream?.attempt < state().streamState?.attempt) { f.close(); return; }
         const pts = f.timestamp;
         try { f = visibleVideoFrame(f, config); }
         catch (e) {
@@ -385,15 +398,15 @@ export function createViewer() {
         }
         const rec = inflight.get(f.timestamp); if (rec) rec.output = performance.now(); (ctx ? paintNow : schedule)(f);
       },
-      error: e => { if (!disposed && d === decoder && !(stream?.attempt < state().streamState?.attempt)) { console.error(e); decodeErrors++; resync(); } },
+      error: e => { if (videoActive() && d === decoder && !(stream?.attempt < state().streamState?.attempt)) { console.error(e); decodeErrors++; resync(); } },
     });
     d.configure({ codec: config.codec, optimizeForLatency: true });
     decoder = d;
     awaitingKey = true;
+    return true;
   }
   function resync() {
-    newDecoder();
-    send(REQUEST_KEYFRAME, 0);
+    if (newDecoder()) send(REQUEST_KEYFRAME, 0);
   }
 
   function onMessage(buf, via = 'websocket', arrival = performance.now()) {
@@ -841,11 +854,7 @@ export function createViewer() {
     disposed = true;
     window.removeEventListener('keydown', controlsShortcut, true);
     window.removeEventListener('keyup', controlsShortcut, true);
-    if (decoder && decoder.state !== 'closed') decoder.close();
-    decoder = null;
-    cancelAnimationFrame(rafId); rafId = 0;
-    pendingFrame?.close(); pendingFrame = null;
-    inflight.clear();
+    retireVideo();
     stage_.decode.length = stage_.paint.length = stage_.interval.length = 0;
     releaseKeyboard();
     unsubscribeKeyboard();

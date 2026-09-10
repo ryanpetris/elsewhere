@@ -23,10 +23,10 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const browser = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--no-sandbox'] });
 const results = [];
 try {
-  for (const renderer of ['2d', 'webgpu']) {
+  for (const renderer of ['2d', 'webgpu']) for (const ending of ['dispose', 4001, 4004, 1006, 4003]) {
     const page = await browser.newPage();
     await page.addInitScript(({ renderer, CONFIG, VIDEO, ROLE, key }) => {
-      const probe = window.probe = { outputs: 0, draws: 0, hold: false, held: new Map(), delivered: [], decoders: [], views: [], created: [], errors: [] };
+      const probe = window.probe = { outputs: 0, draws: 0, hold: false, held: new Map(), delivered: [], decoders: [], views: [], created: [], errors: [], requests: 0 };
       addEventListener('error', event => probe.errors.push(event.message));
       addEventListener('unhandledrejection', event => probe.errors.push(String(event.reason)));
       const Frame = VideoFrame;
@@ -68,7 +68,7 @@ try {
       window.WebSocket = class {
         static OPEN = 1; readyState = 1;
         constructor() { window.socket = this; queueMicrotask(() => { this.onopen?.({}); this.onmessage?.({ data: new Uint8Array([0x15, ...new TextEncoder().encode(JSON.stringify(["desktop.view", "desktop.control", "clipboard.read", "clipboard.write"]))]).buffer }); }); }
-        send() {} close() {}
+        send(data) { if (new Uint8Array(data)[0] === 0x88) probe.requests++; } close() { this.readyState = 3; }
       };
       let seq = 0;
       probe.configure = () => {
@@ -90,35 +90,52 @@ try {
       await page.evaluate(() => { probe.hold = true; probe.feed(); });
       await page.waitForFunction(() => probe.held.size === 1);
     }
-    const result = await page.evaluate(async () => {
+    const result = await page.evaluate(async ending => {
       const decoder = probe.decoders.at(-1), pending = probe.created.at(-1), callbacks = [...probe.held.values()], outputsBefore = probe.outputs;
       for (let i = 0; i < 12; i++) probe.feed();
       const queued = decoder.decodeQueueSize, before = probe.draws, pendingBefore = pending.codedWidth;
-      elsewhere.dispose(); elsewhere.dispose();
+      if (ending === 'dispose') { elsewhere.dispose(); elsewhere.dispose(); }
+      else { socket.readyState = 3; socket.onclose({ code: ending, reason: 'connection ended' }); }
       const state = decoder.state, pendingAfter = pending.codedWidth, held = probe.held.size;
       await new Promise(resolve => setTimeout(resolve, 150));
       // A callback already handed to the application must close its frame without painting or recovering.
       const late = new VideoFrame(document.createElement('canvas'), { timestamp: 50000 });
       probe.output(late); probe.error(new Error('late decoder callback'));
       for (const callback of callbacks) callback(performance.now());
-      return { renderer: elsewhere.store.get().renderer, queued, state, status: elsewhere.store.get().status,
+      return { ending, requests: probe.requests, renderer: elsewhere.store.get().renderer, queued, state, status: elsewhere.store.get().status,
         decoderRetained: elsewhere().decoder !== undefined, pendingBefore, pendingAfter,
         held, nativeOutputsAfterDispose: probe.outputs - outputsBefore, lateClosed: late.codedWidth === 0, extraDraws: probe.draws - before, decoders: probe.decoders.length, nativeReleased: probe.delivered.every(f => f.codedWidth === 0), viewsClosed: probe.views.every(f => f.codedWidth === 0), errors: probe.errors };
-    });
+    }, ending);
     results.push(result);
+    if (ending === 1006 || ending === 4003) {
+      const size = await page.evaluate(() => {
+        elsewhere.setStage(310, 300);
+        const canvas = document.querySelector('canvas.stage');
+        return [parseFloat(canvas.style.width), parseFloat(canvas.style.height)];
+      });
+      assert.deepEqual(size, [310, 300], 'retained picture fits the stage while disconnected');
+    }
+    if (ending === 4001 || ending === 4004) {
+      await page.getByPlaceholder('token', { exact: true }).fill('replacement-token');
+      await Promise.all([page.waitForNavigation(), page.getByRole('button', { name: 'Connect', exact: true }).click()]);
+      await page.waitForFunction(() => window.socket && window.elsewhere?.store);
+      await page.evaluate(() => { probe.configure(); probe.feed(); });
+      await page.waitForFunction(() => probe.draws > 0 && elsewhere.store.get().status === 'connected');
+      assert.deepEqual(await page.evaluate(() => probe.size), [62, 60], 'authenticated replacement connection paints normally');
+    }
     await page.close();
   }
   console.log(JSON.stringify(results));
   for (const result of results) {
     assert.ok(result.queued > 0, 'native decode work was queued at disposal');
-    assert.equal(result.state, 'closed'); assert.equal(result.status, 'closed'); assert.equal(result.decoderRetained, false);
-    assert.equal(result.extraDraws, 0); assert.equal(result.lateClosed, true); assert.equal(result.decoders, 1);
+    assert.equal(result.state, 'closed'); assert.equal(result.status, result.ending === 'dispose' ? 'closed' : result.ending === 1006 ? 'retrying' : result.ending === 4003 ? 'gone' : 'unauthorized'); assert.equal(result.decoderRetained, false);
+    assert.equal(result.requests, 0); assert.equal(result.extraDraws, 0); assert.equal(result.lateClosed, true); assert.equal(result.decoders, 1);
     assert.equal(result.pendingAfter, 0); assert.equal(result.held, 0); assert.deepEqual(result.errors, []);
     assert.equal(result.nativeReleased, true, 'decoder originals released');
     assert.equal(result.viewsClosed, true, 'rendered crop views released');
     if (result.renderer === 'webgpu') assert.ok(result.pendingBefore > 0, 'cropped view pending before disposal');
   }
-  console.log('viewer disposal: native queued decode, late callbacks, pending frame/animation cleanup and repeated disposal passed');
+  console.log('viewer termination: disposal, authorization close 4001/4004, disconnect 1006/4003, retained-picture resize, queued decode cleanup and reauthentication passed');
 } finally {
   await browser.close();
   await new Promise(resolve => server.close(resolve));
