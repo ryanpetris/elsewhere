@@ -11,4 +11,5 @@ tokio = { workspace = true, features = ["sync", "rt", "macros", "time"] }
 tracing.workspace = true
 ffmpeg-next = "9"
 libc = "0.2"
+libloading = "0.8"
 pipewire = { version = "0.10.1", features = ["v0_3_65"] }

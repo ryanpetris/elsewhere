@@ -1,5 +1,6 @@
 //! FFmpeg video and audio codecs, GPU conversion and native device I/O.
 mod encoder;
+mod nvidia;
 pub mod gpu;
 mod viewer;
 mod running;
@@ -8,7 +9,7 @@ mod webcam;
 pub mod broadcast;
 
 pub use encoder::Encoders;
-pub use viewer::{FfmpegSink, validate_software_frame};
+pub use viewer::FfmpegSink;
 pub use running::Running;
 pub use audio::{audio_source, audio_sink};
 pub use webcam::video_sink;

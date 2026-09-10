@@ -52,7 +52,7 @@ fn main() {
     let compositor = elsewhere_compositor::spawn(elsewhere_compositor::Config {
         render_node, socket_name: "wayland-render-retry".into(),
         initial: OutputGeometry { width_px: 320, height_px: 240, scale: 1.0, refresh_mhz: 30_000 },
-        exec: None, exec_env: vec![], kiosk: true, software_encoding: software,
+        exec: None, exec_env: vec![], kiosk: true, frame_transport: if software { elsewhere_core::FrameTransport::Memory } else { elsewhere_core::FrameTransport::Dmabuf },
         validate_format: Box::new(|_| Ok(())),
     }, events).unwrap();
     let source = Process::new(&args[1]).arg(&args[2]).env("WAYLAND_DISPLAY", &compositor.socket_name).spawn().unwrap();

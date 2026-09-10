@@ -991,6 +991,7 @@ dependencies = [
  "elsewhere-core",
  "ffmpeg-next",
  "libc",
+ "libloading",
  "pipewire",
  "tokio",
  "tracing",

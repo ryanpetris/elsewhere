@@ -328,6 +328,14 @@ pub struct CursorImage {
     pub rgba: Vec<u8>,
 }
 
+/// How the compositor supplies pixels to the selected encoder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameTransport {
+    Dmabuf,
+    LinearDmabuf,
+    Memory,
+}
+
 /// One composited frame, handed from the compositor to the encoder.
 pub struct Frame {
     pub width: u32,
@@ -355,7 +363,7 @@ pub enum FrameBuffer {
         /// Whatever keeps the buffer alive; dropping it frees the slot.
         lease: Box<dyn Any + Send + Sync>,
     },
-    /// Pixels read back from a software renderer: linear, rows of `stride` bytes, the top row first;
+    /// Pixels read back from the renderer: linear, rows of `stride` bytes, the top row first;
     /// shared between the viewers' sinks, copied by none.
     Memory { data: Bytes, stride: u32 },
 }

@@ -35,7 +35,7 @@ struct Cli {
     /// Comma-separated codecs to allow. Only these encoders are probed; the browser ranks them.
     #[arg(long, value_delimiter = ',', default_value = "h264,hevc,av1,vp9,vp8", value_parser = ["h264", "hevc", "vp9", "av1", "vp8"])]
     codecs: Vec<String>,
-    /// Encode on the CPU (libvpx, x264, x265, libaom: whichever is installed) instead of with VA-API,
+    /// Encode on the CPU (libvpx, x264, x265, libaom: whichever is installed) instead of with VA-API or NVENC,
     /// for machines without a usable GPU encoder. Slower; the desktop runs at 30 Hz.
     #[arg(long)]
     software_encoding: bool,
@@ -184,7 +184,7 @@ fn main() -> Result<()> {
         tracing::info!("no GPU ({}): rendering in software, encoding in software", cli.render_node.display());
     }
     let software = cli.software_encoding || render_node.is_none();
-    let encoders = elsewhere_stream::Encoders::probe(if software { None } else { render_node.as_deref() }, &allowed)?;
+    let encoders = elsewhere_stream::Encoders::probe(render_node.as_deref(), software, &allowed)?;
     let codecs = encoders.codecs();
     tracing::info!(?codecs, software, "video encoders");
     let (audio_tx, audio_rx) = mpsc::channel(16);
@@ -232,11 +232,9 @@ fn main() -> Result<()> {
         // GTK always publishes its tree; Firefox and Qt only when asked. (Chromium needs --force-renderer-accessibility.)
         exec_env.extend([("GNOME_ACCESSIBILITY", "1"), ("QT_LINUX_ACCESSIBILITY_ALWAYS_ON", "1")].map(|(k, v)| (k.to_string(), v.to_string())));
     }
-    let probe_node = render_node.clone();
-    let validate_format = Box::new(move |frame| {
-        if software { elsewhere_stream::validate_software_frame(frame) }
-        else { elsewhere_stream::gpu::probe(probe_node.as_deref().context("missing encoder render node")?, frame) }
-    });
+    let frame_transport = encoders.frame_transport();
+    let probe_encoders = encoders.clone();
+    let validate_format = Box::new(move |frame| probe_encoders.validate_frame(frame));
     let data_dir = elsewhere_server::Config::default_data_dir()?;
     let files_dir = std::path::absolute(cli.files_dir.unwrap_or_else(elsewhere_server::files::default_dir))?;
     let mut initial = elsewhere_core::OutputGeometry {
@@ -257,7 +255,7 @@ fn main() -> Result<()> {
             exec: cli.exec.clone(),
             exec_env,
             kiosk: cli.kiosk,
-            software_encoding: software,
+            frame_transport,
             validate_format,
         },
         events_tx,

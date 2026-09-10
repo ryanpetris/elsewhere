@@ -3,7 +3,7 @@ use std::{sync::{Arc, Condvar, Mutex, Weak, atomic::{AtomicU32, Ordering}}, time
 use anyhow::{Context, Result, ensure};
 use elsewhere_core::{Bytes, Codec, EffortState, EncodingEffort, EncodedFrame, Frame, FrameBuffer, FrameSink, OutputGeometry, Quality, SinkError, StreamControl, StreamInfo, StreamMsg, Submit};
 use tokio::sync::{Notify, mpsc};
-use crate::encoder::{Encoders, SoftwareConverter, VideoEncoder};
+use crate::encoder::{Backend, Encoders, SoftwareConverter, VideoEncoder};
 
 static STREAM_SEQ: AtomicU32 = AtomicU32::new(1);
 type Redraw = Arc<dyn Fn() + Send + Sync>;
@@ -183,12 +183,12 @@ impl Active {
         let source = settings.source.context("missing video source")?;
         let source_size = (source.geometry.width_px, source.geometry.height_px);
         let size = settings.size.unwrap_or(source_size);
-        let converter = match encoders.node.as_deref() {
-            Some(node) => Converter::Hardware(crate::gpu::Converter::new(node, source_size.0, source_size.1, source.fourcc, source.modifier, size)?),
-            None => Converter::Software(SoftwareConverter::new(source_size.0, source_size.1, source.fourcc, size)?),
+        let converter = match &encoders.backend {
+            Backend::Vaapi(node) => Converter::Hardware(crate::gpu::Converter::new(node, source_size.0, source_size.1, source.fourcc, source.modifier, size)?),
+            _ => Converter::Software(SoftwareConverter::new(source_size.0, source_size.1, source.fourcc, size)?),
         };
         let frames = match &converter { Converter::Hardware(gpu) => gpu.hw_frames_ctx(), Converter::Software(_) => std::ptr::null_mut() };
-        let encoder = VideoEncoder::open(encoders.choice(settings.codec)?, size, (source.geometry.refresh_mhz / 1000).max(1) as u32, settings.quality, settings.effort, frames)?;
+        let encoder = VideoEncoder::open(encoders.choice(settings.codec)?, &encoders.backend, size, (source.geometry.refresh_mhz / 1000).max(1) as u32, settings.quality, settings.effort, frames)?;
         let stream_id = STREAM_SEQ.fetch_add(1, Ordering::Relaxed);
         let scale = source.geometry.scale * size.0 as f64 / source_size.0 as f64;
         Ok(Self { encoder, converter, settings, epoch, stream_id, info: Some(StreamInfo { stream_id, codec: String::new(), width: size.0, height: size.1, scale }) })
@@ -390,13 +390,6 @@ fn deliver(shared: &Shared, tx: &mpsc::Sender<StreamMsg>, messages: Vec<StreamMs
     Ok(true)
 }
 
-/// CPU encoders can only map the compositor's packed, linear RGB allocations.
-pub fn validate_software_frame(frame: Frame) -> Result<()> {
-    let mut converter = SoftwareConverter::new(frame.width, frame.height, frame.fourcc, (frame.width, frame.height))?;
-    converter.convert(frame)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -518,7 +511,7 @@ mod tests {
     fn encoders() -> Arc<Encoders> {
         static ENCODERS: OnceLock<Arc<Encoders>> = OnceLock::new();
         ENCODERS.get_or_init(|| {
-            let encoders = Encoders::probe(None, &[Codec::H264, Codec::Hevc, Codec::Av1, Codec::Vp9, Codec::Vp8]).unwrap();
+            let encoders = Encoders::probe(None, true, &[Codec::H264, Codec::Hevc, Codec::Av1, Codec::Vp9, Codec::Vp8]).unwrap();
             for (codec, libraries) in [
                 (Codec::H264, &["libx264", "libopenh264"][..]),
                 (Codec::Hevc, &["libx265"][..]),

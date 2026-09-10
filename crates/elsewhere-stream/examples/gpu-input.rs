@@ -124,7 +124,7 @@ fn main() -> Result<()> {
     let buffers = [Buffer::new(&device, tiled, [255, 0, 0])?, Buffer::new(&device, 0, [0, 255, 0])?];
     ensure!(buffers[0].modifier == tiled && tiled != 0 && tiled != 0x00ff_ffff_ffff_ffff, "test needs a real tiled export");
     ensure!(matches!(buffers[1].modifier, 0 | 0x00ff_ffff_ffff_ffff), "test needs a real linear export");
-    let encoders = Encoders::probe(Some(&node), &[Codec::H264])?;
+    let encoders = Encoders::probe(Some(&node), false, &[Codec::H264])?;
     ensure!(encoders.codecs().contains(&Codec::H264), "H264 VA encoding unavailable");
     let baseline = resources()?;
     let leases = Arc::new(Leases::default());

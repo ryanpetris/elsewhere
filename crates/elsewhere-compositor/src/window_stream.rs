@@ -1,5 +1,5 @@
 //! One window as its own video stream: rendered from its buffers (popups included) into targets of its
-//! own (a dmabuf swapchain, or a texture read back without a GPU) and handed to its own encoder, at the
+//! own (a dmabuf swapchain, or a texture read back to memory) and handed to its own encoder, at the
 //! output's scale, only when it changed.
 
 use std::{os::fd::AsFd, time::{Duration, Instant}};

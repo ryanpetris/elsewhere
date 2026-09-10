@@ -145,7 +145,7 @@ impl State {
             let Gpu { renderer, targets, fourcc, .. } = &mut self.gpu;
             let mut fb = targets.bind(renderer, &mut target)?;
             let res = self.damage_tracker.render_output(renderer, &mut fb, age, &elements, CLEAR)?;
-            // no GPU: the pixels come back through the CPU now, while the framebuffer is bound
+            // Texture transport and broadcasts read pixels while the framebuffer is bound.
             let pixels = if (texture || broadcast) && res.damage.is_some() && !self.viewer_sinks.is_empty() { Some(read_pixels(renderer, &fb, size, if broadcast { smithay::backend::allocator::Fourcc::Xrgb8888 } else { *fourcc })?) } else { None };
             (res.sync, res.damage.is_some(), res.states, pixels)
         };

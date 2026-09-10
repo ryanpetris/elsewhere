@@ -1,7 +1,7 @@
 //! Low-delay viewer encoders and conversion from owned CPU pictures.
 use std::{ffi::CString, os::fd::{AsRawFd, OwnedFd}, path::{Path, PathBuf}, ptr, sync::Arc};
 use anyhow::{Context, Result, bail, ensure};
-use elsewhere_core::{Codec, EffortState, EncodingEffort, Frame, FrameBuffer, Quality};
+use elsewhere_core::{Codec, EffortState, EncodingEffort, Frame, FrameBuffer, FrameTransport, Quality};
 use ffmpeg_next::{self as ffmpeg, ffi as av, format::Pixel};
 
 const TIME_BASE: (i32, i32) = (1, 1_000_000);
@@ -10,34 +10,48 @@ pub(crate) const BUFFER_MS: u32 = 100;
 #[derive(Clone, Debug)]
 pub(crate) struct Choice { pub codec: Codec, pub name: &'static str, pub low_power: bool }
 
+#[derive(Debug)]
+pub(crate) enum Backend { Vaapi(PathBuf), Nvenc(i32), Software }
+
 /// Encoders proven to produce a recovery picture on the selected device.
-pub struct Encoders { pub(crate) node: Option<PathBuf>, choices: Vec<Choice> }
+pub struct Encoders { pub(crate) backend: Backend, transport: FrameTransport, choices: Vec<Choice> }
 
 impl Encoders {
-    pub fn probe(node: Option<&Path>, allowed: &[Codec]) -> Result<Arc<Self>> {
+    pub fn probe(node: Option<&Path>, software: bool, allowed: &[Codec]) -> Result<Arc<Self>> {
         crate::init()?;
         let mut choices = Vec::new();
         let order = [Codec::H264, Codec::Hevc, Codec::Av1, Codec::Vp9, Codec::Vp8];
-        let hardware = node.map(ProbeFrames::new).transpose()?;
+        let nvidia = node.map(crate::nvidia::pci_device).transpose()?.flatten();
+        let backend = if software || node.is_none() { Backend::Software }
+            else if let Some(pci) = &nvidia { Backend::Nvenc(crate::nvidia::cuda_device(pci)?) }
+            else { Backend::Vaapi(node.unwrap().to_path_buf()) };
+        let transport = if nvidia.is_some() || node.is_none() { FrameTransport::Memory }
+            else if software { FrameTransport::LinearDmabuf } else { FrameTransport::Dmabuf };
+        let hardware = match &backend { Backend::Vaapi(node) => Some(ProbeFrames::new(node)
+            .context("open VA-API encoder device; use --software-encoding for CPU encoding")?), _ => None };
         for codec in order.into_iter().filter(|codec| allowed.contains(codec)) {
-            let names: &[&'static str] = match (node.is_some(), codec) {
-                (true, Codec::H264) => &["h264_vaapi"],
-                (true, Codec::Hevc) => &["hevc_vaapi"],
-                (true, Codec::Vp9) => &["vp9_vaapi"],
-                (true, Codec::Av1) => &["av1_vaapi"],
-                (true, Codec::Vp8) => &[],
-                (false, Codec::H264) => &["libx264", "libopenh264"],
-                (false, Codec::Hevc) => &["libx265"],
-                (false, Codec::Vp8) => &["libvpx"],
-                (false, Codec::Vp9) => &["libvpx-vp9"],
-                (false, Codec::Av1) => &["libaom-av1"],
+            let names: &[&'static str] = match (&backend, codec) {
+                (Backend::Vaapi(_), Codec::H264) => &["h264_vaapi"],
+                (Backend::Vaapi(_), Codec::Hevc) => &["hevc_vaapi"],
+                (Backend::Vaapi(_), Codec::Vp9) => &["vp9_vaapi"],
+                (Backend::Vaapi(_), Codec::Av1) => &["av1_vaapi"],
+                (Backend::Vaapi(_), Codec::Vp8) => &[],
+                (Backend::Nvenc(_), Codec::H264) => &["h264_nvenc"],
+                (Backend::Nvenc(_), Codec::Hevc) => &["hevc_nvenc"],
+                (Backend::Nvenc(_), Codec::Av1) => &["av1_nvenc"],
+                (Backend::Nvenc(_), Codec::Vp8 | Codec::Vp9) => &[],
+                (Backend::Software, Codec::H264) => &["libx264", "libopenh264"],
+                (Backend::Software, Codec::Hevc) => &["libx265"],
+                (Backend::Software, Codec::Vp8) => &["libvpx"],
+                (Backend::Software, Codec::Vp9) => &["libvpx-vp9"],
+                (Backend::Software, Codec::Av1) => &["libaom-av1"],
             };
             'candidate: for &name in names {
                 if ffmpeg::encoder::find_by_name(name).is_none() { continue; }
                 for low_power in [false, true].into_iter().take(if hardware.is_some() { 2 } else { 1 }) {
                     let choice = Choice { codec, name, low_power };
                     let result = (|| -> Result<()> {
-                        let mut enc = VideoEncoder::open(&choice, (320, 180), 30, Quality { bitrate_kbps: 1000, max_fps: 0 }, EncodingEffort::Fast, hardware.as_ref().map_or(ptr::null_mut(), |h| h.frames))?;
+                        let mut enc = VideoEncoder::open(&choice, &backend, (320, 180), 30, Quality { bitrate_kbps: 1000, max_fps: 0 }, EncodingEffort::Fast, hardware.as_ref().map_or(ptr::null_mut(), |h| h.frames))?;
                         let frame = if let Some(hardware) = &hardware { hardware.picture()? } else { black(Pixel::YUV420P, 320, 180) };
                         let packets = enc.encode(frame, true)?;
                         let key = packets.iter().find(|p| p.is_key()).context("encoder did not produce a recovery keyframe")?;
@@ -51,8 +65,23 @@ impl Encoders {
                 }
             }
         }
-        ensure!(!choices.is_empty(), "no usable FFmpeg {} video encoder", if node.is_some() { "VA-API" } else { "software" });
-        Ok(Arc::new(Self { node: node.map(Path::to_path_buf), choices }))
+        ensure!(!choices.is_empty(), "no usable FFmpeg video encoder for {backend:?}; check the GPU driver and FFmpeg build, or use --software-encoding");
+        tracing::info!(?backend, ?transport, encoders = ?choices.iter().map(|c| c.name).collect::<Vec<_>>(), "verified video encoders");
+        Ok(Arc::new(Self { backend, transport, choices }))
+    }
+
+    pub fn frame_transport(&self) -> FrameTransport { self.transport }
+
+    pub fn validate_frame(&self, frame: Frame) -> Result<()> {
+        if let Backend::Vaapi(node) = &self.backend { return crate::gpu::probe(node, frame); }
+        let size = (frame.width, frame.height);
+        let mut converter = SoftwareConverter::new(size.0, size.1, frame.fourcc, size)?;
+        let picture = converter.convert(frame)?;
+        if matches!(self.backend, Backend::Nvenc(_)) {
+            VideoEncoder::open(&self.choices[0], &self.backend, size, 60,
+                Quality { bitrate_kbps: 1000, max_fps: 0 }, EncodingEffort::Fast, ptr::null_mut())?.encode(picture, true)?;
+        }
+        Ok(())
     }
 
     pub fn codecs(&self) -> Vec<Codec> { self.choices.iter().map(|c| c.codec).collect() }
@@ -68,7 +97,7 @@ pub(crate) struct VideoEncoder {
 }
 
 impl VideoEncoder {
-    pub fn open(choice: &Choice, size: (u32, u32), fps: u32, quality: Quality, effort: EncodingEffort, hw_frames: *mut av::AVBufferRef) -> Result<Self> {
+    pub fn open(choice: &Choice, backend: &Backend, size: (u32, u32), fps: u32, quality: Quality, effort: EncodingEffort, hw_frames: *mut av::AVBufferRef) -> Result<Self> {
         let codec = ffmpeg::encoder::find_by_name(choice.name).context("FFmpeg encoder unavailable")?;
         let (width, height) = size;
         ensure!(width >= 2 && height >= 2 && width <= 8192 && height <= 8192 && width % 2 == 0 && height % 2 == 0, "invalid video dimensions");
@@ -84,12 +113,13 @@ impl VideoEncoder {
         video.set_frame_rate(Some((fps as i32, 1)));
         video.set_format(if hw_frames.is_null() { Pixel::YUV420P } else { Pixel::VAAPI });
         video.set_max_b_frames(0);
-        video.set_gop(if hw_frames.is_null() { i32::MAX as u32 } else { 1024 });
+        video.set_gop(if matches!(backend, Backend::Software) { i32::MAX as u32 } else { 1024 });
         video.set_qmin(0);
         // VA uses native quantizer indices; software VP9/AV1 expose the 0..63 scale.
         video.set_qmax(match choice.codec {
             Codec::H264 | Codec::Hevc => 51,
-            Codec::Vp9 | Codec::Av1 if !hw_frames.is_null() => 255,
+            Codec::Vp9 | Codec::Av1 if matches!(backend, Backend::Vaapi(_)) => 255,
+            Codec::Av1 if matches!(backend, Backend::Nvenc(_)) => 255,
             _ => 63,
         });
         let mut options = ffmpeg::Dictionary::new();
@@ -116,6 +146,17 @@ impl VideoEncoder {
                     ctx.compression_level = level as i32;
                     state.setting = Some(format!("compression_level={level}"));
                 } else { state.applied = None; }
+            } else if let Backend::Nvenc(gpu) = backend {
+                options.set("gpu", &gpu.to_string());
+                let preset = ["p1", "p3", "p5"][index];
+                options.set("preset", preset);
+                options.set("tune", "ull");
+                options.set("rc", "cbr");
+                options.set("rc-lookahead", "0");
+                options.set("zerolatency", "1");
+                options.set("delay", "0");
+                if choice.codec != Codec::Av1 { options.set("forced-idr", "1"); }
+                state.setting = Some(format!("preset={preset}"));
             } else {
                 match choice.name {
                     "libx264" => {

@@ -1,10 +1,11 @@
 //! The renderer and what it renders into: a render node's GBM device with dmabuf swapchains the encoders
-//! import, or, without a GPU, Mesa's surfaceless platform (llvmpipe) with a texture read back into memory.
+//! import, or textures read back into memory for NVENC and CPU encoders. Without a render node the
+//! context uses Mesa's surfaceless platform.
 
 use std::{fs::OpenOptions, os::fd::{AsFd, OwnedFd}, path::Path, time::Duration};
 
 use anyhow::{Context, Result};
-use elsewhere_core::{Frame, FrameBuffer, OutputGeometry};
+use elsewhere_core::{Frame, FrameBuffer, FrameTransport, OutputGeometry};
 use smithay::{
     backend::{
         allocator::{
@@ -45,7 +46,7 @@ pub struct Gpu {
 pub enum Targets {
     /// Dmabufs the encoders import zero-copy, in the negotiated format.
     Dmabuf(DmabufSwapchain),
-    /// No GPU: one texture, read back into memory after each frame (made on first use, again after a resize).
+    /// One texture, read back into memory after each frame (made on first use, again after a resize).
     Texture { texture: Option<GlesTexture>, size: Size<i32, Buffer> },
 }
 
@@ -58,14 +59,13 @@ pub enum Target {
 impl Gpu {
     /// Trial renderer allocations through the encoder. Without a render node, software encoders
     /// take the pixels as read back (BGRx).
-    pub fn new(render_node: Option<&Path>, geo: &OutputGeometry, software: bool, validate: &dyn Fn(Frame) -> Result<()>) -> Result<Gpu> {
+    pub fn new(render_node: Option<&Path>, geo: &OutputGeometry, transport: FrameTransport, validate: &dyn Fn(Frame) -> Result<()>) -> Result<Gpu> {
         let Some(render_node) = render_node else {
             // Safety: the display is only used from this thread and outlives the renderer through the context.
             let renderer = unsafe { EGLDisplay::new(EGLSurfacelessDisplay).and_then(|egl| EGLContext::new(&egl)).map_err(anyhow::Error::from).and_then(|ctx| Ok(GlesRenderer::new(ctx)?)) }
                 .context("Mesa's surfaceless EGL platform (no render node; LIBGL_ALWAYS_SOFTWARE=1 forces llvmpipe)")?;
             tracing::info!("no GPU: rendering with Mesa's surfaceless platform, frames read back into memory");
-            let targets = Targets::Texture { texture: None, size: (geo.width_px as i32, geo.height_px as i32).into() };
-            return Ok(Gpu { device: None, renderer, targets, fourcc: Fourcc::Xrgb8888, modifier: Modifier::Linear, allocation_modifier: Modifier::Linear, modifier_verified: false });
+            return Self::memory(None, renderer, geo, validate);
         };
         let node = DrmNode::from_path(render_node)?;
         let file = OpenOptions::new().read(true).write(true).open(render_node)?;
@@ -75,10 +75,13 @@ impl Gpu {
         let egl = unsafe { EGLDisplay::new(gbm.clone())? };
         let mut renderer = unsafe { GlesRenderer::new(EGLContext::new(&egl)?)? };
 
+        if transport == FrameTransport::Memory {
+            return Self::memory(Some(Device { node, drm: fd, gbm }), renderer, geo, validate);
+        }
         let renderable = Bind::<Dmabuf>::supported_formats(&renderer).unwrap_or_default();
         let mut candidates: Vec<_> = renderable
             .iter()
-            .filter(|format| matches!(format.code, Fourcc::Argb8888 | Fourcc::Xrgb8888) && (!software || format.modifier == Modifier::Linear))
+            .filter(|format| matches!(format.code, Fourcc::Argb8888 | Fourcc::Xrgb8888) && (transport != FrameTransport::LinearDmabuf || format.modifier == Modifier::Linear))
             .map(|format| (format.code, format.modifier))
             .collect();
         candidates.sort_by_key(|&(fourcc, modifier)| {
@@ -122,11 +125,32 @@ impl Gpu {
         Ok(Gpu { device: Some(Device { node, drm: fd, gbm }), renderer, targets, fourcc, modifier, allocation_modifier, modifier_verified: false })
     }
 
+    fn memory(device: Option<Device>, mut renderer: GlesRenderer, geo: &OutputGeometry, validate: &dyn Fn(Frame) -> Result<()>) -> Result<Gpu> {
+        let size = (geo.width_px as i32, geo.height_px as i32).into();
+        let fourcc = Fourcc::Xrgb8888;
+        let mut targets = Targets::Texture { texture: None, size };
+        let (mut target, _) = targets.acquire(&mut renderer, fourcc)?.context("allocate texture probe")?;
+        let pixels = {
+            let mut fb = targets.bind(&mut renderer, &mut target)?;
+            let physical = (geo.width_px as i32, geo.height_px as i32).into();
+            let mut frame = renderer.render(&mut fb, physical, Transform::Normal)?;
+            frame.clear([0.12, 0.12, 0.14, 1.0].into(), &[Rectangle::from_size(physical)])?;
+            let sync = frame.finish()?;
+            while sync.wait().is_err() {}
+            read_pixels(&mut renderer, &fb, size, fourcc)?
+        };
+        validate(Frame { width: geo.width_px, height: geo.height_px, fourcc: fourcc as u32,
+            pts: Duration::ZERO, seq: 0, refine: false,
+            buffer: FrameBuffer::Memory { data: pixels.into(), stride: geo.width_px * 4 } })?;
+        tracing::info!(?fourcc, "verified texture render target and framebuffer readback");
+        Ok(Gpu { device, renderer, targets, fourcc, modifier: Modifier::Linear, allocation_modifier: Modifier::Linear, modifier_verified: false })
+    }
+
     /// Targets for a window stream of `width`×`height`.
     pub fn targets(&self, width: u32, height: u32) -> Targets {
-        match &self.device {
-            Some(d) => Targets::Dmabuf(swapchain(&d.gbm, self.fourcc, self.allocation_modifier, width, height)),
-            None => Targets::Texture { texture: None, size: (width as i32, height as i32).into() },
+        match (&self.targets, &self.device) {
+            (Targets::Dmabuf(_), Some(d)) => Targets::Dmabuf(swapchain(&d.gbm, self.fourcc, self.allocation_modifier, width, height)),
+            _ => Targets::Texture { texture: None, size: (width as i32, height as i32).into() },
         }
     }
 }

@@ -92,8 +92,8 @@ pub struct Config {
     pub exec_env: Vec<(String, String)>,
     /// Every new window is fullscreened (for running a nested desktop).
     pub kiosk: bool,
-    /// Software encoders need linear render targets they can map.
-    pub software_encoding: bool,
+    /// Pixel transport selected independently of the rendering device.
+    pub frame_transport: elsewhere_core::FrameTransport,
     /// Verify a real renderer allocation through the selected encoder's conversion path.
     pub validate_format: Box<dyn Fn(elsewhere_core::Frame) -> Result<()> + Send>,
 }
@@ -280,7 +280,7 @@ impl State {
         handle.insert_source(pinged, |_, _, state| state.drag_settle())?;
         let dh = display.handle();
 
-        let gpu = gpu::Gpu::new(cfg.render_node.as_deref(), &cfg.initial, cfg.software_encoding, &*cfg.validate_format)?;
+        let gpu = gpu::Gpu::new(cfg.render_node.as_deref(), &cfg.initial, cfg.frame_transport, &*cfg.validate_format)?;
 
         let output = Output::new(
             "ELSEWHERE-1".into(),
