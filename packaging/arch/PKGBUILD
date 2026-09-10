@@ -11,7 +11,7 @@ arch=('x86_64')
 url="https://github.com/ryanpetris/elsewhere"
 license=('MIT')
 depends=('ffmpeg' 'libva' 'mesa' 'libxkbcommon' 'libpipewire' 'ca-certificates')
-makedepends=('cargo' 'nodejs' 'npm' 'clang' 'git' 'make')
+makedepends=('cargo' 'nodejs' 'npm' 'clang' 'glib2' 'git' 'make')
 optdepends=('xorg-xwayland: X11 clients'
             'ttf-dejavu: titles on the window decorations the compositor draws'
             'pipewire: private native audio services (PipeWire 1.4.2 or later)'

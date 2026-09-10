@@ -13,9 +13,10 @@ Design notes: [docs/architecture.md](docs/architecture.md), [docs/protocol.md](d
 Releases made from `vX.Y.Z` tags carry separate native packages and tarballs for Debian stable
 and current Ubuntu, plus an Arch package. Choose the artifact for your distribution;
 FFmpeg shared-library ABIs differ between releases.
-Building from source needs Rust stable, Node 24 for the viewer, Clang, pkg-config and the development
+Building from source needs Rust stable, Node 24 for the viewer, Clang, pkg-config, `glib-compile-schemas` and the development
 packages for FFmpeg, libva, PipeWire, libgbm, libEGL and libxkbcommon; `make` builds the viewer and then
-`target/release/elsewhere`. `make version` reports the nearest reachable `vX.Y.Z` release tag,
+`target/release/elsewhere`. The schema compiler comes from `libglib2.0-bin` on Debian/Ubuntu
+and `glib2` on Arch. `make version` reports the nearest reachable `vX.Y.Z` release tag,
 adding `.N` for commits since that tag and `-dirty` for tracked changes or untracked files.
 For example, three commits after `v0.1.2` produce `v0.1.2.3`, or `v0.1.2.3-dirty` with local changes.
 Ignored build outputs do not make a checkout dirty. Fetch tags and full history before building;
@@ -198,19 +199,15 @@ xfce4-panel needs a D-Bus session bus for xfconfd; the wrapper is only needed wh
  Its pager shows the single workspace. Waybar's default config draws its
 icons with Font Awesome (`otf-font-awesome`); GTK only shows icons in the Xfce menus with
 `gtk-menu-images=1` in `~/.config/gtk-3.0/settings.ini`, which xfsettingsd normally sets. Windows
-that draw their own title bar (GTK applications, Firefox, Chromium) take its buttons from the GSettings
-key `org.gnome.desktop.wm.preferences button-layout`, whose GNOME default is `appmenu:close`; without
-a desktop that sets it, minimize and maximize are missing until you do:
-
-```sh
-gsettings set org.gnome.desktop.wm.preferences button-layout 'menu:minimize,maximize,close'
-```
+that draw their own title bar take its buttons from the GSettings key
+`org.gnome.desktop.wm.preferences button-layout`. Elsewhere supplies
+`menu:minimize,maximize,close` as the session default while preserving explicit user preferences.
 
 The `Dockerfile` packages all of that on Arch Linux: Elsewhere, the Xfce panel and apps,
 Firefox and Chromium, applications for what the desktop can do (guvcview for the webcam, Audacity, GIMP,
 mpv with VA-API decode, Ristretto, pavucontrol), nano and a passwordless sudo for the `elsewhere` user, with PipeWire for audio and
 Mesa's OpenGL and Vulkan drivers for Intel and AMD (`glxgears`, `vkcube` and the info tools are included
-to check them), and the two GTK settings above. Programs launched from the desktop start in the home folder.
+to check them), and GTK menu icons. Programs launched from the desktop start in the home folder.
 The desktop starts empty; the viewer's menu launches the applications, and `--exec xfce4-panel` after
 the image name adds the panel. `make docker-run` builds the image and runs it; the details are
 in the Dockerfile's header.
@@ -456,6 +453,11 @@ lists them all.
 Games and other clients that lock the pointer get raw mouse deltas: the page mirrors the lock with the
 Pointer Lock API. In supported application fullscreen, normal Escape reaches the client and holding
 Escape releases capture through the browser.
+
+GTK client headers default to minimize, maximize and close buttons in ordinary and Docker sessions.
+The binary supplies [session-scoped GSettings defaults](crates/elsewhere/resources/schemas/README.md);
+explicit user settings and application schemas retain their precedence. Fullscreen and fixed-size
+windows still follow their toolkit's window-control rules.
 
 Certificate and tokens live in `$XDG_CONFIG_HOME/elsewhere/`; delete them to regenerate.
 

@@ -37,7 +37,7 @@ RUN npm run build
 
 FROM archlinux:latest AS build
 RUN pacman -Sy --noconfirm archlinux-keyring \
-    && pacman -Syu --noconfirm --needed rust pkgconf clang libpipewire ffmpeg libva mesa libxkbcommon \
+    && pacman -Syu --noconfirm --needed rust pkgconf clang glib2 libpipewire ffmpeg libva mesa libxkbcommon \
     && rm -rf /var/cache/pacman/pkg/*
 WORKDIR /src
 COPY . .
@@ -61,12 +61,8 @@ RUN pacman -Syu --noconfirm --needed \
         mesa-utils mesa-demos vulkan-tools xfce4 firefox chromium \
         guvcview audacity gimp mpv ristretto pavucontrol nano sudo \
     && rm -rf /var/cache/pacman/pkg/*
-# GTK hides menu icons unless told otherwise, and on Wayland it takes the title-bar buttons of
-# client-decorated windows (GTK apps, Firefox, Chromium) from GSettings, where GNOME's default keeps
-# only Close. On a real Xfce session xfsettingsd provides both.
+# Menu icons and hardware-assisted playback for desktop applications.
 RUN printf '[Settings]\ngtk-menu-images=1\n' > /etc/gtk-3.0/settings.ini \
-    && printf "[org.gnome.desktop.wm.preferences]\nbutton-layout='menu:minimize,maximize,close'\n" > /usr/share/glib-2.0/schemas/50-elsewhere.gschema.override \
-    && glib-compile-schemas /usr/share/glib-2.0/schemas \
     && install -d /etc/mpv && printf 'hwdec=auto-safe\n' > /etc/mpv/mpv.conf
 # Seed the default panel layout so a run with `--exec xfce4-panel` doesn't stop at the "first start" dialog.
 # The data dir exists (elsewhere-owned) so a `-v` named volume mounted there is writable from the first run.

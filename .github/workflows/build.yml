@@ -48,7 +48,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends build-essential curl ca-certificates git pkg-config cmake \
             libavcodec-dev libavdevice-dev libavfilter-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev \
-            libva-dev libpipewire-0.3-dev libclang-dev libgbm-dev libegl-dev libxkbcommon-dev
+            libva-dev libpipewire-0.3-dev libclang-dev libgbm-dev libegl-dev libxkbcommon-dev libglib2.0-bin
           native_versions=$(pkg-config --modversion libavcodec libavformat libavutil libavdevice libavfilter libswscale libswresample libva libpipewire-0.3 gbm egl xkbcommon)
           echo "abi=$(printf '%s\n' "$native_versions" | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
@@ -109,7 +109,7 @@ jobs:
         id: native
         run: |
           pacman -Sy --noconfirm archlinux-keyring
-          pacman -Syu --noconfirm --needed cargo nodejs npm ffmpeg libva mesa libxkbcommon libpipewire clang git curl python
+          pacman -Syu --noconfirm --needed cargo nodejs npm ffmpeg libva mesa libxkbcommon libpipewire clang glib2 git curl python
           native_versions=$(pkg-config --modversion libavcodec libavformat libavutil libavdevice libavfilter libswscale libswresample libva libpipewire-0.3 gbm egl xkbcommon)
           echo "abi=$(printf '%s\n' "$native_versions" | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
           useradd -m builder

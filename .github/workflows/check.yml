@@ -15,7 +15,7 @@ jobs:
         id: native
         run: |
           pacman -Sy --noconfirm archlinux-keyring
-          pacman -Syu --noconfirm --needed rust clang pkgconf git nodejs npm chromium python curl \
+          pacman -Syu --noconfirm --needed rust clang glib2 pkgconf git nodejs npm chromium python curl \
             ffmpeg libpipewire libva mesa libxkbcommon ca-certificates openssl ttf-dejavu foot
           native_versions=$(pkg-config --modversion libavcodec libavformat libavutil libavdevice libavfilter libswscale libswresample libva libpipewire-0.3 gbm egl xkbcommon)
           echo "abi=$(printf '%s\n' "$native_versions" | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"

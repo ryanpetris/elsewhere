@@ -6,6 +6,7 @@ use clap::Parser;
 use tokio::sync::mpsc;
 
 mod audio;
+mod gtk;
 
 #[derive(Parser)]
 #[command(about = "A Wayland compositor whose screen is a browser tab", version = env!("ELSEWHERE_VERSION"))]
@@ -222,6 +223,10 @@ fn main() -> Result<()> {
         // An unavailable session must not send its applications to the host audio server.
         vec![("PIPEWIRE_REMOTE".into(), "/dev/null".into()), ("PULSE_SERVER".into(), "unix:/dev/null".into()), ("PIPEWIRE_CONFIG_DIR".into(), "/dev/null".into())]
     });
+    // Hold for the session: dropping this directory removes the client schema defaults.
+    let gtk_defaults = gtk::defaults()?;
+    let data_dirs = std::env::var("XDG_DATA_DIRS").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/usr/local/share:/usr/share".into());
+    exec_env.push(("XDG_DATA_DIRS".into(), format!("{}:{data_dirs}", gtk_defaults.path().display())));
     exec_env.push(("ELSEWHERE_WEBCAM_DEVICE".into(), cli.webcam.as_ref().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default()));
     if cli.elements {
         // GTK always publishes its tree; Firefox and Qt only when asked. (Chromium needs --force-renderer-accessibility.)

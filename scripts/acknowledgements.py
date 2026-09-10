@@ -35,6 +35,9 @@ for path, package in lock["packages"].items():
     entries.append(("JavaScript", name, package["version"], package.get("license"),
                     notice(root / "web" / path)))
 
+entries.append(("Resources", "gsettings-desktop-schemas", "48.0", "LGPL-2.1-or-later",
+                notice(root / "crates/elsewhere/resources/schemas")))
+
 text = """# Acknowledgements
 
 Elsewhere is made possible by these open source projects and their contributors.
@@ -43,7 +46,7 @@ FFmpeg, PipeWire, WirePlumber, Mesa, libva, libxkbcommon and Xwayland provide na
 media and desktop services. Their system packages include their notices and source
 information; see [native dependencies](https://github.com/ryanpetris/elsewhere/blob/master/docs/native-dependencies.md).
 
-The following credits cover the Rust and JavaScript dependency locks, including
+The following credits cover the Rust and JavaScript dependency locks and embedded schema resources, including
 build tools and platform dependencies. Full notice text is included where present
 in the installed package; other entries give the package's declared license.
 Run `python3 scripts/acknowledgements.py` after fetching Cargo dependencies and
