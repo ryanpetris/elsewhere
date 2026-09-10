@@ -8,6 +8,7 @@ import { BroadcastsPanel } from './BroadcastsPanel.jsx';
 import { FilesPanel } from './FilesPanel.jsx';
 import { thumbnailScheduler } from '../thumbnails.js';
 import { Badge, Eyebrow, codecName, cx, windowColor } from './ui.jsx';
+import { STATUS_BAR_HEIGHT } from './StatusBar.jsx';
 
 const TABS = [['windows', 'Windows', AppWindow], ['files', 'Files', FolderOpen], ['stats', 'Statistics', Activity], ['broadcasts', 'Broadcasts', Radio]];
 
@@ -152,8 +153,8 @@ function WindowRow({ viewer, w, acts, eligible, dpr }) {
       <div className="absolute top-1/2 right-2 flex -translate-y-1/2 items-center gap-px rounded-md border border-line-2 bg-surface-3 p-0.5 opacity-0 shadow-pop transition-opacity group-hover:opacity-100 focus-within:opacity-100">
         <Action icon={ExternalLink} label="Open in New Window" onClick={e => {
           e.stopPropagation(); e.currentTarget.blur();
-          // the window's size plus the popup's own bars (TopBar h-12 + StatusBar h-8), so it shows 1:1
-          window.open(url(`/?window=${w.id}`), storageKey(`window-${w.id}`), `popup,width=${w.w},height=${w.h + 80}`);
+          // The window's size plus its top and status bars, so it shows 1:1.
+          window.open(url(`/?window=${w.id}`), storageKey(`window-${w.id}`), `popup,width=${w.w},height=${w.h + 48 + STATUS_BAR_HEIGHT}`);
         }} />
         {viewer.pip.supported && <Action icon={PictureInPicture2} label="Picture-in-Picture" onClick={e => { e.stopPropagation(); viewer.pip.open(w.id); }} />}
         <Action icon={Camera} label="Snapshot (PNG)" onClick={e => {

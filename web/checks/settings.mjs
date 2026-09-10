@@ -338,6 +338,10 @@ try {
     assert.equal(await current.locator('#hide-controls').isVisible(), false);
     const box = await show.boundingBox();
     assert(box.x >= 0 && box.x + box.width <= current.viewportSize().width, 'exit fits narrow viewers');
+    const footerBox = await current.locator('footer').boundingBox();
+    assert.equal(footerBox.height, 30);
+    assert.equal(await current.locator('footer select').count(), 0);
+    assert(Math.abs(box.y + box.height / 2 - footerBox.y - footerBox.height / 2) < 0.1, 'Show Controls is centered in desktop, phone and window bars');
     assert(await current.evaluate(() => originalCanvas === document.querySelector('canvas.stage') && originalSocket === socket));
     if (current === phone) await show.tap(); else await show.click();
     await current.locator('#hide-controls').waitFor();
@@ -399,11 +403,60 @@ try {
       const box = await button.boundingBox();
       assert(box && box.width >= 60 && box.x >= 0 && box.x + box.width <= width, 'transport and retry stay visible at narrow widths');
     }
-    assert.equal((await footer.boundingBox()).height, 32);
+    assert.equal((await footer.boundingBox()).height, 30);
+    assert.equal(await footer.locator('select').count(), 0);
+    assert(await footer.evaluate(footer => {
+      const box = footer.getBoundingClientRect(), center = box.y + box.height / 2;
+      return [...footer.querySelectorAll('button, [data-metric]')].filter(el => el.getClientRects().length)
+        .every(el => { const b = el.getBoundingClientRect(); return Math.abs(b.y + b.height / 2 - center) < 0.1; });
+    }), 'chips and metrics share the bar center');
     if (width < 912) {
       await page.getByRole('button', { name: 'Stream Settings', exact: true }).click();
       assert.equal(await streamPanel.getByText('Transport', { exact: true }).count(), 0);
+      assert.equal(await streamPanel.locator('select, [role="dialog"], [data-transport-dot]').count(), 0);
+      assert.equal(await streamPanel.getByRole('group').count(), 3);
       await page.getByRole('button', { name: 'Close Stream Settings', exact: true }).click();
+    }
+  }
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.evaluate(() => { elsewhere.setCaptureOnClick(true); elsewhere.store.set({ codecs: [{ codec: 'vp8', hardware: false }], decodable: ['vp8'], role: 'controller', permissions: ['desktop.view', 'desktop.control', 'audio.listen'] }); });
+    if (await sidebarToggle.getAttribute('aria-pressed') === 'true') await sidebarToggle.click();
+    for (const [label, value] of [['Video Codec', 'vp8'], ['Quality', 'high'], ['Encoding Effort', 'balanced']]) {
+      const button = page.getByTitle(width >= 912 ? label : 'Stream Settings', { exact: true });
+      if (label === 'Video Codec') {
+        await page.locator('canvas.stage').click();
+        await page.waitForFunction(() => document.pointerLockElement === document.querySelector('canvas.stage'));
+      }
+      await button.focus(); await resetPackets(); await page.keyboard.press('Enter');
+      const dialog = page.getByRole('dialog', { name: width >= 912 ? label : 'Stream Settings', exact: true });
+      await page.waitForFunction(() => !document.pointerLockElement);
+      assert(await page.evaluate(() => sent.some(packet => packet[0] === 0x89)), 'opening releases desktop input');
+      assert(await dialog.locator('input:checked').first().evaluate(el => el === document.activeElement));
+      assert.equal(await dialog.locator('[data-transport-dot], select').count(), 0);
+      await page.keyboard.press('Escape');
+      assert(await button.evaluate(el => el === document.activeElement));
+      assert.deepEqual(await keyPackets(), [], 'stream keyboard open and Escape stay local');
+      await button.click();
+      const radio = dialog.getByRole('group', { name: label, exact: true }).locator(`input[value="${value}"]`);
+      await radio.focus(); await resetPackets(); await page.keyboard.press('Space');
+      await dialog.waitFor({ state: 'detached' });
+      assert(await button.evaluate(el => el === document.activeElement));
+      assert.deepEqual(await keyPackets(), [], 'stream keyboard choice stays local');
+      assert.equal(await page.evaluate(name => localStorage.getItem('elsewhere.' + name), label === 'Video Codec' ? 'codec' : label === 'Quality' ? 'quality' : 'effort'), value);
+      if (width >= 912) assert((await button.getAttribute('aria-label')).includes((await button.textContent()).trim()), 'chip accessible name includes the visible choice');
+      await button.click();
+      await resetPackets();
+      await dialog.getByRole('group', { name: label, exact: true }).locator('input:checked').press('Space');
+      await dialog.waitFor({ state: 'detached' });
+      assert.equal(await page.evaluate(() => sent.filter(packet => packet[0] === 0x8f).length), 0, 'closing the current choice does not send a stream update');
+    }
+    await page.screenshot({ path: `/tmp/elsewhere-status-chips-${width}.png` });
+    if (width < 912) {
+      await page.getByRole('button', { name: 'Stream Settings', exact: true }).click();
+      await streamPanel.waitFor();
+      await page.screenshot({ path: '/tmp/elsewhere-status-chips-menu.png', animations: 'disabled' });
+      await page.keyboard.press('Escape');
     }
   }
   await page.evaluate(() => elsewhere.store.set({ rtcAvailable: false, rtcRecovery: { state: 'unavailable', reason: 'WebRTC unavailable' } }));
@@ -413,6 +466,11 @@ try {
   assert.equal(await page.evaluate(() => elsewhere.store.get().transport), 'websocket');
   assert.equal(await transportButton.count(), 0, 'socket preference hides unavailable transport choice');
   assert.equal(await page.locator('footer').getByRole('button', { name: 'Retry Now', exact: true }).count(), 0);
+  await page.setViewportSize({ width: 1280, height: 844 });
+  await page.evaluate(() => { windowsFrame(); window.open = (...args) => { window.popupRequest = args; }; });
+  if (await sidebarToggle.getAttribute('aria-pressed') !== 'true') await sidebarToggle.click();
+  await page.getByRole('button', { name: 'Open in New Window', exact: true }).click();
+  assert.equal(await page.evaluate(() => popupRequest[2]), 'popup,width=400,height=328', 'popup height includes both bars around the window');
   assert.deepEqual(errors, []);
   console.log('settings defaults/persistence, overlays, local keyboard, menus, late responses, unavailable support, read-only, fullscreen, narrow layout and window popup checks passed');
 } finally {

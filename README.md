@@ -95,9 +95,9 @@ desktop follows the controlling browser's size. Settings offers the same choice 
 Fixed resolutions use scale 1. Returning to Auto immediately uses the controller's last display size
 and device scale, or retains the current output until a controller supplies a size.
 
-Each viewer picks its own codec, quality and encoding effort in the status bar: the codec list is what both the server
+Each viewer picks its own codec, quality and encoding effort through status-bar chips with radio popovers. The codec list is what both the server
 and that browser can do ("Auto (HEVC)" shows the pick). A window narrower than 57 rem folds these controls into the
-status bar's Stream settings popover. All five quality levels adapt under their
+status bar's Stream Settings popover, with a radio fieldset for each choice. All five quality levels adapt under their
 selected ceiling: Very Low (2 Mbit/s), Low (5), Medium (`--bitrate`, 8 by default), High (12), and
 Max (25). Medium is the default. The stream starts at its ceiling; under pressure the server halves the
 bitrate and holds it, then climbs back a quarter at a time. Targets below 3 Mbit/s have a 30 fps cap.

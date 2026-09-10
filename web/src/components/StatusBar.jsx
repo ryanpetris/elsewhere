@@ -27,9 +27,55 @@ function useMedia(query) {
   return matches;
 }
 
-/// This viewer's stream choices. Inline in a wide status bar, stacked inside the popover of a narrow
-/// one; only one set of controls exists at a time.
-function StreamControls({ viewer, stacked = false }) {
+export const STATUS_BAR_HEIGHT = 30;
+
+function ChoiceField({ name, label, value, options, onChange, stacked = false }) {
+  return (
+    <fieldset className="flex flex-col gap-2 text-sm text-ink">
+      <legend className={stacked ? 'eyebrow mb-1' : 'sr-only'}>{label}</legend>
+      {options.map(option => <label key={option.value} className="flex min-h-9 items-center gap-2">
+        <input type="radio" name={name} value={option.value} checked={value === option.value} onChange={() => onChange(option.value)}
+          onClick={() => { if (value === option.value) onChange(option.value); }}
+          onKeyDown={event => { if (event.key === ' ') { event.preventDefault(); onChange(option.value); } }} />
+        {option.label}
+      </label>)}
+    </fieldset>
+  );
+}
+
+function ChoiceChip({ viewer, name, label, value, options, onChange }) {
+  const [open, setOpen] = useState(false);
+  const button = useRef(null), panel = useRef(null);
+  const face = options.find(option => option.value === value)?.label ?? value;
+  const close = () => { setOpen(false); button.current?.focus(); };
+  useEffect(() => {
+    if (!open) return;
+    viewer.releaseInput();
+    if (document.pointerLockElement) document.exitPointerLock();
+    panel.current?.querySelector('input:checked')?.focus();
+  }, [open, viewer]);
+  return <>
+    <button ref={button} type="button" aria-label={`${label}: ${face}`} title={label} aria-expanded={open} aria-haspopup="dialog" aria-controls={`${name}-settings`}
+      onClick={() => setOpen(!open)} className={control}>
+      <span className="whitespace-nowrap">{face}</span>
+      <ChevronDown className="size-3 shrink-0" />
+    </button>
+    {open && createPortal(
+      <Popover floating ref={panel} id={`${name}-settings`} role="dialog" aria-label={label} onClose={close}
+        style={{ right: 8, bottom: STATUS_BAR_HEIGHT + 8, width: 'min(20rem, calc(100vw - 1rem))', maxHeight: `calc(100dvh - ${STATUS_BAR_HEIGHT + 16}px)` }} className="font-sans">
+        <div className="flex items-center justify-between border-b border-line px-3 py-2">
+          <h2 className="text-sm font-medium text-ink">{label}</h2>
+          <IconButton icon={X} label={`Close ${label}`} size="sm" onClick={close} />
+        </div>
+        <div className="min-h-0 overflow-y-auto p-3">
+          <ChoiceField {...{ name, label, value, options }} onChange={next => { onChange(next); close(); }} />
+        </div>
+      </Popover>, document.querySelector('[data-viewer]') ?? document.body)}
+  </>;
+}
+
+// Only one set of stream choices exists: chips on a wide bar, fieldsets in the narrow dialog.
+function StreamControls({ viewer, stacked = false, onClose }) {
   const st = useStore(viewer.store, s => s.streamState);
   const choice = useStore(viewer.store, s => s.choice);
   const codecs = useStore(viewer.store, s => s.codecs);
@@ -37,46 +83,19 @@ function StreamControls({ viewer, stacked = false }) {
   const ceilings = { 'very-low': 2000, low: 5000, medium: st?.medium_kbps, high: 12000, max: 25000 };
   if (st?.preset) ceilings[st.preset] = st.ceiling_kbps;
   const both = codecs.filter(c => decodable.includes(c.codec));
-  const select = cx('select', stacked ? 'select-md w-full' : 'shrink-0');
-  const codec = (
-    <select value={choice.codec} onChange={e => viewer.setChoice({ codec: e.target.value })} className={select} title="Video Codec">
-      <option value="auto">Auto{choice.codec === 'auto' && st?.codec ? ` (${codecName(st.codec)})` : ''}</option>
-      {both.map(c => <option key={c.codec} value={c.codec}>{codecName(c.codec)}{choice.codec === c.codec && st?.codec && st.codec !== c.codec ? ` (Using ${codecName(st.codec)})` : ''}{c.hardware ? '' : ' (Software)'}</option>)}
-    </select>
-  );
-  const quality = (
-    <select value={choice.quality} onChange={e => viewer.setChoice({ quality: e.target.value })} className={select} title="Quality">
-      {PRESETS.map(p => <option key={p} value={p}>{PRESET_LABEL[p]} ({ceilings[p] === undefined ? 'Server Limit' : mbit(ceilings[p])})</option>)}
-    </select>
-  );
-  const effortSelect = (
-    <select value={choice.effort} onChange={event => viewer.setChoice({ effort: event.target.value })} className={select} aria-label="Encoding Effort" title="Encoding Effort">
-      {EFFORTS.map(e => <option key={e} value={e}>{EFFORT_LABEL[e]}</option>)}
-    </select>
-  );
-  if (stacked) return (
-    <div className="flex flex-col gap-3 p-3 text-xs">
-      <Field label="Codec">{codec}</Field>
-      <Field label="Quality">{quality}</Field>
-      {effortSelect}
-    </div>
-  );
-  return (
-    <>
-      {codec}
-      {quality}
-      {effortSelect}
-    </>
-  );
-}
-
-function Field({ label, children }) {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="eyebrow">{label}</span>
-      {children}
-    </label>
-  );
+  const fields = [
+    { name: 'codec', label: 'Video Codec', options: [
+      { value: 'auto', label: `Auto${choice.codec === 'auto' && st?.codec ? ` (${codecName(st.codec)})` : ''}` },
+      ...both.map(c => ({ value: c.codec, label: `${codecName(c.codec)}${choice.codec === c.codec && st?.codec && st.codec !== c.codec ? ` (Using ${codecName(st.codec)})` : ''}${c.hardware ? '' : ' (Software)'}` })),
+    ] },
+    { name: 'quality', label: 'Quality', options: PRESETS.map(p => ({ value: p, label: `${PRESET_LABEL[p]} (${ceilings[p] === undefined ? 'Server Limit' : mbit(ceilings[p])})` })) },
+    { name: 'effort', label: 'Encoding Effort', options: EFFORTS.map(e => ({ value: e, label: EFFORT_LABEL[e] })) },
+  ];
+  const controls = fields.map(field => {
+    const props = { ...field, value: choice[field.name], onChange: value => { if (value !== choice[field.name]) viewer.setChoice({ [field.name]: value }); onClose?.(); } };
+    return stacked ? <ChoiceField key={field.name} {...props} stacked /> : <ChoiceChip key={field.name} viewer={viewer} {...props} />;
+  });
+  return stacked ? <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-3">{controls}</div> : <>{controls}</>;
 }
 
 /// The narrow status bar's stream controls: a chip that opens them in a popover.
@@ -90,7 +109,7 @@ function StreamChip({ viewer }) {
     if (!open) return;
     viewer.releaseInput();
     if (document.pointerLockElement) document.exitPointerLock();
-    panel.current?.focus();
+    panel.current?.querySelector('input:checked')?.focus();
   }, [open, viewer]);
   const summary = st?.codec ? `${codecName(st.codec)} · ${PRESET_LABEL[choice.quality]}` : 'Stream';
   return (
@@ -102,12 +121,12 @@ function StreamChip({ viewer }) {
       </button>
       {open && createPortal(
         <Popover floating ref={panel} id="stream-settings" role="dialog" aria-label="Stream Settings" onClose={close}
-          onKeyDown={event => event.stopPropagation()} style={{ right: 8, bottom: 40, width: 'min(20rem, calc(100vw - 1rem))' }} className="font-sans">
+          onKeyDown={event => event.stopPropagation()} style={{ right: 8, bottom: STATUS_BAR_HEIGHT + 8, width: 'min(20rem, calc(100vw - 1rem))', maxHeight: `calc(100dvh - ${STATUS_BAR_HEIGHT + 16}px)` }} className="font-sans">
           <div className="flex items-center justify-between border-b border-line px-3 py-2">
             <h2 className="text-sm font-medium text-ink">Stream Settings</h2>
             <IconButton icon={X} label="Close Stream Settings" size="sm" onClick={close} />
           </div>
-          <StreamControls viewer={viewer} stacked />
+          <StreamControls viewer={viewer} stacked onClose={close} />
         </Popover>, document.querySelector('[data-viewer]') ?? document.body)}
     </>
   );
@@ -165,7 +184,7 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
   // The four readouts follow the optional Show Controls button. The bar never wraps: each width hides what
   // does not fit, and the controls scroll horizontally when space is limited.
   return (
-    <footer className="flex h-8 shrink-0 items-center gap-x-2 border-y border-line border-b-transparent bg-surface px-2 font-mono text-[11px] text-ink-3 sm:gap-x-3 sm:px-3">
+    <footer style={{ height: STATUS_BAR_HEIGHT }} className="flex shrink-0 items-center gap-x-2 border-y border-line border-b-transparent bg-surface px-2 font-mono text-[11px] text-ink-3 sm:gap-x-3 sm:px-3">
       {controlsHidden && (
         <button type="button" aria-label="Show Controls" title="Show Controls (Ctrl+Alt+Shift+H)" onFocus={viewer.releaseInput} onClick={onShowControls}
           className={cx(control, 'w-6 px-0 bg-warn/15 text-warn hover:text-warn')}>
@@ -190,7 +209,7 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
       </span>
       {transportOpen && withTransport && createPortal(
         <Popover floating ref={transportPanel} id="transport-settings" role="dialog" aria-label="Transport" onClose={closeTransport}
-          style={{ left: 8, bottom: 40, width: 'min(20rem, calc(100vw - 1rem))' }} className="font-sans">
+          style={{ left: 8, bottom: STATUS_BAR_HEIGHT + 8, width: 'min(20rem, calc(100vw - 1rem))' }} className="font-sans">
           <div className="flex items-center justify-between border-b border-line px-3 py-2">
             <h2 className="text-sm font-medium text-ink">Preferred Transport</h2>
             <IconButton icon={X} label="Close Transport" size="sm" onClick={closeTransport} />

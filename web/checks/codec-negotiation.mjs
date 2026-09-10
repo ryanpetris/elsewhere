@@ -1,3 +1,4 @@
+import { streamChoice, chooseStream } from './stream-choice.mjs';
 // Docker: built viewer and Chromium. Decoder order, recovery UI and live preferences for both viewers.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -44,15 +45,17 @@ try {
     assert.equal(await page.evaluate(() => probed.length), 5);
     await page.evaluate(() => streamState('starting', 'h264'));
     await page.getByTitle('Video Codec', { exact: true }).waitFor();
-    assert.deepEqual(await page.getByTitle('Video Codec', { exact: true }).locator('option').evaluateAll(options => options.map(o => o.value)), ['auto', 'h264', 'hevc']);
-    await page.getByTitle('Video Codec', { exact: true }).selectOption('hevc');
+    const field = await streamChoice(page, 'Video Codec');
+    assert.deepEqual(await field.locator('input').evaluateAll(options => options.map(o => o.value)), ['auto', 'h264', 'hevc']);
+    await page.keyboard.press('Escape');
+    await chooseStream(page, 'Video Codec', 'hevc');
     assert.deepEqual(await page.evaluate(() => payload(0x8f)), { codecs: ['hevc', 'h264', 'av1', 'vp8'] });
     await page.evaluate(() => streamState('retrying', 'hevc', 2));
     await page.getByRole('status').filter({ hasText: 'Retrying HEVC' }).waitFor();
     await page.evaluate(() => streamState('switching', 'h264', 3));
     await page.getByRole('status').filter({ hasText: 'Switching to H.264' }).waitFor();
     assert(await page.evaluate(() => { const first = elsewhere.store.get().notice; streamState('switching', 'h264', 3); return elsewhere.store.get().notice === first; }), 'repeat state does not repeat the switch notice');
-    assert.match(await page.getByTitle('Video Codec', { exact: true }).locator('option:checked').textContent(), /Using H\.264/);
+    assert.match(await page.getByTitle('Video Codec', { exact: true }).textContent(), /Using H\.264/);
     await page.evaluate(() => { streamState('failed', null, 4); streamState('starting', 'h264', 1); });
     assert.equal(await page.evaluate(() => elsewhere.store.get().streamState.status), 'failed');
     await page.getByRole('button', { name: 'Retry Video', exact: true }).click();
@@ -67,7 +70,7 @@ try {
       message(1, { attempt: 5, streamId: 5, codec: 'avc1.640028', width: 640, height: 480, scale: 1 });
     });
     assert.equal(await page.evaluate(() => elsewhere.store.get().stream.attempt), 6);
-    await page.getByTitle('Video Codec', { exact: true }).selectOption('auto');
+    await chooseStream(page, 'Video Codec', 'auto');
     assert.deepEqual(await page.evaluate(() => payload(0x8f)), { codecs: ['h264', 'hevc', 'av1', 'vp8'] });
     await page.evaluate(() => { elsewhere.setChoice({ codec: 'hevc', quality: 'high' }); sockets[0].close(); });
     await page.waitForFunction(() => sockets.length === 2 && sent.filter(p => p[0] === 0x81).length === 2);

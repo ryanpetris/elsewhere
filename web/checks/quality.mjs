@@ -1,3 +1,4 @@
+import { streamChoice, chooseStream, selectedStream } from './stream-choice.mjs';
 import { createToken } from './token-fixture.mjs';
 // Run in Docker; optionally pass the Medium ceiling. ELSEWHERE_RENDER_NODE and
 // ELSEWHERE_CODEC select hardware coverage; ELSEWHERE_SOFTWARE_ENCODING keeps GPU rendering.
@@ -64,7 +65,7 @@ try {
     return page;
   };
   const main = await connect(null, null);
-  assert.equal(await main.getByTitle('Quality', { exact: true }).inputValue(), 'medium');
+  assert.equal(await selectedStream(main, 'Quality'), 'medium');
   assert.deepEqual(await main.evaluate(() => [qualityStates[0].preset, qualityStates[0].ceiling_kbps, qualityStates[0].bitrate_kbps, hellos[0].quality]), ['medium', medium, medium, 'medium']);
   await main.evaluate(() => elsewhere.spawn('foot --app-id=quality-check'));
   await main.waitForFunction(() => elsewhere.store.get().windows.some(w => w.app_id === 'quality-check'));
@@ -72,14 +73,16 @@ try {
 
   for (const id of [null, windowId]) {
     const page = id ? await connect(id, null) : main;
-    const select = page.getByTitle('Quality', { exact: true });
-    assert.equal(await select.inputValue(), 'medium');
-    assert.deepEqual(await select.locator('option').evaluateAll(options => options.map(o => o.value)), levels.map(([name]) => name));
+    const chip = page.getByTitle('Quality', { exact: true });
+    assert.equal(await selectedStream(page, 'Quality'), 'medium');
+    const field = await streamChoice(page, 'Quality');
+    assert.deepEqual(await field.locator('input').evaluateAll(options => options.map(o => o.value)), levels.map(([name]) => name));
     assert.deepEqual(await page.evaluate(() => [qualityStates[0].preset, qualityStates[0].bitrate_kbps, hellos[0].quality]), ['medium', medium, 'medium']);
-    assert((await select.locator('option[value="medium"]').textContent()).includes(`${medium / 1000} Mbit`));
+    assert((await field.getByRole('radio', { name: /^Medium/ }).locator('..').textContent()).includes(`${medium / 1000} Mbit`));
+    await page.keyboard.press('Escape');
     for (const [name, , ceiling] of levels) {
       await page.evaluate(() => { window.qualityStates = []; });
-      await select.selectOption(name);
+      await chooseStream(page, 'Quality', name);
       await page.waitForFunction(name => qualityStates.some(s => s.preset === name), name);
       const state = await page.evaluate(name => qualityStates.find(s => s.preset === name), name);
       assert.equal(state.ceiling_kbps, ceiling); assert.equal(state.bitrate_kbps, ceiling);
@@ -90,7 +93,7 @@ try {
       await page.waitForFunction(() => qualityStates.length > 0);
       assert.deepEqual(await page.evaluate(() => [elsewhere.store.get().choice.quality, hellos[0].quality, qualityStates[0].bitrate_kbps]), [name, name, ceiling]);
     }
-    await select.selectOption('max');
+    await chooseStream(page, 'Quality', 'max');
     await page.waitForFunction(() => elsewhere.store.get().streamState.preset === 'max');
     // A real browser-pressure report drives the existing controller; the selected level stays Max.
     await page.evaluate(() => {
@@ -98,14 +101,14 @@ try {
     });
     await page.waitForFunction(() => elsewhere.store.get().streamState.bitrate_kbps < 25000);
     await page.evaluate(() => clearInterval(window.pressureTimer));
-    assert.equal(await select.inputValue(), 'max');
-    assert((await select.locator('option:checked').textContent()).includes('25 Mbit'));
+    assert.equal(await selectedStream(page, 'Quality'), 'max');
+    assert((await chip.textContent()).includes('25 Mbit'));
     await page.getByTitle(/^Measured video throughput:/).waitFor();
-    await page.getByTitle('Video Codec', { exact: true }).selectOption('auto');
+    await chooseStream(page, 'Video Codec', 'auto');
     await page.waitForFunction(() => elsewhere.store.get().choice.codec === 'auto' && elsewhere.store.get().streamState.codec);
     await page.evaluate(() => elsewhere.setChoice({ quality: 'low' }));
     await page.waitForFunction(() => elsewhere.store.get().streamState.preset === 'low');
-    assert.equal(await select.inputValue(), 'low');
+    assert.equal(await selectedStream(page, 'Quality'), 'low');
     assert.equal(await page.evaluate(() => localStorage.getItem('elsewhere.quality')), 'low');
     await page.evaluate(() => elsewhere.setTransport('webrtc'));
     await page.waitForFunction(() => elsewhere.store.get().videoVia === 'webrtc');
@@ -113,13 +116,13 @@ try {
     await page.waitForFunction(() => qualityRtcFrames > 0);
     await page.evaluate(() => qualityChannel.close());
     await page.waitForFunction(() => elsewhere.store.get().videoVia === 'websocket');
-    assert.equal(await select.inputValue(), 'low');
+    assert.equal(await selectedStream(page, 'Quality'), 'low');
     assert.equal(await page.evaluate(() => elsewhere.store.get().streamState.ceiling_kbps), 5000);
     await page.evaluate(() => { window.qualityRtcFrames = 0; elsewhere.setTransport('webrtc'); });
     await page.waitForFunction(() => elsewhere.store.get().videoVia === 'webrtc');
     await page.evaluate(() => qualitySocket.send(new Uint8Array([0x88])));
     await page.waitForFunction(() => qualityRtcFrames > 0);
-    assert.equal(await select.inputValue(), 'low');
+    assert.equal(await selectedStream(page, 'Quality'), 'low');
     assert.equal(await page.evaluate(() => localStorage.getItem('elsewhere.quality')), 'low');
     assert.equal(await page.evaluate(() => elsewhere.store.get().streamState.ceiling_kbps), 5000);
     assert(await page.evaluate(() => qualityOffers.length >= 2 && qualityOffers.at(-2) !== qualityOffers.at(-1)));
@@ -165,6 +168,26 @@ try {
       return stable;
     }), 'live readouts fit without resizing the stage');
     await page.screenshot({ path: `/tmp/elsewhere41-${id ? 'window' : 'desktop'}-${medium}.png` });
+    const sidebar = page.getByRole('button', { name: 'Windows and Statistics', exact: true });
+    if (await sidebar.count() && await sidebar.getAttribute('aria-pressed') === 'true') await sidebar.click();
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      for (const [label, value] of [['Video Codec', codec], ['Quality', 'medium'], ['Encoding Effort', 'balanced']]) {
+        await chooseStream(page, label, value);
+      }
+      await page.waitForFunction(({ codec, medium }) => {
+        const state = elsewhere.store.get().streamState;
+        return state.codec === codec && state.preset === 'medium' && state.ceiling_kbps === medium && state.effort.requested === 'balanced' && !state.effort.pending;
+      }, { codec, medium });
+      assert.equal(await page.locator('footer select').count(), 0);
+      assert.equal((await page.locator('footer').boundingBox()).height, 30);
+      await page.screenshot({ path: `/tmp/elsewhere-status-chips-live-${id ? 'window' : 'desktop'}-${width}.png` });
+      if (width < 912) {
+        await streamChoice(page, 'Quality');
+        await page.screenshot({ path: `/tmp/elsewhere-status-chips-live-${id ? 'window' : 'desktop'}-menu.png`, animations: 'disabled' });
+        await page.keyboard.press('Escape');
+      }
+    }
     if (id) await page.context().close();
   }
 
