@@ -17,6 +17,7 @@
     "check:viewer-lifecycle": "node checks/viewer-lifecycle.mjs",
     "check:viewer-disposal": "node checks/viewer-disposal.mjs",
     "check:rtc-stream": "node checks/rtc-stream.mjs",
+    "check:display": "node checks/display.mjs",
     "check:fullscreen-capture": "node checks/fullscreen-capture.mjs",
     "check:effort-benchmark": "node checks/effort-benchmark.mjs",
     "check:reliability": "node checks/reliability.mjs"

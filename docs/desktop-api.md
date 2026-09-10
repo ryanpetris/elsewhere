@@ -691,3 +691,18 @@ stream costs an encoder and a swapchain.
 - Decorations: hover highlights on the buttons, a right-click menu, borders around the client area.
 - Elements: acting on an element through AT-SPI (activate, set text) instead of clicking its rectangle;
   element states (checked, focused, disabled); Flatpak applications, whose pid on the bus is the sandbox's.
+
+
+## Display controls
+
+The viewer can hide its top bar and panels while retaining the status bar and a Show controls button.
+Ctrl+Alt+Shift+H toggles this view and releases captured input. The setting is local to the viewer and
+resets on reload. Hidden panels retain their state, including running terminal sessions.
+
+Settings also exposes shared kiosk and resolution controls through `/api/display`. These require
+`desktop.control` and apply without restarting the server. See [display settings](protocol.md#display-settings)
+for the request and event formats. Turning kiosk off restores saved layouts; windows opened in kiosk
+become maximized, respecting panel reservations and compositor decorations.
+
+Run `npm run check:display` in the Docker rig to exercise live resizing, controller handoffs, kiosk
+layout restoration, startup kiosk exit, permissions and settings replay.

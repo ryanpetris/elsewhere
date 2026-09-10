@@ -12,6 +12,7 @@ mod gpu;
 mod grabs;
 mod handlers;
 mod input;
+mod kiosk;
 mod window_stream;
 mod workspace;
 pub(crate) mod render;

@@ -12,7 +12,7 @@ signal and silence. The microphone capture control remains separate.
 
 The renderer loads when playback is available and the panel opens. Its analysis
 branch never connects to the speakers. Closing the panel disposes that branch;
-hiding the page or entering stage fullscreen, disabling animation and reduced motion
+hiding the page or hiding the controls or entering viewer fullscreen, disabling animation and reduced motion
 pause drawing and disconnect the analysis input. Playback retains its context and
 speaker connection. Animation is capped at 30 fps.
 

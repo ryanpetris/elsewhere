@@ -73,8 +73,13 @@ the server runs. It prints a new secret once, after committing its hash and gran
 `XDG_CONFIG_HOME` is unset. Startup creates no tokens. See [token permissions and management](docs/tokens.md)
 for scoped access, recovery and database backups.
 
-The desktop takes the size of the controlling viewer's display area; the fullscreen button hands it the whole screen, with
-keyboard lock so shortcuts like Ctrl+W reach the desktop.
+The desktop takes the size of the controlling viewer's display area. Fullscreen keeps the display and
+status bar on screen, with keyboard lock so shortcuts like Ctrl+W reach the desktop.
+
+**Hide controls** hides the top bar and open panels while keeping the status bar, statistics and stream
+controls. Use **Show controls** in the status bar or **Ctrl+Alt+Shift+H** to return. The shortcut also
+releases mouse capture and exits viewer fullscreen. The mode belongs to this viewer and resets on reload;
+hidden terminal sessions stay open. Browser tabs and the address bar stay visible in windowed mode.
 
 Any number of people can watch at once, each with a stream scaled to their own window. The first to
 connect with `desktop.control` drives the pointer and keyboard; other eligible sessions can use
@@ -84,7 +89,10 @@ camera, microphone and program execution have separate permissions.
 Use `--screen-size 1920x1080` to set a fixed desktop resolution from startup. Browser resizes and
 control handoffs keep that resolution; each browser scales the picture to fit while preserving its
 aspect ratio. Both dimensions must be even and between 2 and 8192 pixels. Without this option, the
-desktop follows the controlling browser's size.
+desktop follows the controlling browser's size. Settings offers the same choice at runtime: select
+**Auto: fit controlling viewer**, a resolution preset, or custom pixel dimensions, then **Apply resolution**.
+Fixed resolutions use scale 1. Returning to Auto immediately uses the controller's last display size
+and device scale, or retains the current output until a controller supplies a size.
 
 Each viewer picks its own codec, quality and encoding effort in the status bar: the codec list is what both the server
 and that browser can do ("Auto (HEVC)" shows the pick). A window narrower than 57 rem folds these controls into the
@@ -166,6 +174,12 @@ with GTK 4.22's Vulkan renderer, including the nested shell's GTK viewer.
 `QT_QPA_PLATFORM='wayland;xcb'` makes Qt try Wayland, then X11 for builds without a Wayland plugin.
 For Docker, pass `-e GSK_RENDERER=ngl -e 'QT_QPA_PLATFORM=wayland;xcb'` before the image name.
 Without these settings, applications choose their toolkit defaults.
+
+**Kiosk mode** in Settings applies to existing and newly opened application windows. Turning it off
+restores their previous window state and geometry. Windows opened in kiosk become maximized within
+the work area, accounting for panels and compositor title bars. Kiosk does not prevent applications
+from changing their own fullscreen state. Kiosk and resolution are shared desktop settings requiring
+`desktop.control`; changes last until the server restarts, when startup flags apply again.
 
 The devkit's window follows the browser size. Don't add `--virtual-monitor`: that adds a second
 monitor, and GNOME puts its top bar only on the first one.

@@ -258,6 +258,17 @@ try {
   assert.equal(await page.evaluate(() => elsewhere.store.get().controlsHidden), true, 'ordinary H after lost shortcut keyup does not toggle');
   await page.reload();
   await page.locator('#hide-controls').waitFor();
+  await page.bringToFront();
+  await page.evaluate(() => elsewhere.store.set({ status: 'connected', role: 'controller' }));
+  await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
+  await page.getByRole('button', { name: 'Show controls', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Stream settings', exact: true }).click();
+  const streamPanel = page.getByRole('dialog', { name: 'Stream settings', exact: true });
+  await streamPanel.waitFor();
+  assert(await page.evaluate(() => document.fullscreenElement.contains(document.querySelector('#stream-settings'))));
+  await page.getByRole('button', { name: 'Close stream settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Show controls', exact: true }).click();
+  await page.waitForFunction(() => !document.fullscreenElement);
   assert.deepEqual(errors, []);
   console.log('settings defaults/persistence, overlays, local keyboard, menus, late responses, unavailable support, read-only, fullscreen, narrow layout and window popup checks passed');
 } finally {

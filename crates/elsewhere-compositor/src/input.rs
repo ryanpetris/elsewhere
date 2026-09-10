@@ -124,6 +124,10 @@ impl State {
             Command::PointerButton { button, pressed } => self.pointer_button(button, pressed),
             Command::PointerAxis { source, dx, dy, v120 } => self.pointer_axis(source, dx, dy, v120),
             Command::Resize(geo) => self.resize(geo),
+            Command::ConfigureDisplay { kiosk, geometry } => {
+                self.set_kiosk(kiosk);
+                if let Some(geo) = geometry { self.resize(geo); }
+            },
             Command::ViewerStream { key, sink: Some(sink) } => self.start_viewer_stream(key, sink),
             Command::ViewerStream { key, sink: None } => self.stop_viewer_stream(key),
             Command::RequestFullFrame => self.force_full_frame = true,

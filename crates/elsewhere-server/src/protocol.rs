@@ -42,6 +42,8 @@ pub const MIXER_ERROR: u8 = 0x11;
 pub const SESSION: u8 = 0x12;
 /// `[FILE_RESULT][JSON]`: a staged batch rescued to the transfer folder, with saved paths and failures.
 pub const FILE_RESULT: u8 = 0x13;
+/// JSON snapshot of the shared kiosk and resolution settings.
+pub const DISPLAY: u8 = 0x14;
 // client -> server
 /// `[AUTH][token as UTF-8]`: must be the first message on a new socket; nothing else is processed before it.
 pub const AUTH: u8 = 0x80;

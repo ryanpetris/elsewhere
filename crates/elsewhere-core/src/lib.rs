@@ -42,6 +42,8 @@ pub enum Command {
     PointerButton { button: u32, pressed: bool },
     PointerAxis { source: AxisSource, dx: f64, dy: f64, v120: Option<(i32, i32)> },
     Resize(OutputGeometry),
+    /// Shared display policy, serialized with viewer resizes and control handoffs.
+    ConfigureDisplay { kiosk: bool, geometry: Option<OutputGeometry> },
     /// A viewer's encoder: every output frame goes to each of these (`None` stops one). `key` names it.
     ViewerStream { key: u64, sink: Option<Box<dyn FrameSink>> },
     /// Render a frame even if nothing changed (keyframe on connect).

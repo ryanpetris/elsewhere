@@ -272,10 +272,17 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
     let (mut info, mut config, mut ws_config, mut seq) = (None::<elsewhere_core::StreamInfo>, Bytes::new(), None, 0u16);
     let mut ping = tokio::time::interval(Duration::from_secs(1));
     let (mut unanswered, started) = (0, Instant::now());
+    let mut display_updates = app.display_updates.subscribe();
+    display_updates.mark_changed();
     let ended = loop {
         tokio::select! {
             biased;
             _ = key.ended() => break Some((UNAUTHORIZED, "token revoked or expired")),
+            changed = display_updates.changed() => {
+                if changed.is_err() { break None; }
+                let message = display_updates.borrow_and_update().message();
+                if !send(&mut socket, &key, message).await { break None; }
+            },
             changed = async { match &mut mixer_state { Some(state) => state.changed().await, None => std::future::pending().await } } => {
                 if !key.live() { break Some((UNAUTHORIZED, "token revoked or expired")); }
                 if changed.is_err() { mixer_state = None; }
@@ -474,10 +481,17 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
     let mut pointer = None; // the last window-relative position, for the edge notice
     let mut ping = tokio::time::interval(Duration::from_secs(1));
     let (mut unanswered, started) = (0, Instant::now());
+    let mut display_updates = app.display_updates.subscribe();
+    display_updates.mark_changed();
     let ended = loop {
         tokio::select! {
             biased;
             _ = key.ended() => break Some((UNAUTHORIZED, "token revoked or expired")),
+            changed = display_updates.changed() => {
+                if changed.is_err() { break None; }
+                let message = display_updates.borrow_and_update().message();
+                if !send(&mut socket, &key, message).await { break None; }
+            },
             msg = rx.recv() => match msg {
                 Some(StreamMsg::Info(epoch, i)) => {
                     if !selection.accepts(epoch, control.as_ref()) { continue; }
@@ -743,7 +757,7 @@ impl App {
                 if let Some(s) = v.sessions.get_mut(&id) {
                     s.size = Some(geo);
                 }
-                if controls && !self.fixed_size {
+                if controls && matches!(v.display.resolution, crate::display::Resolution::Auto) {
                     v.output = geo;
                     self.retarget(&v);
                     Some(Command::Resize(geo))
@@ -831,7 +845,7 @@ impl App {
         drop(owner);
         let _ = self.commands.send(Command::ReleasePointerLock);
         // targets first, so the frame the compositor renders for the new size finds them in place
-        let size = next.filter(|_| !self.fixed_size).and_then(|id| v.sessions.get(&id)).and_then(|s| s.size);
+        let size = next.filter(|_| matches!(v.display.resolution, crate::display::Resolution::Auto)).and_then(|id| v.sessions.get(&id)).and_then(|s| s.size);
         if let Some(size) = size {
             v.output = size;
         }
@@ -848,7 +862,7 @@ impl App {
 
     /// Viewers' encoders scale the output to their windows. The controller receives native frames
     /// and the browser scales the canvas to fit, preserving exact logical input coordinates.
-    fn retarget(&self, v: &Viewers) {
+    pub(crate) fn retarget(&self, v: &Viewers) {
         for (id, s) in &v.sessions {
             if let Some(size) = s.size {
                 s.control.set_size((v.controller != Some(*id)).then(|| fit(&v.output, &size)));

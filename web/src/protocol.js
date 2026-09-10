@@ -12,3 +12,6 @@ export const EFFORTS = ['fast', 'balanced', 'high'];
 export const TRANSPORTS = ['websocket', 'webrtc'];
 // PointerEvent.button -> BTN_LEFT, MIDDLE, RIGHT, SIDE, EXTRA
 export const BTN = [0x110, 0x112, 0x111, 0x113, 0x114];
+
+// Shared desktop kiosk and resolution settings.
+export const DISPLAY = 0x14;

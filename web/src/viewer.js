@@ -10,7 +10,7 @@ import { createStore } from './store.js';
 import { startMic, stopMic } from './mic.js';
 import { startCam, stopCam } from './cam.js';
 import { openRtc, rtcEndpoint, RTC_TIMING } from './rtc.js';
-import { CONFIG, VIDEO, CURSOR, POINTER_LOCK, AUDIO, WINDOWS, CLIPBOARD, ROLE, NOTICE, CLIPBOARD_DATA, NOTIFICATIONS, STREAM_STATE, RTC, ROLES, CODEC_FAMILIES, EFFORTS, PRESETS, AUTH, HELLO, RESIZE, MOTION_ABS, MOTION_REL, BUTTON, AXIS, KEY, REQUEST_KEYFRAME, BLUR, POINTER_LOCK_LOST, POINTER_LOCK_GAINED, CONTROL, SET_CLIPBOARD, TAKE_CONTROL, NOTIFY, STREAM, DRAG, INPUT, TOUCH, MIC, CAM, RTC_CLIENT, REPORT, BTN, MIXER_STATE, MIXER_LEVELS, MIXER_ERROR, MIXER_CLIENT, SESSION, HANDOFF, FILE_RESULT } from './protocol.js';
+import { DISPLAY, CONFIG, VIDEO, CURSOR, POINTER_LOCK, AUDIO, WINDOWS, CLIPBOARD, ROLE, NOTICE, CLIPBOARD_DATA, NOTIFICATIONS, STREAM_STATE, RTC, ROLES, CODEC_FAMILIES, EFFORTS, PRESETS, AUTH, HELLO, RESIZE, MOTION_ABS, MOTION_REL, BUTTON, AXIS, KEY, REQUEST_KEYFRAME, BLUR, POINTER_LOCK_LOST, POINTER_LOCK_GAINED, CONTROL, SET_CLIPBOARD, TAKE_CONTROL, NOTIFY, STREAM, DRAG, INPUT, TOUCH, MIC, CAM, RTC_CLIENT, REPORT, BTN, MIXER_STATE, MIXER_LEVELS, MIXER_ERROR, MIXER_CLIENT, SESSION, HANDOFF, FILE_RESULT } from './protocol.js';
 
 const AUDIO_LEAD = 0.06;
 const qualityName = name => PRESETS.includes(name) ? name : 'medium';
@@ -24,6 +24,7 @@ export function createViewer() {
     // The role tracks desktop input ownership; permissions govern feature access.
     role: null,
     controlsHidden: false,
+    display: null,
     permissions: [],
     sessionId: null,
     stream: null, // the last Config: {streamId, codec, width, height, scale}
@@ -214,11 +215,11 @@ export function createViewer() {
       rtcConfig = null;
       recovery('unavailable', 'WebSocket disconnected');
       uploadAbort?.abort();
-      store.set({ permissions: [], sessionId: null, role: null, playback: null, audioAvailable: false, micAvailable: false, camAvailable: false, rtcAvailable: false, videoVia: 'websocket' });
+      store.set({ display: null, permissions: [], sessionId: null, role: null, playback: null, audioAvailable: false, micAvailable: false, camAvailable: false, rtcAvailable: false, videoVia: 'websocket' });
       if (e.code === 4001) {
         stream = null;
         forgetToken();
-        if (document.fullscreenElement) document.exitFullscreen(); // the token dialog is outside the stage
+        if (document.fullscreenElement) document.exitFullscreen(); // restore the viewer controls for authentication
         store.set({ status: 'unauthorized', reason: e.reason || 'wrong token', stream: null });
         return;
       }
@@ -504,6 +505,7 @@ export function createViewer() {
       case NOTICE:
         notice(new TextDecoder().decode(new Uint8Array(buf, 2)), dv.getUint8(1) ? 'success' : 'warning');
         break;
+      case DISPLAY: store.set({ display: JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 1))) }); break;
       case SESSION: store.set({ sessionId: dv.getBigUint64(1, true) }); break;
       case ROLE: {
         const role = ROLES[dv.getUint8(1)] ?? 'viewer';

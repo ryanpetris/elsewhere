@@ -128,7 +128,7 @@ try {
       assert.equal(name, 'firefox');
       driver = await start('geckodriver', ['--port', port], env);
       await wait(async () => { try { return (await wd('/status')).ready; } catch { return false; } });
-      const session = await wd('/session', { capabilities: { alwaysMatch: { browserName: 'firefox', 'moz:firefoxOptions': { binary: '/usr/bin/firefox' } } } });
+      const session = await wd('/session', { capabilities: { alwaysMatch: { browserName: 'firefox', 'moz:firefoxOptions': { binary: process.env.ELSEWHERE_FIREFOX_BINARY || '/usr/bin/firefox' } } } });
       route = '/session/' + session.sessionId;
       js = (fn, ...args) => wd(route + '/execute/sync', { script: 'return (' + fn.toString() + ')(...arguments)', args });
       click = async selector => {
@@ -176,7 +176,8 @@ try {
       await wait(() => js(() => !document.pointerLockElement));
       await click('#clipboard-toggle');
       assert.equal(await js(() => document.fullscreenElement.contains(document.querySelector('#desktop-clipboard'))), true, 'fullscreen clipboard stays inside fullscreen root');
-      key('Escape');
+      await click('button[aria-label="Close clipboard"]');
+      await new Promise(resolve => setTimeout(resolve, 2100));
       await click('canvas.stage');
       if (windowMode) await js(POINTER_LOCK => packet([POINTER_LOCK, 1]), POINTER_LOCK);
       await captured();

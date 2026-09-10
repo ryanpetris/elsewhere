@@ -3,6 +3,7 @@
 //! and turns permitted input into `Command`s. Each token carries explicit grants.
 
 mod api;
+mod display;
 mod auth;
 mod apps;
 mod elements;
@@ -67,6 +68,7 @@ pub struct Config {
     pub initial: elsewhere_core::OutputGeometry,
     /// Keep the initial resolution when viewers resize or take control.
     pub fixed_size: bool,
+    pub kiosk: bool,
     /// Where the state database and TLS certificate/key live.
     pub data_dir: PathBuf,
     /// Serve /api/windows/{id}/elements (see `elements.rs`).
@@ -111,8 +113,8 @@ pub struct App {
     codecs: Vec<Codec>,
     software: bool,
     bitrate_kbps: u32,
-    fixed_size: bool,
     viewers: Mutex<Viewers>,
+    display_updates: tokio::sync::watch::Sender<display::Settings>,
     sinks: SinkFactory,
     broadcast_backend: broadcast::Backend,
     broadcasts: Mutex<broadcast::Registry>,
@@ -149,6 +151,7 @@ pub(crate) struct Viewers {
     control_epoch: u64,
     /// The output as the controller last sized it.
     output: OutputGeometry,
+    display: display::Settings,
     /// Last cursor message, replayed to a new viewer.
     cursor: Option<Bytes>,
     /// Whether a client currently holds a pointer lock, replayed to a new viewer.
@@ -165,7 +168,7 @@ pub(crate) struct Viewers {
 
 impl Default for Viewers {
     fn default() -> Self {
-        Viewers { sessions: HashMap::new(), controller: None, control_epoch: 0, output: elsewhere_core::INITIAL_OUTPUT, cursor: None, locked: false, windows: None, window_list: Vec::new(), clipboard: Clipboard::default(), clipboard_scope: random_hex(16), next_clipboard_write: 1, next_id: 1 }
+        Viewers { sessions: HashMap::new(), controller: None, control_epoch: 0, display: display::Settings::default(), output: elsewhere_core::INITIAL_OUTPUT, cursor: None, locked: false, windows: None, window_list: Vec::new(), clipboard: Clipboard::default(), clipboard_scope: random_hex(16), next_clipboard_write: 1, next_id: 1 }
     }
 }
 
@@ -225,6 +228,7 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
     };
     let mut mixer = cfg.mixer;
     let mixer_errors = mixer.as_mut().and_then(|mixer| mixer.errors.take());
+    let display = display::Settings { kiosk: cfg.kiosk, resolution: if cfg.fixed_size { display::Resolution::Fixed { width: cfg.initial.width_px, height: cfg.initial.height_px } } else { display::Resolution::Auto } };
     let app = Arc::new(App {
         tokens,
         auth_serial: tokio::sync::Mutex::new(()),
@@ -238,8 +242,8 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
         codecs: cfg.codecs,
         software: cfg.software,
         bitrate_kbps: cfg.bitrate_kbps,
-        fixed_size: cfg.fixed_size,
-        viewers: Mutex::new(Viewers { output: cfg.initial, ..Default::default() }),
+        viewers: Mutex::new(Viewers { output: cfg.initial, display, ..Default::default() }),
+        display_updates: tokio::sync::watch::channel(display).0,
         sinks: cfg.sinks,
         broadcast_backend: cfg.broadcast,
         broadcasts: Mutex::default(),
@@ -287,6 +291,7 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
                 .route("/api/applications", get(api_applications))
                 .route("/api/applications/{id}/icon", get(api_application_icon))
                 .route("/api/control", post(api_control))
+                .route("/api/display", get(display::get).patch(display::update))
                 .route("/api/broadcasts", get(broadcast::list))
                 .route("/api/broadcasts/capabilities", get(broadcast::capabilities))
                 .route("/api/broadcasts/start", post(broadcast::start))

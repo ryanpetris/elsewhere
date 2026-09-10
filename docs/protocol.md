@@ -287,3 +287,29 @@ It removes its dedicated firewall chain on exit.
 `FILE_RESULT` (`0x13`) carries UTF-8 JSON `{batch, saved, failed, error}` after an unclaimed or
 cancelled desktop drop is rescued. `saved` contains `{name,path,directory}` objects. Sessions belonging to the token that staged the batch receive it; the originating client matches its batch ID and offers navigation explicitly.
 It carries an operation result, not a directory subscription.
+
+
+## Display settings
+
+`GET /api/display` requires `desktop.view` and returns the shared settings:
+
+```json
+{"kiosk":false,"resolution":{"mode":"auto"}}
+```
+
+`PATCH /api/display` requires `desktop.control`. Either field can be supplied independently.
+For a fixed resolution use `{"resolution":{"mode":"fixed","width":1920,"height":1080}}`.
+Dimensions are physical pixels at scale 1, must be even, and must be between 2 and 8192.
+Invalid dimensions return `400`; malformed JSON or unknown fields are rejected. A successful request
+returns `200` with the resulting settings. Like window control, compositor application is asynchronous.
+
+The server serializes policy changes with browser resizes and controller handoffs. Auto uses the
+current controller's latest viewport and device scale immediately, or keeps the output until a size
+is available. Fixed resolution survives browser resizes and handoffs. Startup flags supply initial
+values; runtime changes are not written to disk.
+
+`DISPLAY` (`0x14`) carries the same UTF-8 JSON snapshot to desktop and window viewers on connection
+and when these settings change. This is shared desktop state, independent of per-viewer stream quality
+and controls visibility. Kiosk fullscreens existing and newly mapped application windows. Turning it
+off restores saved window state and geometry; windows first opened in kiosk become maximized in the
+work area. Application fullscreen requests remain available in either mode.
