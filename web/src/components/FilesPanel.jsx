@@ -76,7 +76,7 @@ export function FilesPanel({ viewer, open }) {
           <button className={tool} onClick={refresh}><RefreshCw className="size-3" /> Refresh</button>
           {listing && (
             <span className="ml-auto flex items-center gap-1">
-              {permissions.includes('files.upload') && <label className={cx(tool, 'cursor-pointer')}><Upload className="size-3" /> Upload<input aria-label="Upload Files" type="file" multiple className="hidden" onChange={e => { viewer.uploadFiles(e.target.files); e.target.value = ''; }} /></label>}
+              {permissions.includes('files.upload') && <label className={tool}><Upload className="size-3" /> Upload<input aria-label="Upload Files" type="file" multiple className="hidden" onChange={e => { viewer.uploadFiles(e.target.files); e.target.value = ''; }} /></label>}
               {manages && <button className={tool} onClick={() => { const name = prompt('Folder Name'); if (name) mutate(path => manageFile({ op: 'mkdir', path, name })); }}><FolderPlus className="size-3" /> New Folder</button>}
             </span>
           )}

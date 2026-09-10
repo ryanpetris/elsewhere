@@ -129,7 +129,8 @@ function WindowRow({ viewer, w, acts, eligible, dpr }) {
     <div
       onClick={() => acts && viewer.activate(w.id)}
       className={cx(
-        'group relative flex cursor-pointer items-center gap-3 px-3 py-2 transition-colors hover:bg-surface-2',
+        'group relative flex items-center gap-3 px-3 py-2 transition-colors hover:bg-surface-2',
+        acts && 'cursor-pointer',
         w.focused && 'bg-accent/8 before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-r before:bg-accent',
         w.minimized && 'opacity-55',
       )}

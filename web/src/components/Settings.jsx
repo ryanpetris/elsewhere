@@ -6,7 +6,7 @@ import { Popover } from './Launcher.jsx';
 
 function Toggle({ inputRef, icon: Icon, label, description, id, checked, onChange, disabled = false }) {
   return (
-    <label className="flex min-h-11 cursor-pointer items-start gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-surface-2">
+    <label className="flex min-h-11 items-start gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-surface-2">
       <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-surface-3 text-ink-3"><Icon className="size-3.5" strokeWidth={1.75} /></span>
       <span className="min-w-0 flex-1">
         <span className="block text-sm text-ink">{label}</span>
