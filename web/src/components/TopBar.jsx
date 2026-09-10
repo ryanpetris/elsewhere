@@ -90,13 +90,14 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, o
   );
   return (
     <header onClick={event => { if (!event.target.closest('[data-menu-trigger]')) onMenu(null); }} className="flex h-12 shrink-0 items-center border-b border-line bg-surface px-1 max-sm:[&_button]:size-7 max-sm:[&_button]:px-0 sm:gap-2 sm:px-3">
-      <div className="flex min-w-0 shrink items-center gap-2.5 pr-1">
+      <div className="flex min-w-0 shrink items-center pr-1">
         <button type="button" data-menu-trigger id="about-toggle" aria-label="About Elsewhere" title="About Elsewhere"
+          aria-describedby={windowMode ? 'about-window-title' : undefined}
           aria-haspopup="dialog" aria-expanded={menu === 'about'} aria-controls="viewer-about" onClick={event => { onMenu('about'); event.currentTarget.blur(); }}
-          className="inline-flex shrink-0 rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+          className="inline-flex min-w-0 items-center gap-2.5 rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
           <Logo />
+          <span id="about-window-title" title={windowMode ? title : undefined} className="hidden min-w-0 truncate text-sm font-semibold tracking-tight text-ink md:inline">{title}</span>
         </button>
-        <span className="hidden min-w-0 truncate text-sm font-semibold tracking-tight text-ink md:inline">{title}</span>
       </div>
       {acts('apps.launch') && <Divider className="hidden sm:block" />}
       {acts('apps.launch') && <BarButton data-menu-trigger id="apps-toggle" icon={LayoutGrid} label="Applications" active={menu === 'apps'} onClick={() => onMenu('apps')} />}

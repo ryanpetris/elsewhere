@@ -81,6 +81,7 @@ try {
       const dialog = brandPage.getByRole('dialog', { name: 'About Elsewhere' });
       await dialog.waitFor();
       assert.equal(await logo.getAttribute('aria-expanded'), 'true');
+      assert(await dialog.getByRole('heading', { name: 'About Elsewhere' }).isVisible());
       const box = await dialog.boundingBox();
       assert(box.x < 20 && box.x + box.width <= width, 'About fits beside the left edge');
       assert(await brandPage.locator('header').evaluate(node => node.scrollWidth <= node.clientWidth), 'top bar fits the viewport');
@@ -98,6 +99,30 @@ try {
       await logo.click();
       await dialog.waitFor();
       await dialog.getByRole('button', { name: 'Close About', exact: true }).click();
+      await logo.focus();
+      await brandPage.keyboard.press('Space');
+      await dialog.waitFor();
+      await brandPage.keyboard.press('Escape');
+      await logo.click();
+      await dialog.waitFor();
+      await brandPage.mouse.click(width - 10, 790);
+      await dialog.waitFor({ state: 'detached' });
+      assert.equal(await logo.locator('button, a, input, [tabindex]').count(), 0, 'brand has one keyboard stop');
+      if (width === 1280) {
+        if (windowMode) await brandPage.evaluate(() => elsewhere.store.set({ windowTitle: 'A long application window title '.repeat(20) }));
+        const heading = logo.locator('#about-window-title');
+        assert(await heading.isVisible(), 'title remains visible at wide widths');
+        if (windowMode) {
+          assert(await heading.evaluate(node => node.clientWidth > 0 && node.scrollWidth > node.clientWidth && getComputedStyle(node).textOverflow === 'ellipsis'), 'long window title is visibly truncated');
+          assert.equal(await logo.getAttribute('aria-describedby'), 'about-window-title');
+          assert.equal(await heading.getAttribute('title'), await heading.textContent(), 'hover exposes the full window title');
+        }
+        await heading.click();
+        await dialog.waitFor();
+        await heading.click();
+        await dialog.waitFor({ state: 'detached' });
+        assert(await brandPage.locator('header').evaluate(node => node.scrollWidth <= node.clientWidth), 'long title fits the header');
+      }
     }
     await brandPage.close();
   }
