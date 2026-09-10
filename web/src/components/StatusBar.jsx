@@ -162,7 +162,7 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
   // The four readouts follow the optional Show Controls button. The bar never wraps: each width hides what
   // does not fit, and the controls scroll horizontally when space is limited.
   return (
-    <footer className="flex h-8 shrink-0 items-center gap-x-2 border-t border-line bg-surface px-2 font-mono text-[11px] text-ink-3 sm:gap-x-3 sm:px-3">
+    <footer className="flex h-8 shrink-0 items-center gap-x-2 border-y border-line border-b-transparent bg-surface px-2 font-mono text-[11px] text-ink-3 sm:gap-x-3 sm:px-3">
       {controlsHidden && (
         <button type="button" aria-label="Show Controls" title="Show Controls (Ctrl+Alt+Shift+H)" onFocus={viewer.releaseInput} onClick={onShowControls}
           className={cx(control, 'w-6 px-0 bg-warn/15 text-warn hover:text-warn')}>
