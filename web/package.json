@@ -9,7 +9,7 @@
     "check:video-crop": "node checks/video-crop.mjs",
     "check:codec-recovery": "node checks/codec-recovery.mjs",
     "check:codec-negotiation": "node checks/codec-negotiation.mjs",
-    "check:visualiser": "node checks/visualiser.mjs",
+    "check:visualiser": "node checks/visualiser.mjs && node checks/visualiser-renderer.mjs",
     "check:panel-windows": "node checks/panel-windows.mjs",
     "check:structured-input": "node checks/structured-input.mjs",
     "check:clipboard-firefox": "node checks/clipboard-firefox.mjs",
@@ -28,11 +28,11 @@
   "dependencies": {
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
-    "audiomotion-analyzer": "4.5.4",
     "lucide-react": "^1.41.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-simple-keyboard": "3.8.269"
+    "react-simple-keyboard": "3.8.269",
+    "@foobar404/wave": "file:vendor/wave"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",

@@ -1,0 +1,1 @@
+Elsewhere distributes an adapted drawing subset of Wave.js 2.0.5, based on upstream revision 03b29e841a9d0dbce5845bb6faf75b9b0088c49f. The adaptation accepts normalized bands, owns no audio or animation loop, and includes radial drawing. See web/vendor/wave/README.md for source provenance and adaptation details.

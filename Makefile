@@ -30,7 +30,7 @@ check-version:
 package-deb package-tar package-arch:
 	sh scripts/package.sh $(@:package-%=%)
 
-WEB_SRC := $(shell find web/src) web/index.html web/vite.config.js web/package.json web/package-lock.json
+WEB_SRC := $(shell find web/src web/vendor) web/index.html web/vite.config.js web/package.json web/package-lock.json
 DIST := web/dist/index.html web/dist/app.js web/dist/app.css
 
 web: $(DIST)

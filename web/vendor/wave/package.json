@@ -1,0 +1,9 @@
+{
+  "name": "@foobar404/wave",
+  "version": "2.0.5",
+  "type": "module",
+  "exports": "./animations.js",
+  "license": "MIT",
+  "repository": "https://github.com/foobar404/wave.js",
+  "upstreamRevision": "03b29e841a9d0dbce5845bb6faf75b9b0088c49f"
+}

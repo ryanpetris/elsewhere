@@ -99,7 +99,22 @@ cleanup();
 const token = (await readFile(process.env.ELSEWHERE_TEST_TOKEN_FILE, 'utf8')).trim();
 const browser = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
 try {
-  const page = await browser.newPage();
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  await page.addInitScript(() => {
+    window.renderProbe = { draws: 0, reads: 0 };
+    const fill = CanvasRenderingContext2D.prototype.fillRect;
+    CanvasRenderingContext2D.prototype.fillRect = function (x, y, width, height) {
+      if (this.canvas.closest('[aria-label="Audio Visualizer"]') && width === this.canvas.width && height === this.canvas.height) renderProbe.draws++;
+      return fill.call(this, x, y, width, height);
+    };
+    for (const name of ['getByteFrequencyData', 'getFloatFrequencyData']) {
+      const read = AnalyserNode.prototype[name];
+      AnalyserNode.prototype[name] = function (data) {
+        if (this !== window.elsewhere?.store.get().playback?.source) renderProbe.reads++;
+        return read.call(this, data);
+      };
+    }
+  });
   await page.goto(`${process.env.ELSEWHERE_TEST_URL || 'http://127.0.0.1:8080'}/#token=${token}`);
   await page.waitForFunction(() => window.elsewhere?.store.get().status === 'connected');
   await page.evaluate(command => {
@@ -107,13 +122,18 @@ try {
     elsewhere.spawn(command);
     elsewhere.spawn('mpv --no-config --no-audio --length=40 --title=elsewhere-audio-check --vo=wlshm av://lavfi:testsrc2=size=640x360:rate=30');
   }, toneCommand({ seconds: 36, pulse: true }));
-  await page.waitForFunction(() => elsewhere.store.get().stats.audio?.level > 0 && elsewhere.store.get().stats.frames > 5, undefined, { timeout: 15000 });
+  // Let both decoders process about two seconds of media before measuring steady playback.
+  await page.waitForFunction(() => {
+    const { audio, frames } = elsewhere.store.get().stats;
+    return audio?.level > 0 && audio.decoded >= 100 && frames >= 60;
+  }, undefined, { timeout: 15000 });
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Performance.enable');
   const metrics = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map(m => [m.name, m.value]));
   const measure = async () => {
+    await cdp.send('HeapProfiler.collectGarbage');
     const before = await metrics();
-    const start = await page.evaluate(() => elsewhere.store.get().stats.frames);
+    const start = await page.evaluate(() => ({ frames: elsewhere.store.get().stats.frames, underruns: elsewhere.store.get().stats.underruns, ...renderProbe }));
     const peak = await page.evaluate(async () => {
       let peak = 0;
       for (let n = 0; n < 20; n++) {
@@ -125,23 +145,37 @@ try {
       return peak;
     });
     const after = await metrics();
-    return { peak, taskMsPerSecond: 1000 * (after.TaskDuration - before.TaskDuration) / 3, ...(await page.evaluate(start => ({ frames: elsewhere.store.get().stats.frames - start, audio: elsewhere.store.get().stats.audio, underruns: elsewhere.store.get().stats.underruns }), start)) };
+    return { peak, seconds: after.Timestamp - before.Timestamp, heapBytes: after.JSHeapUsedSize, nodes: after.Nodes, taskMsPerSecond: 1000 * (after.TaskDuration - before.TaskDuration) / (after.Timestamp - before.Timestamp), ...(await page.evaluate(start => ({ frames: elsewhere.store.get().stats.frames - start.frames, draws: renderProbe.draws - start.draws, reads: renderProbe.reads - start.reads, audio: elsewhere.store.get().stats.audio, underruns: elsewhere.store.get().stats.underruns - start.underruns }), start)) };
   };
+  const videoSize = await page.locator('canvas.stage').boundingBox();
   const closed = await measure();
   await page.getByRole('button', { name: 'Audio Visualizer', exact: true }).click();
   const panel = page.getByRole('region', { name: 'Audio Visualizer' });
   await panel.locator('canvas').waitFor();
+  await panel.getByText('Loading…', { exact: true }).waitFor({ state: 'detached' });
+  const panelSize = await panel.boundingBox();
+  await page.setViewportSize({ width: 1280, height: 800 + Math.round(panelSize.height) });
+  await page.waitForFunction(height => Math.abs(document.querySelector('canvas.stage').getBoundingClientRect().height - height) < 1, videoSize.height);
+  await page.waitForFunction(() => renderProbe.draws > 0);
   const image1 = await panel.locator('canvas').evaluate(c => c.toDataURL());
-  await page.waitForTimeout(300);
-  const image2 = await panel.locator('canvas').evaluate(c => c.toDataURL());
-  assert.notEqual(image1, image2, 'actual playback animates spectrum');
+  await page.waitForFunction(before => document.querySelector('[aria-label="Audio Visualizer"] canvas').toDataURL() !== before, image1);
   const open = await measure();
   console.log(JSON.stringify({ closed, open }));
   assert(open.frames > 30 && open.audio.level > 0);
   assert(Math.abs(open.peak - closed.peak) < .002, 'analysis does not alter playback level');
   await panel.getByRole('button', { name: 'Close Visualizer', exact: true }).click();
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.waitForFunction(height => Math.abs(document.querySelector('canvas.stage').getBoundingClientRect().height - height) < 1, videoSize.height);
   const closedAgain = await measure();
   console.log(JSON.stringify({ closed, open, closedAgain }));
+  for (const sample of [closed, open, closedAgain]) {
+    assert(sample.frames / sample.seconds > 25, 'live video keeps up with the 30 fps source');
+    assert.equal(sample.underruns, 0, 'live audio stays supplied during measurement');
+    assert(Math.abs(sample.peak - closed.peak) < .002, 'playback level stays stable');
+  }
+  assert(open.draws / open.seconds > 25 && open.draws <= open.seconds * 30 + 2, 'visualiser draws near its 30 fps cap');
+  assert.equal(open.reads, open.draws * 2);
+  assert.deepEqual([closed.draws, closed.reads, closedAgain.draws, closedAgain.reads], [0, 0, 0, 0]);
   // Stop the rig's finite test signal early, then observe the real playback analyser.
   await page.evaluate(pattern => elsewhere.spawn("pkill -f '" + pattern + "'"), tonePattern);
   await page.waitForFunction(() => elsewhere.store.get().stats.audio?.signalPeak < 0.0001);

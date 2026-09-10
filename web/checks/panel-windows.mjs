@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
-import { chromium } from 'playwright-core';
+import { chromium, firefox } from 'playwright-core';
 import { MIXER_CLIENT } from '../src/protocol.js';
 
 const dist = new URL('../dist/', import.meta.url);
@@ -20,6 +20,7 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 // An externally launched browser exercises real focus/visibility without Playwright's overrides.
 const browser = process.env.BROWSER_CDP
   ? await chromium.connectOverCDP(process.env.BROWSER_CDP, { noDefaults: true })
+  : process.env.BROWSER === 'firefox' ? await firefox.launch({ firefoxUserPrefs: { 'media.autoplay.default': 0, 'media.autoplay.block-webaudio': false } })
   : await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'] });
 const until = async (condition, message) => {
   const deadline = Date.now() + 5000;
@@ -162,14 +163,16 @@ try {
     await mixer.getByText('Read Only', { exact: true }).waitFor();
     assert.equal(await mixer.getByRole('button', { name: 'Speakers Mute', exact: true }).isDisabled(), true);
     // Playback can close before React disposes the analysis branch. Exercise that interval.
-    const beforeClose = await audio.evaluate(() => window.paints);
     assert.equal(await page.evaluate(async () => {
       await playback.context.close();
       playback.source.getByteFrequencyData(new Uint8Array(playback.source.frequencyBinCount));
       return playback.context.state;
     }), 'closed');
-    await audio.waitForFunction(before => window.paints > before + 3, beforeClose);
-    assert.equal(errors.length, 0, 'analysis remains safe until the closed playback source is unpublished');
+    await until(async () => await edges() === 1, 'closed context stops the analysis branch');
+    const stopped = await audio.evaluate(() => window.paints);
+    await delay(150);
+    assert.equal(await audio.evaluate(() => window.paints), stopped, 'closed context stops rendering before React teardown');
+    assert.equal(errors.length, 0, 'closed playback remains safe until unpublished');
     await page.evaluate(() => {
       Object.defineProperty(document, 'hidden', { configurable: true, value: false });
       document.dispatchEvent(new Event('visibilitychange'));
@@ -205,7 +208,10 @@ try {
     for (let i = 0; i < 3; i++) {
       audio = await open('Audio Visualizer', 'Pop Out Visualizer');
       await until(async () => await edges() === 2, 'analysis attached');
-      await audio.getByRole('button', { name: 'Close Visualizer', exact: true }).click();
+      await audio.getByRole('button', { name: 'Close Visualizer', exact: true }).click({ noWaitAfter: true }).catch(error => {
+        // Firefox can acknowledge the click after its target window closes.
+        if (!audio.isClosed() || !/closed/.test(error.message)) throw error;
+      });
       await until(() => audio.isClosed(), 'panel close closes popup');
       await until(async () => await edges() === 1, 'repeated popup cleanup');
     }

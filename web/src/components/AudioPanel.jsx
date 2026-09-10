@@ -21,7 +21,7 @@ export function AudioPanel({ viewer, hidden = false, onClose, onPopOut, poppedOu
   const [fullscreen, setFullscreen] = useState(false);
   const [error, setError] = useState('');
   const [ready, setReady] = useState(false);
-  const paused = hidden || !visible || !animate || reduced || status !== 'connected';
+  const paused = hidden || !visible || !animate || reduced || status !== 'connected' || !available;
   const options = useRef({});
   useEffect(() => { options.current = { style, gradient, paused }; }, [style, gradient, paused]);
 
@@ -46,7 +46,7 @@ export function AudioPanel({ viewer, hidden = false, onClose, onPopOut, poppedOu
     setError(''); setReady(false);
     loadRenderer().then(({ createVisualiser }) => {
       if (cancelled) return;
-      instance = createVisualiser(canvas.current, playback);
+      instance = createVisualiser(canvas.current, { ...playback, onError: fail });
       renderer.current = instance;
       const { style, gradient, paused } = options.current;
       instance.style(style, gradient);
@@ -54,14 +54,14 @@ export function AudioPanel({ viewer, hidden = false, onClose, onPopOut, poppedOu
       setReady(true);
     }).catch(() => fail());
     function fail() {
-      instance?.dispose();
+      try { instance?.dispose(); } catch {}
       if (renderer.current === instance) renderer.current = null;
       instance = null;
       if (!cancelled) { setError('Visualizer unavailable.'); setReady(false); }
     }
     return () => {
       cancelled = true;
-      instance?.dispose();
+      try { instance?.dispose(); } catch {}
       if (renderer.current === instance) renderer.current = null;
     };
   }, [playback]);
@@ -71,7 +71,8 @@ export function AudioPanel({ viewer, hidden = false, onClose, onPopOut, poppedOu
       renderer.current?.style(style, gradient);
       renderer.current?.pause(paused);
     } catch {
-      renderer.current?.dispose(); renderer.current = null;
+      try { renderer.current?.dispose(); } catch {}
+      renderer.current = null; setReady(false);
       setError('Visualizer unavailable.');
     }
   }, [style, gradient, paused]);

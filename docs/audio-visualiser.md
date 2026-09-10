@@ -1,67 +1,99 @@
 # Session audio visualiser
 
-The desktop viewer's audio controls open an expandable visualiser panel. It offers
-spectrum bars, a line/area spectrum, a radial spectrum and a stereo spectrum.
-Style, colours and the animation switch are local display preferences. Read-only
-viewers can use them. Reduced-motion preferences pause animation.
+The desktop viewer's audio controls open an expandable visualiser panel. Spectrum
+bars, a frequency line with area fill, radial bars and independent left/right
+spectra share the Classic, Rainbow and Steel Blue palettes. Style, colours and the
+animation switch are local display preferences. Read-only viewers can use them.
+Reduced-motion preferences pause animation; status text remains available.
 
-This displays the mixed audio at this viewer's Web Audio playback node, before
-browser or system muting. It cannot identify applications or confirm sound at the
-speakers. Text distinguishes unavailable audio, waiting for playback permission,
-signal and silence. The microphone capture control remains separate.
+Wave.js 2.0.5 supplies the rendering subset in `web/vendor/wave`, pinned to upstream
+revision `03b29e841a9d0dbce5845bb6faf75b9b0088c49f` under MIT. That directory records
+the source files and adaptations. npm installs the local package, Vite includes it
+in the optional visualiser chunk, and the acknowledgements generator includes its
+license. The renderer loads only when the panel opens with playback available.
+Opening About or the mixer does not load it. All assets are local.
 
-The renderer loads when playback is available and the panel opens. Its analysis
-branch never connects to the speakers. Closing the panel disposes that branch;
-hiding the page or hiding the controls or entering viewer fullscreen, disabling animation and reduced motion
-pause drawing and disconnect the analysis input. Playback retains its context and
-speaker connection. Animation is capped at 30 fps.
+The visualiser observes the viewer's playback node before browser or system muting.
+It cannot identify applications or confirm sound at the speakers. Text distinguishes
+unavailable audio, waiting for playback permission, signal and silence. Microphone
+capture remains separate.
 
-Pop Out Visualizer opens a resizable browser window with the same display
-preferences and playback source. Its visibility and fullscreen controls belong to
-that window, so hiding the main viewer does not pause a visible pop-out. The
-status-bar button focuses an existing pop-out. Closing the pop-out leaves the
-visualiser closed; the status-bar button can open the docked panel again.
-The main viewer must stay open. Navigating or reloading either window, ending the
-server session, or transferring desktop playback to picture-in-picture closes the
-visualiser pop-out. Temporary reconnects keep it open.
+A dedicated analysis branch upmixes mono to both channels and splits stereo into
+two owned analysers. Each uses a 4096-sample FFT, smoothing of 0.7 and a -90 to -15 dB
+range. Sixty-four logarithmic bands cover 20 Hz through 20 kHz or Nyquist. Each band
+uses its strongest bin. Combined views take the stronger channel per band, so
+opposite-phase stereo does not cancel the display. Stereo draws each channel
+separately. Drawing scales to the backing canvas and its owning window's pixel ratio.
+
+Playback retains its context, statistics analyser settings and speaker connection.
+The branch never connects to speakers. The renderer starts paused. Animation is
+capped at 30 fps, with no recurring animation callbacks or analysis reads while
+paused, hidden, zero-sized or without a running playback context. Disabling Animate,
+reduced motion, hidden controls and viewer fullscreen pause the docked panel.
+Closing it releases its branch, canvas, observers and listeners. Setup and draw
+failures stop the renderer and report "Visualizer unavailable" without stopping
+session playback.
+
+Pop Out Visualizer opens a resizable window sharing the same playback source and
+connection. Its visibility, animation scheduling and fullscreen controls belong to
+that window. A background opener does not pause a visible popup. The status button
+focuses an existing popup; closing it leaves the visualiser closed. Blocked popups
+leave the dock available. Navigating or reloading either window, ending the session
+or transferring desktop playback to picture-in-picture closes the popup. Temporary
+reconnects keep it open and replace its analysis branch when playback returns.
 
 ## Verification
 
-In the Docker image, install Node, npm and Chromium, then run `npm ci` in `web`.
-`npm run build && npm run check:visualiser` exercises the emitted viewer in
-Chromium.
-`npm run check:panel-windows` checks both audio pop-outs, shared connection and
-audio ownership, URL prefixes, independent visibility, resize and fullscreen,
-mixer permissions and subscriptions, reconnects, blocked pop-ups and cleanup.
-For an additional check of actual background-tab behavior, start ordinary Chromium
-with remote debugging and `--autoplay-policy=no-user-gesture-required` in an
-isolated Docker rig under Xvfb. Set `BROWSER_CDP` to its debugging endpoint when
-running `check:panel-windows`. This mode avoids Playwright's forced visibility and
-checks animation and mixer volume commands while the opener is in a background
-tab. It supplements the default suite; run both modes for full coverage. Both
-modes passed, as did `check:viewer-disposal`.
-The checks cover graph ownership, repeated disposal and click listener counts,
-style changes, HiDPI, fullscreen, reduced motion, animation off, delayed audio
-initialization and source replacement.
-The signal/silence comparison waits for coloured Classic bars on the current
-canvas, then for a painted background pixel and no coloured pixels after the oscillator
-stops. Twelve consecutive Docker runs passed, including animation-disabled and
-reduced-motion checks and the unavailable-renderer fallback. Suppressing canvas path fills in a temporary test copy
-failed the signal readiness check within five seconds.
-Freezing FFT reads after the signal snapshot failed the silence readiness check.
+Run checks inside Docker with Chromium and Node installed, after `npm ci` and
+`npm run build` in `web`:
+
+- `npm run check:visualiser` checks the emitted panel and Wave renderer, lazy loading,
+  status and accessible controls, all styles and palettes, frequency placement at
+  80 Hz, 1 kHz and 8 kHz, true stereo, mono, silence, HiDPI, graph ownership,
+  reduced motion, pause/dispose, partial setup and asynchronous drawing failures.
+  Small input arrays and counts exceeding the available bins must produce finite
+  bounded geometry. A simulated 144 Hz display checks the rendering cap and stale
+  callbacks after pause or disposal.
+- `npm run check:panel-windows` checks shared graph and connection ownership, prefixes,
+  independent visibility, resize, fullscreen, preferences, reconnects, blocked popups,
+  repeated cleanup, context closure and failed cleanup during session termination.
+- `npm run check:viewer-disposal` and `node checks/settings.mjs` cover viewer teardown
+  and the surrounding controls.
+
+Also run the panel-window check with `BROWSER_CDP` pointing at ordinary Chromium
+under Xvfb, launched with remote debugging and
+`--autoplay-policy=no-user-gesture-required`. This mode verifies popup rendering
+and mixer commands while the opener is genuinely in a background tab, without
+Playwright's visibility overrides. Run both browser modes.
+
+For Firefox, install the Playwright Firefox browser and its system libraries in
+the rig. Provide a Pulse-compatible virtual audio output through `PULSE_SERVER`;
+Firefox needs an output device for a running AudioContext. Run
+`BROWSER=firefox node checks/visualiser-renderer.mjs` and
+`BROWSER=firefox npm run check:panel-windows`.
 
 The live check is `node checks/session-audio.mjs`, with `ELSEWHERE_TEST_URL` and
-`ELSEWHERE_TEST_TOKEN_FILE` pointing at an isolated Docker desktop and a token granting `desktop.view` and `audio.listen`.
-It uses finite FFmpeg audio and mpv software-Wayland video test signals, then
-Chromium's fake microphone device. It terminates test processes whose command
-lines match its own signals; use a dedicated rig.
+`ELSEWHERE_TEST_TOKEN_FILE` pointing at an isolated Docker desktop and an admin token.
+It uses finite FFmpeg audio, mpv software-Wayland video and Chromium's fake microphone.
+It terminates only processes matching its test signals. The check compensates for
+panel height so closed/open/closed-again measurements use the same video viewport.
+It records task time, heap and DOM counts, draw and analysis counts, video frames,
+PCM peaks and audio underruns. Run it without competing builds or test workloads.
 
-A software-rendered Docker run with a 440 Hz signal decoded 85 video frames in
-three seconds both with the panel closed and open, with zero audio underruns.
-The measured PCM peak was 0.10113 closed and 0.10112 open. Browser task time was
-151 ms/s closed, 132 ms/s open and 160 ms/s closed again. Opening the panel also
-shrinks the desktop video viewport, so those task-time samples do not isolate
-the renderer's cost. They establish that video and audio continued smoothly in
-that rig, not a general performance guarantee. Playback returned to silence. Fake microphone start/stop passed. Restarting
-an audio-enabled session with audio disabled cleared the old visualiser and
-reported unavailable audio after reconnect.
+A Docker Chromium 152 software-video run at a constant 928 × 722 video viewport
+measured the following. Each sample lasted about three seconds with the same
+30 fps moving video and stereo tone, after both decoders processed about two seconds
+of media. Task time is browser main-thread time per
+second; heap is the sampled JavaScript heap after collection before each interval.
+
+| Panel | Task ms/s | Video fps | Draws/s | Analysis reads/s | Heap MiB | DOM nodes | Audio underruns |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Closed | 100.1 | 28.9 | 0 | 0 | 5.05 | 624 | 0 |
+| Open | 145.5 | 28.5 | 30 | 60 | 5.01 | 748 | 0 |
+| Closed again | 114.0 | 28.6 | 0 | 0 | 4.90 | 635 | 0 |
+
+PCM peaks stayed within 0.0001 across these samples. These are rig measurements,
+not performance limits for every browser or machine. The live check asserts video
+throughput, uninterrupted audio, stable level, the drawing cap and stopped analysis
+after closure. Direct lifecycle checks cover retained graph edges, listeners,
+observers and callbacks over repeated creation and disposal.

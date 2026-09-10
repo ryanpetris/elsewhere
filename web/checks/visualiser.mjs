@@ -122,7 +122,7 @@ try {
       const samples = new Float32Array(source.fftSize);
       source.getFloatTimeDomainData(samples);
       const signalPeak = Math.max(...samples.map(Math.abs));
-      elsewhere.store.set({ stats: { ...elsewhere.store.get().stats, audio: { packets: 1, decoded: 1, lead: 0, state: context.state, signalPeak, level: signalPeak > .0001 ? 200 : 0 } } });
+      elsewhere.store.set({ stats: { ...elsewhere.store.get().stats, audio: { packets: 1, decoded: 1, lead: 0, state: window.frozenAudioState || context.state, signalPeak, level: signalPeak > .0001 ? 200 : 0 } } });
     }, 50);
     window.elsewhere.store.set({ playback: { context, source }, stats: { ...window.elsewhere.store.get().stats, audio: { packets: 1, decoded: 1, lead: 0, state: 'running', signalPeak: .1, level: 200 } } });
   });
@@ -143,7 +143,17 @@ try {
   await panel.getByText('Playing', { exact: false }).waitFor();
   await page.evaluate(() => window.testPlayback.context.suspend());
   await panel.getByText('Playback paused.', { exact: false }).waitFor();
-  await page.evaluate(() => window.testPlayback.context.resume());
+  await checkEdges(1);
+  const resumed = await page.evaluate(async () => {
+    window.frozenAudioState = 'suspended';
+    const { context, source } = testPlayback;
+    const changed = new Promise(resolve => context.addEventListener('statechange', resolve, { once: true }));
+    await context.resume(); await changed;
+    const result = { edges: graphEdges.filter(([from]) => from === source).length, snapshot: elsewhere.store.get().stats.audio.state };
+    delete window.frozenAudioState;
+    return result;
+  });
+  assert.deepEqual(resumed, { edges: 2, snapshot: 'suspended' }, 'context resumption attaches analysis before the next statistics update');
   await panel.getByText('Playing', { exact: false }).waitFor();
   for (const style of ['line', 'radial', 'stereo', 'bars']) {
     await panel.getByRole('combobox', { name: /^Style/ }).selectOption(style);
@@ -203,6 +213,27 @@ try {
     await checkEdges(2);
   }
   assert.equal(await listeners(), clickListeners, 'no leaked window click listeners');
+  // An asynchronous draw error is contained by the panel and releases its analysis branch.
+  await page.evaluate(() => {
+    const stroke = CanvasRenderingContext2D.prototype.stroke;
+    CanvasRenderingContext2D.prototype.stroke = function (...args) {
+      if (this.canvas.closest('[aria-label="Audio Visualizer"]')) {
+        CanvasRenderingContext2D.prototype.stroke = stroke;
+        throw Error('Injected visualizer draw failure');
+      }
+      return stroke.apply(this, args);
+    };
+  });
+  await panel.getByRole('alert').filter({ hasText: 'Visualizer unavailable' }).waitFor();
+  await checkEdges(1);
+  assert.equal(await panel.locator('canvas').count(), 0);
+  const failedDraws = await page.evaluate(() => framesDrawn);
+  await page.waitForTimeout(150);
+  assert.equal(await page.evaluate(() => framesDrawn), failedDraws, 'failed renderer stops');
+  assert.equal(await page.evaluate(() => testPlayback.context.state), 'running');
+  await panel.getByRole('button', { name: 'Close Visualizer', exact: true }).click();
+  await page.getByRole('button', { name: 'Audio Visualizer', exact: true }).click();
+  await panel.locator('canvas').waitFor();
   await panel.getByRole('combobox', { name: /^Style/ }).selectOption('bars');
   await panel.getByRole('combobox', { name: /^Colours/ }).selectOption('classic');
   // Classic bars have coloured pixels only when the renderer draws a signal.
@@ -245,6 +276,45 @@ try {
   assert.equal(await page.evaluate(() => window.testPlayback.context.state === 'closed'), false);
   assert.equal(await panel.locator('canvas').count(), 0);
   assert.equal(errors.length, 0, errors.join('\n'));
+  // Replacing playback while the module is loading cancels initialization for the old source.
+  let unblock, sawRequest;
+  const loading = new Promise(resolve => { unblock = resolve; });
+  const requested = new Promise(resolve => { sawRequest = resolve; });
+  await page.route('**/assets/visualiser-*.js', async route => { sawRequest(); await loading; await route.continue(); });
+  await page.reload();
+  await page.waitForFunction(() => !!window.elsewhere?.store);
+  await page.evaluate(async () => {
+    const context = new AudioContext(); await context.resume();
+    const source = context.createAnalyser(); source.connect(context.destination);
+    window.testPlayback = { context, source };
+    elsewhere.store.set({ status: 'connected', role: 'viewer', permissions: ['desktop.view', 'audio.listen'], audioAvailable: true, playback: { context, source } });
+  });
+  await page.getByRole('button', { name: 'Audio Visualizer', exact: true }).click();
+  await requested;
+  await page.evaluate(async () => {
+    window.oldPlayback = testPlayback;
+    const context = new AudioContext(); await context.resume();
+    const source = context.createAnalyser(); source.connect(context.destination);
+    window.testPlayback = { context, source };
+    elsewhere.store.set({ playback: { context, source } });
+  });
+  unblock();
+  await panel.locator('canvas').waitFor();
+  await checkEdges(2);
+  assert.equal(await page.evaluate(() => graphEdges.filter(([from]) => from === oldPlayback.source).length), 1, 'cancelled source never gains an analysis branch');
+  await page.evaluate(() => oldPlayback.context.close());
+  await panel.getByRole('button', { name: 'Close Visualizer', exact: true }).click();
+  await checkEdges(1);
+  await page.evaluate(() => {
+    window.createAnalyser = AudioContext.prototype.createAnalyser;
+    AudioContext.prototype.createAnalyser = () => { throw Error('Injected analyser initialization failure'); };
+  });
+  await page.getByRole('button', { name: 'Audio Visualizer', exact: true }).click();
+  await panel.getByRole('alert').filter({ hasText: 'Visualizer unavailable' }).waitFor();
+  await checkEdges(1);
+  assert.equal(await panel.locator('canvas').count(), 0);
+  assert.equal(await page.evaluate(() => testPlayback.context.state), 'running');
+  await page.evaluate(() => { AudioContext.prototype.createAnalyser = window.createAnalyser; });
   await page.route('**/assets/visualiser-*.js', route => route.abort());
   await page.reload();
   await page.waitForFunction(() => !!window.elsewhere?.store);

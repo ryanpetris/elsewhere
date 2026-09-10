@@ -27,11 +27,11 @@ for package in metadata["packages"]:
 
 lock = json.loads((root / "web/package-lock.json").read_text())
 for path, package in lock["packages"].items():
-    if not path:
+    if not path or package.get("link"):
         continue
     if not (root / "web" / path).is_dir() and not package.get("optional", False):
         raise RuntimeError("Run npm ci in web before refreshing acknowledgements")
-    name = path.rsplit("node_modules/", 1)[-1]
+    name = package.get("name") or path.rsplit("node_modules/", 1)[-1]
     entries.append(("JavaScript", name, package["version"], package.get("license"),
                     notice(root / "web" / path)))
 
