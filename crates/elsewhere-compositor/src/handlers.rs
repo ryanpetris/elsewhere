@@ -405,7 +405,6 @@ impl XdgShellHandler for State {
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         let work = self.work_area();
         surface.with_pending_state(|s| {
-            s.decoration_mode = Some(DecorationMode::ServerSide); // ours unless the client asks to draw its own
             s.capabilities.replace([xdg_toplevel::WmCapabilities::Maximize, xdg_toplevel::WmCapabilities::Fullscreen]);
             if !self.kiosk {
                 s.capabilities.set(xdg_toplevel::WmCapabilities::Minimize); // a nested desktop has nowhere to come back from
@@ -424,7 +423,7 @@ impl XdgShellHandler for State {
         }
         let n = self.space.elements().count() as i32 % 10;
         let window = Window::new_wayland_window(surface);
-        // room for a title bar above (the client's answer on decorations comes with its first commit)
+        // Reserve room for possible server decoration in the cascade.
         self.space.map_element(window.clone(), work.loc + Point::from((40 + 30 * n, 40 + elsewhere_core::decoration::BAR + 30 * n)), true);
         self.active = Some(window); // mapped activated: that is what the desktop API reports as focused
     }
@@ -630,10 +629,10 @@ impl WlrLayerShellHandler for State {
     }
 }
 
-/// We draw the decorations unless the client wants to (GTK, Qt, browsers); what it asks for, it gets.
+/// Negotiated xdg decorations default to server-side and honor client mode requests.
 impl XdgDecorationHandler for State {
     fn new_decoration(&mut self, toplevel: ToplevelSurface) {
-        toplevel.with_pending_state(|s| s.decoration_mode = Some(DecorationMode::ServerSide));
+        self.request_mode(toplevel, DecorationMode::ServerSide);
     }
     fn request_mode(&mut self, toplevel: ToplevelSurface, mode: DecorationMode) {
         toplevel.with_pending_state(|s| s.decoration_mode = Some(mode));

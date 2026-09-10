@@ -1,4 +1,4 @@
-//! Delegate protocol requests and observe the clipboard source's lifetime.
+//! Delegate protocol requests and observe clipboard and decoration object lifetimes.
 
 use std::any::Any;
 
@@ -12,7 +12,7 @@ use smithay::{
 
 use crate::State;
 
-impl<I: Resource, U: Dispatch2<I, Self>> Dispatch<I, U> for State
+impl<I: Resource + 'static, U: Dispatch2<I, Self>> Dispatch<I, U> for State
 where
     I::Request: 'static,
 {
@@ -32,6 +32,14 @@ where
     fn destroyed(state: &mut Self, client: ClientId, resource: &I, data: &U) {
         let clipboard_owner = state.reading.owner.as_ref().is_some_and(|owner| owner.id() == resource.id());
         data.destroyed(state, client, resource);
+        // Smithay has no xdg-decoration destruction callback; its pending mode outlives the object.
+        // Pending state also supersedes unacknowledged configures.
+        if let Some(decoration) = (resource as &dyn Any).downcast_ref::<smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::ZxdgToplevelDecorationV1>()
+            && let Some(toplevel) = decoration.data::<smithay::wayland::shell::xdg::ToplevelSurface>()
+        {
+            toplevel.with_pending_state(|s| s.decoration_mode = None);
+            state.decorations_changed();
+        }
         // Smithay clears the seat selection here without calling new_selection.
         if clipboard_owner {
             state.clipboard_offer(None, false);

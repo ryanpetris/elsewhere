@@ -10,7 +10,7 @@ use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
 use smithay::{
     reexports::{
         wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration::{Mode as KdeMode, OrgKdeKwinServerDecoration},
-        wayland_server::{WEnum, protocol::wl_surface::WlSurface},
+        wayland_server::{Resource, WEnum, protocol::wl_surface::WlSurface},
     },
     wayland::{
         compositor::with_states,
@@ -61,32 +61,38 @@ pub enum Under {
 #[derive(Default)]
 struct Cache(RefCell<Option<(String, bool, bool, Size<i32, Buffer>, MemoryRenderBuffer)>>);
 
-/// What a surface asked for through KDE's server-decoration protocol, the one GTK (3 and 4) and
-/// Firefox use to say they draw their own; xdg-decoration is the other way to say it.
+/// The live KDE decoration object and its negotiated mode.
 #[derive(Default)]
-struct KdeRequest(RefCell<Option<KdeMode>>);
+struct KdeRequest(RefCell<Option<(OrgKdeKwinServerDecoration, KdeMode)>>);
 
-fn kde_client_side(surface: &WlSurface) -> bool {
-    with_states(surface, |s| s.data_map.get::<KdeRequest>().is_some_and(|r| matches!(*r.0.borrow(), Some(KdeMode::Client | KdeMode::None))))
+fn kde_server_side(surface: &WlSurface) -> bool {
+    with_states(surface, |s| s.data_map.get::<KdeRequest>().is_some_and(|r| {
+        r.0.borrow().as_ref().is_some_and(|(object, mode)| object.is_alive() && *mode == KdeMode::Server)
+    }))
 }
 
 impl KdeDecorationHandler for State {
     fn kde_decoration_state(&self) -> &KdeDecorationState {
         &self.kde_decoration_state
     }
+    fn new_decoration(&mut self, surface: &WlSurface, decoration: &OrgKdeKwinServerDecoration) {
+        self.request_mode(surface, decoration, WEnum::Value(KdeMode::Server));
+    }
     fn request_mode(&mut self, surface: &WlSurface, decoration: &OrgKdeKwinServerDecoration, mode: WEnum<KdeMode>) {
         if let WEnum::Value(mode) = mode {
             with_states(surface, |s| {
                 s.data_map.insert_if_missing(KdeRequest::default);
-                *s.data_map.get::<KdeRequest>().unwrap().0.borrow_mut() = Some(mode);
+                *s.data_map.get::<KdeRequest>().unwrap().0.borrow_mut() = Some((decoration.clone(), mode));
             });
             decoration.mode(mode);
             self.decorations_changed();
         }
     }
-    fn release(&mut self, _decoration: &OrgKdeKwinServerDecoration, surface: &WlSurface) {
+    fn release(&mut self, decoration: &OrgKdeKwinServerDecoration, surface: &WlSurface) {
         with_states(surface, |s| {
-            if let Some(r) = s.data_map.get::<KdeRequest>() {
+            if let Some(r) = s.data_map.get::<KdeRequest>()
+                && r.0.borrow().as_ref().is_some_and(|(object, _)| object == decoration)
+            {
                 *r.0.borrow_mut() = None;
             }
         });
@@ -128,15 +134,19 @@ pub fn resize_cursor(edge: ResizeEdge) -> CursorIcon {
 }
 
 impl State {
-    /// Windows we draw a bar for: X11 ones that don't refuse decorations, Wayland ones that didn't say
-    /// they draw their own (through xdg-decoration or KDE's protocol); never fullscreen ones. Read from
-    /// the pending xdg state: what was asked for, before the client acks it, so the room a maximized
-    /// window gets is right on the way out of fullscreen.
+    /// Wayland server chrome requires a negotiated server mode; undecorated X11 windows get a bar.
+    /// Pending xdg state includes requests not yet acknowledged, so maximize/fullscreen sizing uses
+    /// the same bar presence as rendering and hit testing.
     pub fn decorated(&self, window: &Window) -> bool {
         match window.underlying_surface() {
             WindowSurface::X11(x) => !x.is_override_redirect() && !x.is_decorated() && !x.is_fullscreen(),
             WindowSurface::Wayland(t) => {
-                t.with_pending_state(|s| s.decoration_mode != Some(Mode::ClientSide) && !s.states.contains(XdgState::Fullscreen)) && !kde_client_side(t.wl_surface())
+                // Both queries lock the same surface; keep them separate.
+                let (mode, fullscreen) = t.with_pending_state(|s| (s.decoration_mode, s.states.contains(XdgState::Fullscreen)));
+                !fullscreen && match mode {
+                    Some(mode) => mode == Mode::ServerSide,
+                    None => kde_server_side(t.wl_surface()),
+                }
             }
         }
     }
