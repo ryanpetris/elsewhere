@@ -319,6 +319,14 @@ input-to-frame latency and loss counters; the Statistics tab of the side panel a
 and audio lead once a second, collected only while it is shown; `elsewhere()` in the console returns the same
 as JSON.
 
+The crop check runs inside Docker with Chromium, FFmpeg and Xvfb. Start
+`Xvfb :96 -screen 0 1920x1080x24 -nolisten tcp`. In `web/`, run `npm run build`, then
+`DISPLAY=:96 TEST_WEBGPU=software npm run check:video-crop`.
+Software mode selects Chromium's bundled SwiftShader for ANGLE and WebGPU, so no GPU device is
+required. `TEST_WEBGPU=1` uses the system GPU path for a rig with a passed-through GPU.
+The check reports the adapter and verifies decoded video, cropped edge pixels and retained frames
+through WebGPU texture imports and readback. SwiftShader results cover software rendering.
+
 ## Running and deployment
 
 See the README for flags and the `Dockerfile` for a complete Arch Linux image with the Xfce applications

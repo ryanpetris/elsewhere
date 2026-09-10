@@ -1,4 +1,5 @@
-// Docker with Chromium, FFmpeg and Xvfb: DISPLAY=:96 TEST_WEBGPU=1 node checks/video-crop.mjs
+// Docker with Chromium, FFmpeg and Xvfb: DISPLAY=:96 TEST_WEBGPU=software npm run check:video-crop
+// TEST_WEBGPU=1 uses the system GPU path; software selects SwiftShader for ANGLE and WebGPU.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -56,6 +57,7 @@ const server = http.createServer((req, res) => {
   }
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
+const softwareGpu = process.env.TEST_WEBGPU === 'software';
 const browser = await chromium.launch({
   executablePath: '/usr/bin/chromium',
   headless: false,
@@ -63,7 +65,7 @@ const browser = await chromium.launch({
   args: [
     '--no-sandbox',
     '--enable-unsafe-webgpu',
-    '--use-angle=gl',
+    ...(softwareGpu ? ['--use-angle=vulkan', '--use-vulkan=swiftshader', '--use-webgpu-adapter=swiftshader'] : ['--use-angle=gl']),
     '--enable-features=Vulkan',
     '--disable-vulkan-surface',
     '--disable-background-timer-throttling',
@@ -342,6 +344,15 @@ try {
   if (process.env.TEST_WEBGPU) {
     const gpu = await context.newPage();
     await gpu.goto(url + '?renderer=webgpu#token=fixture');
+    const adapter = await gpu.evaluate(async () => {
+      const adapter = await navigator.gpu?.requestAdapter();
+      if (!adapter) return null;
+      const { vendor, architecture } = adapter.info;
+      return { vendor, architecture };
+    });
+    console.log(JSON.stringify({ adapter }));
+    assert(adapter, 'WebGPU adapter unavailable');
+    if (softwareGpu) assert.match(adapter.architecture, /swiftshader/i, 'crop check uses the software WebGPU adapter');
     await ready(gpu);
     const gr = await capture(gpu, 'desktop-webgpu');
     assert.equal(gr.renderer, 'webgpu');
@@ -467,7 +478,7 @@ try {
   await context.close();
   console.log(
     'Viewer crop paths and edge landmarks passed; WebGPU: ' +
-      (process.env.TEST_WEBGPU ? 'tested' : 'SKIPPED (set TEST_WEBGPU=1)')
+      (process.env.TEST_WEBGPU ? 'tested' : 'SKIPPED (set TEST_WEBGPU=1 or software)')
   );
 } finally {
   await browser.close();
