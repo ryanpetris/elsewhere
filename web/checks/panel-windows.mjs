@@ -95,6 +95,14 @@ try {
   assert.equal(await audio.evaluate(() => typeof window.elsewhere), 'undefined', 'popout does not create a viewer');
   const focusAudio = page.getByRole('button', { name: 'Focus Audio Visualizer Window', exact: true });
   assert.equal(await focusAudio.getAttribute('aria-expanded'), null, 'window focus is not a collapsed-panel action');
+  const appearance = () => focusAudio.evaluate(button => {
+    const style = getComputedStyle(button);
+    return [style.color, style.backgroundColor];
+  });
+  const activeAppearance = await appearance();
+  await focusAudio.hover();
+  await delay(200);
+  assert.deepEqual(await appearance(), activeAppearance, 'hover preserves the open-window highlight');
   await focusAudio.click();
   assert.equal(context.pages().length, 2, 'status button focuses the existing popout');
   assert.equal(await region(page, 'Audio Visualizer').count(), 0);
@@ -154,6 +162,15 @@ try {
     await page.evaluate(() => elsewhere.store.set({ role: 'viewer' }));
     await mixer.getByText('Read Only', { exact: true }).waitFor();
     assert.equal(await mixer.getByRole('button', { name: 'Speakers Mute', exact: true }).isDisabled(), true);
+    // Playback can close before React disposes the analysis branch. Exercise that interval.
+    const beforeClose = await audio.evaluate(() => window.paints);
+    assert.equal(await page.evaluate(async () => {
+      await playback.context.close();
+      playback.source.getByteFrequencyData(new Uint8Array(playback.source.frequencyBinCount));
+      return playback.context.state;
+    }), 'closed');
+    await audio.waitForFunction(before => window.paints > before + 3, beforeClose);
+    assert.equal(errors.length, 0, 'analysis remains safe until the closed playback source is unpublished');
     await page.evaluate(() => {
       Object.defineProperty(document, 'hidden', { configurable: true, value: false });
       document.dispatchEvent(new Event('visibilitychange'));
@@ -197,20 +214,25 @@ try {
     await page.evaluate(() => elsewhere.setPlaybackEnabled(false));
     await until(() => audio.isClosed(), 'desktop PiP playback handoff closes visualizer popup');
     // An isolated teardown failure must not prevent the other window from closing.
-    const brokenWindow = page.waitForEvent('popup');
     await page.evaluate(() => {
-      const original = window.open;
-      let win;
-      window.open = () => (win = original.call(window, 'about:blank', '_blank', 'popup'));
-      try {
-        elsewhere.panels.open('audio');
-        elsewhere.panels.attach(win, 'audio').ready(() => { throw new Error('Injected cleanup failure'); });
-      } finally { window.open = original; }
+      elsewhere.store.set({ playback: { context: playback.context, source: playback.source } });
+      const attach = elsewhere.panels.attach;
+      elsewhere.panels.attach = (win, kind) => {
+        const owner = attach(win, kind);
+        if (owner && kind === 'audio') {
+          elsewhere.panels.attach = attach;
+          const ready = owner.ready;
+          owner.ready = cleanup => ready(() => { cleanup(); throw new Error('Injected cleanup failure'); });
+        }
+        return owner;
+      };
     });
-    const brokenAudio = await brokenWindow;
+    const brokenAudio = await open('Audio Visualizer', 'Pop Out Visualizer');
+    await until(async () => await edges() === 2, 'real analysis branch exists before teardown failure');
     const endedMixer = await open('Audio Mixer', 'Pop Out Mixer');
     await page.evaluate(() => elsewhere.store.set({ status: 'quit' }));
     await until(() => brokenAudio.isClosed() && endedMixer.isClosed(), 'session end closes both windows despite failed cleanup');
+    assert.equal(await edges(), 1, 'real analysis cleanup ran before the injected failure');
     assert.equal(await page.getByRole('button', { name: 'Audio Mixer', exact: true }).getAttribute('aria-expanded'), 'false');
     await page.evaluate(() => elsewhere.store.set({ status: 'connected' }));
     const lastMixer = await open('Audio Mixer', 'Pop Out Mixer');

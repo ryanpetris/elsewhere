@@ -186,12 +186,12 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
           </button>
         )}
         {listens && onMixer && (
-          <button id="session-mixer-toggle" type="button" aria-label={panelWindows.mixer ? 'Focus Audio Mixer Window' : 'Audio Mixer'} title={panelWindows.mixer ? 'Focus Audio Mixer Window' : 'Audio Mixer'} aria-expanded={panelWindows.mixer ? undefined : mixerPanel && !controlsHidden} onClick={onMixer} className={cx(control, panelWindows.mixer && 'bg-accent/15 text-accent-2')}>
+          <button id="session-mixer-toggle" type="button" aria-label={panelWindows.mixer ? 'Focus Audio Mixer Window' : 'Audio Mixer'} title={panelWindows.mixer ? 'Focus Audio Mixer Window' : 'Audio Mixer'} aria-expanded={panelWindows.mixer ? undefined : mixerPanel && !controlsHidden} onClick={onMixer} className={cx(control, panelWindows.mixer && 'bg-accent/15! text-accent-2!')}>
             <SlidersHorizontal className="size-3.5" />
           </button>
         )}
         {listens && onAudioPanel && (
-          <button type="button" aria-label={panelWindows.audio ? 'Focus Audio Visualizer Window' : 'Audio Visualizer'} title={panelWindows.audio ? 'Focus Audio Visualizer Window' : 'Audio Visualizer'} aria-expanded={panelWindows.audio ? undefined : audioPanel && !controlsHidden} onClick={onAudioPanel} className={cx(control, panelWindows.audio && 'bg-accent/15 text-accent-2')}>
+          <button type="button" aria-label={panelWindows.audio ? 'Focus Audio Visualizer Window' : 'Audio Visualizer'} title={panelWindows.audio ? 'Focus Audio Visualizer Window' : 'Audio Visualizer'} aria-expanded={panelWindows.audio ? undefined : audioPanel && !controlsHidden} onClick={onAudioPanel} className={cx(control, panelWindows.audio && 'bg-accent/15! text-accent-2!')}>
             <AudioLines className="size-3.5" />
           </button>
         )}
