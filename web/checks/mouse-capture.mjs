@@ -11,7 +11,7 @@ const server = createServer(async (req, res) => {
     const path = new URL(req.url, 'http://localhost').pathname;
     if (path.startsWith('/api/')) {
       res.setHeader('Content-Type', 'application/json');
-      return res.end(path === '/api/me' ? JSON.stringify({ permissions: ['desktop.view', 'desktop.control'] }) : '[]');
+      return res.end(path === '/api/me' ? JSON.stringify({ permissions: ['desktop.view', 'desktop.control', 'clipboard.write'] }) : '[]');
     }
     res.setHeader('Content-Type', path.endsWith('.js') ? 'text/javascript' : path.endsWith('.css') ? 'text/css' : 'text/html');
     res.end(await readFile(new URL('../dist/' + (path === '/' ? 'index.html' : path.slice(1)), import.meta.url)));
