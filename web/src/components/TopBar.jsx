@@ -50,6 +50,14 @@ function Role({ viewer, role, windowMode }) {
   return null;
 }
 
+/// The popup's role, in the badges the main bar uses. Its own Take Control button stands beside this.
+function PopupRole({ status, role, text }) {
+  if (status !== 'connected') return <span className="shrink-0 text-ink-3">{text}</span>;
+  if (role === 'viewer') return <Badge title="This token does not allow desktop control"><Eye className="size-3" /> View Only</Badge>;
+  if (role === 'controller') return <Badge tone="ok" dot title="Desktop Control">Controlling</Badge>;
+  return <Badge>Watching</Badge>;
+}
+
 /// The mouse is inside the desktop and Escape is the way out. It stays until capture ends, so it is
 /// the bar's own warning rather than a notice that fades.
 const Capture = () => (
@@ -73,7 +81,7 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, o
     <header className="flex h-9 shrink-0 items-center gap-2 border-b border-line bg-surface px-2 text-xs">
       <span className={`size-2 shrink-0 rounded-full ${dot}`} title={text} />
       <span className="min-w-0 flex-1 truncate font-medium text-ink">{windowMode ? windowTitle || `Window ${WINDOW}` : 'Remote Desktop'}</span>
-      <span className="shrink-0 text-ink-3">{status === 'connected' ? role === 'viewer' ? 'View Only' : role === 'controller' ? 'Controlling' : 'Watching' : text}</span>
+      <PopupRole status={status} role={role} text={text} />
       {locked && <MousePointer2 data-mouse-capture className="size-3.5 shrink-0 text-warn" role="img" aria-label="Mouse Captured" />}
       {!windowMode && role === 'participant' && <button type="button" className="btn btn-primary btn-xs" onClick={() => viewer.takeControl()}>Take Control</button>}
       {!windowMode && role === 'controller' && <IconButton icon={Keyboard} label="On-Screen Keyboard" size="sm" active={keyboard} onClick={onKeyboard} />}

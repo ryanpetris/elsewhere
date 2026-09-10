@@ -695,9 +695,10 @@ stream costs an encoder and a swapchain.
 
 ## Display controls
 
-The viewer can hide its top bar and panels while retaining the status bar and a Show Controls button.
-Ctrl+Alt+Shift+H toggles this view and releases captured input. The setting is local to the viewer and
-resets on reload. Hidden panels retain their state, including running terminal sessions.
+The viewer can hide its top bar and panels while retaining the status bar and a highlighted Show Controls
+button at its left. Ctrl+Alt+Shift+H toggles this view and releases captured input. The setting is local
+to the viewer and resets on reload. Hidden panels retain their state, including running terminal
+sessions.
 
 Settings also exposes shared kiosk and resolution controls through `/api/display`. These require
 `desktop.control` and apply without restarting the server. See [display settings](protocol.md#display-settings)

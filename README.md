@@ -77,9 +77,10 @@ The desktop takes the size of the controlling viewer's display area. Fullscreen 
 status bar on screen, with keyboard lock so shortcuts like Ctrl+W reach the desktop.
 
 **Hide controls** hides the top bar and open panels while keeping the status bar, statistics and stream
-controls. Use **Show Controls** in the status bar or **Ctrl+Alt+Shift+H** to return. The shortcut also
-releases mouse capture and exits viewer fullscreen. The mode belongs to this viewer and resets on reload;
-hidden terminal sessions stay open. Browser tabs and the address bar stay visible in windowed mode.
+controls. Use the highlighted **Show Controls** button at the left of the status bar or
+**Ctrl+Alt+Shift+H** to return. The shortcut also releases mouse capture and exits viewer fullscreen. The
+mode belongs to this viewer and resets on reload; hidden terminal sessions stay open. Browser tabs and
+the address bar stay visible in windowed mode.
 
 Any number of people can watch at once, each with a stream scaled to their own window. The first to
 connect with `desktop.control` drives the pointer and keyboard; other eligible sessions can use
@@ -217,14 +218,14 @@ in the Dockerfile's header.
 The page says when the server closed its socket with a token dialog ("wrong token" or "token revoked or expired").
 
 In Settings, enable **Capture Mouse on Click** for games that use edge scrolling. The first click
-captures the mouse; movement, clicks, and the mouse wheel reach the desktop only while captured.
-A **Mouse Captured** warning sits in the top bar for as long as capture lasts; fullscreen and hidden
-controls take the bar and the warning with them.
-Use the application's fullscreen button to send normal Escape presses to the remote application
-while keeping the mouse captured in supported browsers. Hold Escape to use the browser's release
-gesture. Outside supported fullscreen, normal Escape may release capture; browser-only F11 fullscreen
-does not enable this behavior. The setting is remembered in your browser and starts off.
-Games that request pointer lock still capture automatically; after the browser releases capture, click to resume.
+captures the mouse; movement, clicks, and the mouse wheel reach the desktop only while captured. A
+**Mouse Captured** warning sits in the top bar for as long as capture lasts; fullscreen and hidden
+controls take the bar and the warning with them. Use the application's fullscreen button to send normal
+Escape presses to the remote application while keeping the mouse captured in supported browsers. Hold
+Escape to use the browser's release gesture. Outside supported fullscreen, normal Escape may release
+capture; browser-only F11 fullscreen does not enable this behavior. The setting is remembered in your
+browser and starts off. Games that request pointer lock still capture automatically; after the browser
+releases capture, click to resume.
 
 ## Reverse proxies
 

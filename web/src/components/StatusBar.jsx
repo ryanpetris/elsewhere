@@ -2,7 +2,7 @@
 // quality, effort and transport choices. Its height is fixed, so nothing here ever resizes the stage.
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Activity, AudioLines, Camera, CameraOff, Mic, MicOff, Settings2, SlidersHorizontal, Terminal, Volume2, VolumeX, X } from 'lucide-react';
+import { Activity, AudioLines, Camera, CameraOff, Mic, MicOff, PanelTopOpen, Settings2, SlidersHorizontal, Terminal, Volume2, VolumeX, X } from 'lucide-react';
 import { useStore } from '../store.js';
 import { EFFORTS, PRESETS, TRANSPORTS } from '../protocol.js';
 import { IconButton, codecName, cx } from './ui.jsx';
@@ -162,7 +162,12 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
   // does not fit, and the controls scroll horizontally when space is limited.
   return (
     <footer className="flex h-8 shrink-0 items-center gap-x-2 border-t border-line bg-surface px-2 font-mono text-[11px] text-ink-3 sm:gap-x-3 sm:px-3">
-      {controlsHidden && <button type="button" className="btn btn-outline btn-xs shrink-0" onFocus={viewer.releaseInput} onClick={onShowControls} title="Show Controls (Ctrl+Alt+Shift+H)">Show Controls</button>}
+      {controlsHidden && (
+        <button type="button" aria-label="Show Controls" title="Show Controls (Ctrl+Alt+Shift+H)" onFocus={viewer.releaseInput} onClick={onShowControls}
+          className={cx(control, 'w-6 px-0 bg-warn/15 text-warn hover:text-warn')}>
+          <PanelTopOpen className="size-3.5" />
+        </button>
+      )}
       <Metric icon={Activity} value={`${s.fps} fps`} width="w-[9ch]" title={`${s.fps} frames per second painted`} />
       <Metric value={`${s.mbps.toFixed(1)} Mbit`} width="w-[11ch]" title={`Measured video throughput: ${s.mbps.toFixed(1)} Mbit`} className="max-[26rem]:hidden" />
       <Metric value={`${s.latencyMs.toFixed(0)} ms`} width="w-[8ch]" title={`Input to the next painted frame: ${s.latencyMs.toFixed(0)} ms`} className="max-lg:hidden" />
