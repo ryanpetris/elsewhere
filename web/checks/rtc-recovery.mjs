@@ -108,6 +108,33 @@ try {
   const active = page => page.waitForFunction(() => elsewhere.store.get().rtcRecovery.state === 'active');
   const waiting = page => page.waitForFunction(() => elsewhere.store.get().rtcRecovery.state === 'waiting');
   const keyframe = page => page.evaluate(() => rtcTest.socket.send(new Uint8Array([0x88])));
+  const chooseTransport = async (page, name) => {
+    await page.getByRole('button', { name: /^Transport:/ }).click();
+    await page.getByRole('dialog', { name: 'Transport', exact: true }).getByRole('radio', { name, exact: true }).click();
+    await page.getByRole('dialog', { name: 'Transport', exact: true }).waitFor({ state: 'detached' });
+    assert.equal(await page.evaluate(() => elsewhere.store.get().transport), name.toLowerCase());
+  };
+  const transportLayout = async (page, state) => {
+    for (const width of [1600, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      const footer = page.locator('footer');
+      assert.equal(await footer.locator('[data-transport-status]').count(), 1);
+      assert.equal(await page.locator('select[title="Transport"]').count(), 0);
+      const button = footer.getByRole('button', { name: /^Transport:/ });
+      assert(await button.isVisible());
+      const box = await button.boundingBox();
+      assert(box && box.width >= 60 && box.x >= 0 && box.x + box.width <= width, 'transport face stays on screen');
+      if (state === 'waiting') await footer.getByRole('button', { name: 'Retry Now', exact: true }).waitFor({ state: 'visible' });
+      if (width === 390) {
+        await page.getByRole('button', { name: 'Stream Settings', exact: true }).click();
+        const panel = page.getByRole('dialog', { name: 'Stream Settings', exact: true });
+        assert.equal(await panel.getByText('Transport', { exact: true }).count(), 0);
+        await panel.getByRole('button', { name: 'Close Stream Settings', exact: true }).click();
+      }
+      await page.screenshot({ path: `/tmp/elsewhere-transport-${width}-${state}.png` });
+    }
+    await page.setViewportSize({ width: 1600, height: 900 });
+  };
   const selected = async page => {
     assert.deepEqual(await page.evaluate(() => [elsewhere.store.get().transport, localStorage.getItem('elsewhere.transport'), elsewhere.store.get().choice.quality, elsewhere.store.get().streamState.ceiling_kbps]), ['webrtc', 'webrtc', 'low', 5000]);
     assert.equal(await page.evaluate(() => elsewhere.store.get().statsOn), false);
@@ -130,13 +157,18 @@ try {
   };
   for (const page of [main, popup]) {
     // A failed offer falls back without changing either selection and automatically recovers.
-    await page.evaluate(() => { rtcTest.failOffers = 1; elsewhere.setTransport('webrtc'); });
+    await page.evaluate(() => { rtcTest.failOffers = 100; });
+    await chooseTransport(page, 'WebRTC');
     await waiting(page); await selected(page);
     assert.match(await page.locator('[data-transport-status]').textContent(), /WebSocket.*retrying WebRTC/);
+    await transportLayout(page, 'waiting');
+    await page.evaluate(() => { rtcTest.failOffers = 0; });
+    await page.locator('footer').getByRole('button', { name: 'Retry Now', exact: true }).click();
     await page.evaluate(() => { rtcTest.socketFrames = 0; }); await keyframe(page);
     await page.waitForFunction(() => rtcTest.socketFrames > 0);
     await active(page);
     await keyframe(page); await page.waitForFunction(() => rtcTest.rtcFrames > 0);
+    await transportLayout(page, 'active');
     await socketPaths(page);
 
     const accepted = await page.evaluate(() => rtcTest.offers.at(-1));
@@ -182,7 +214,7 @@ try {
     assert.equal(await page.evaluate(() => rtcTest.peers.length), peersBeforeIdle);
     await page.evaluate(() => rtcTest.channel.close()); await waiting(page);
     assert(await page.evaluate(() => { const r = elsewhere.store.get().rtcRecovery; return r.nextAt - Date.now() <= 1000; }));
-    await page.evaluate(() => elsewhere.setTransport('websocket'));
+    await chooseTransport(page, 'WebSocket');
     const stopped = await page.evaluate(() => rtcTest.peers.length);
     await page.waitForTimeout(1300);
     assert.equal(await page.evaluate(() => rtcTest.peers.length), stopped);

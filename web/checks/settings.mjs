@@ -371,6 +371,48 @@ try {
   await page.getByRole('button', { name: 'Close Stream Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Show Controls', exact: true }).click();
   await page.waitForFunction(() => !document.fullscreenElement);
+  assert.equal(await page.getByRole('button', { name: /^Transport:/ }).count(), 0, 'no transport choice without WebRTC');
+  await page.evaluate(() => elsewhere.store.set({ rtcAvailable: true, videoVia: 'websocket' }));
+  const transportButton = page.getByRole('button', { name: /^Transport:/ });
+  const transportPanel = page.getByRole('dialog', { name: 'Transport', exact: true });
+  await transportButton.focus(); await resetPackets(); await page.keyboard.press('Enter');
+  assert(await transportPanel.getByRole('radio', { name: 'WebSocket', exact: true }).evaluate(el => el === document.activeElement));
+  await page.keyboard.press('Escape');
+  assert(await transportButton.evaluate(el => el === document.activeElement));
+  assert.deepEqual(await keyPackets(), [], 'transport keyboard open and close stay local');
+  await transportButton.click();
+  await transportPanel.getByRole('radio', { name: 'WebRTC', exact: true }).click();
+  await transportPanel.waitFor({ state: 'detached' });
+  assert.equal(await page.evaluate(() => elsewhere.store.get().transport), 'webrtc');
+  await transportButton.click();
+  assert(await transportPanel.getByRole('radio', { name: 'WebRTC', exact: true }).evaluate(el => el === document.activeElement));
+  await page.keyboard.press('Escape');
+  for (const width of [1280, 390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.evaluate(() => elsewhere.store.set({ rtcRecovery: { state: 'waiting', reason: 'Fixture fallback', nextAt: Date.now() + 60000 }, videoVia: 'websocket' }));
+    const footer = page.locator('footer');
+    assert.equal(await footer.locator('[data-transport-status]').count(), 1);
+    assert.match(await footer.locator('[data-transport-status]').textContent(), /WebSocket.*retrying WebRTC/);
+    assert(await footer.locator('[data-transport-dot]').evaluate(el => el.classList.contains('bg-warn')));
+    assert.equal(await page.locator('select[title="Transport"]').count(), 0);
+    for (const button of [transportButton, footer.getByRole('button', { name: 'Retry Now', exact: true })]) {
+      const box = await button.boundingBox();
+      assert(box && box.width >= 60 && box.x >= 0 && box.x + box.width <= width, 'transport and retry stay visible at narrow widths');
+    }
+    assert.equal((await footer.boundingBox()).height, 32);
+    if (width < 912) {
+      await page.getByRole('button', { name: 'Stream Settings', exact: true }).click();
+      assert.equal(await streamPanel.getByText('Transport', { exact: true }).count(), 0);
+      await page.getByRole('button', { name: 'Close Stream Settings', exact: true }).click();
+    }
+  }
+  await page.evaluate(() => elsewhere.store.set({ rtcAvailable: false, rtcRecovery: { state: 'unavailable', reason: 'WebRTC unavailable' } }));
+  await transportButton.click();
+  assert(await transportPanel.getByRole('radio', { name: 'WebRTC', exact: true }).isDisabled());
+  await transportPanel.getByRole('radio', { name: 'WebSocket', exact: true }).click();
+  assert.equal(await page.evaluate(() => elsewhere.store.get().transport), 'websocket');
+  assert.equal(await transportButton.count(), 0, 'socket preference hides unavailable transport choice');
+  assert.equal(await page.locator('footer').getByRole('button', { name: 'Retry Now', exact: true }).count(), 0);
   assert.deepEqual(errors, []);
   console.log('settings defaults/persistence, overlays, local keyboard, menus, late responses, unavailable support, read-only, fullscreen, narrow layout and window popup checks passed');
 } finally {

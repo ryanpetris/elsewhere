@@ -2,7 +2,7 @@
 // quality, effort and transport choices. Its height is fixed, so nothing here ever resizes the stage.
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Activity, AudioLines, Camera, CameraOff, Mic, MicOff, PanelTopOpen, Settings2, SlidersHorizontal, Terminal, Volume2, VolumeX, X } from 'lucide-react';
+import { Activity, AudioLines, Camera, CameraOff, ChevronDown, Mic, MicOff, PanelTopOpen, Settings2, SlidersHorizontal, Terminal, Volume2, VolumeX, X } from 'lucide-react';
 import { useStore } from '../store.js';
 import { EFFORTS, PRESETS, TRANSPORTS } from '../protocol.js';
 import { IconButton, codecName, cx } from './ui.jsx';
@@ -34,12 +34,9 @@ function StreamControls({ viewer, stacked = false }) {
   const choice = useStore(viewer.store, s => s.choice);
   const codecs = useStore(viewer.store, s => s.codecs);
   const decodable = useStore(viewer.store, s => s.decodable);
-  const transport = useStore(viewer.store, s => s.transport);
-  const rtcAvailable = useStore(viewer.store, s => s.rtcAvailable);
   const ceilings = { 'very-low': 2000, low: 5000, medium: st?.medium_kbps, high: 12000, max: 25000 };
   if (st?.preset) ceilings[st.preset] = st.ceiling_kbps;
   const both = codecs.filter(c => decodable.includes(c.codec));
-  const withTransport = rtcAvailable || transport === 'webrtc';
   const select = cx('select', stacked ? 'select-md w-full' : 'shrink-0');
   const codec = (
     <select value={choice.codec} onChange={e => viewer.setChoice({ codec: e.target.value })} className={select} title="Video Codec">
@@ -57,17 +54,11 @@ function StreamControls({ viewer, stacked = false }) {
       {EFFORTS.map(e => <option key={e} value={e}>{EFFORT_LABEL[e]}</option>)}
     </select>
   );
-  const transportSelect = withTransport && (
-    <select value={transport} onChange={e => viewer.setTransport(e.target.value)} className={select} title="Transport">
-      {TRANSPORTS.map(t => <option key={t} value={t}>{TRANSPORT_LABEL[t]}</option>)}
-    </select>
-  );
   if (stacked) return (
     <div className="flex flex-col gap-3 p-3 text-xs">
       <Field label="Codec">{codec}</Field>
       <Field label="Quality">{quality}</Field>
       {effortSelect}
-      {withTransport && <Field label="Transport">{transportSelect}</Field>}
     </div>
   );
   return (
@@ -75,7 +66,6 @@ function StreamControls({ viewer, stacked = false }) {
       {codec}
       {quality}
       {effortSelect}
-      {transportSelect}
     </>
   );
 }
@@ -146,17 +136,30 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
   const role = useStore(viewer.store, st => st.role);
   const permissions = useStore(viewer.store, st => st.permissions);
   const transport = useStore(viewer.store, st => st.transport);
+  const rtcAvailable = useStore(viewer.store, st => st.rtcAvailable);
   const videoVia = useStore(viewer.store, st => st.videoVia);
   const status = useStore(viewer.store, st => st.status);
   const streamState = useStore(viewer.store, st => st.streamState);
   const recovery = useStore(viewer.store, st => st.rtcRecovery);
   const wide = useMedia('(min-width: 57rem)'); // the stream controls fit beside the readouts
+  const [transportOpen, setTransportOpen] = useState(false);
+  const transportButton = useRef(null), transportPanel = useRef(null);
+  const withTransport = rtcAvailable || transport === 'webrtc';
+  const closeTransport = () => { setTransportOpen(false); transportButton.current?.focus(); };
+  useEffect(() => {
+    if (!withTransport) { setTransportOpen(false); return; }
+    if (!transportOpen) return;
+    viewer.releaseInput();
+    if (document.pointerLockElement) document.exitPointerLock();
+    (transportPanel.current?.querySelector('input:checked:not(:disabled)') ?? transportPanel.current?.querySelector('input:not(:disabled)'))?.focus();
+  }, [transportOpen, withTransport, viewer]);
   const transportHint = status !== 'connected' ? 'WebSocket disconnected'
     : videoVia === 'webrtc' ? 'WebRTC'
     : transport !== 'webrtc' ? 'WebSocket'
     : recovery.state === 'unavailable' ? 'WebSocket · WebRTC unavailable'
     : recovery.state === 'connecting' ? 'WebSocket · connecting WebRTC'
     : 'WebSocket · retrying WebRTC';
+  const transportDot = <span data-transport-dot className={cx('size-1.5 shrink-0 rounded-full', status !== 'connected' ? 'bg-ink-4' : videoVia === 'webrtc' ? 'bg-info' : transport === 'webrtc' ? 'bg-warn' : 'bg-ok')} />;
   const bad = s.lost + s.dropped + s.decodeErrors;
   const listens = permissions.includes('audio.listen');
   // The four readouts follow the optional Show Controls button. The bar never wraps: each width hides what
@@ -169,16 +172,40 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
           <PanelTopOpen className="size-3.5" />
         </button>
       )}
-      <Metric icon={Activity} value={`${s.fps} fps`} width="w-[9ch]" title={`${s.fps} frames per second painted`} />
+      <Metric icon={Activity} value={`${s.fps} fps`} width="w-[9ch]" title={`${s.fps} frames per second painted`} className={status === 'connected' && transport === 'webrtc' && videoVia !== 'webrtc' ? 'max-sm:hidden' : ''} />
       <Metric value={`${s.mbps.toFixed(1)} Mbit`} width="w-[11ch]" title={`Measured video throughput: ${s.mbps.toFixed(1)} Mbit`} className="max-[26rem]:hidden" />
       <Metric value={`${s.latencyMs.toFixed(0)} ms`} width="w-[8ch]" title={`Input to the next painted frame: ${s.latencyMs.toFixed(0)} ms`} className="max-lg:hidden" />
       <Metric value={`${s.lost} · ${s.dropped} · ${s.decodeErrors}`} width="w-[19ch]" title={`lost ${s.lost} · dropped ${s.dropped} · decode errors ${s.decodeErrors}`} warn={bad > 0} className="max-xl:hidden" />
-      <span className="hidden min-w-0 flex-1 items-center gap-2 sm:flex" title={recovery.reason || transportHint}>
-        <span className={cx('size-1.5 shrink-0 rounded-full', status !== 'connected' ? 'bg-ink-4' : videoVia === 'webrtc' ? 'bg-info' : 'bg-ok')} />
-        <span className="min-w-0 truncate" data-transport-status>{transportHint}</span>
+      <span className={cx('flex flex-1 items-center gap-1', recovery.state === 'waiting' ? 'min-w-[11.5rem]' : 'min-w-[6.5rem]')}>
+        {withTransport ? (
+          <button ref={transportButton} type="button" aria-label={`Transport: ${transportHint}`} title={transportHint}
+            aria-haspopup="dialog" aria-expanded={transportOpen} aria-controls="transport-settings" onClick={() => setTransportOpen(!transportOpen)}
+            className={cx(control, 'min-w-0 shrink!')}>
+            {transportDot}
+            <span className="min-w-0 truncate" data-transport-status>{transportHint}</span>
+            <ChevronDown className="size-3 shrink-0" />
+          </button>
+        ) : <span className="flex min-w-0 items-center gap-1.5" title={transportHint}>{transportDot}<span className="min-w-0 truncate" data-transport-status>{transportHint}</span></span>}
         {recovery.state === 'waiting' && <button type="button" onClick={() => viewer.retryRtc()} className="btn btn-link btn-xs shrink-0 font-sans">Retry Now</button>}
       </span>
-      <span className="ml-auto flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] sm:gap-1.5">
+      {transportOpen && withTransport && createPortal(
+        <Popover floating ref={transportPanel} id="transport-settings" role="dialog" aria-label="Transport" onClose={closeTransport}
+          style={{ left: 8, bottom: 40, width: 'min(20rem, calc(100vw - 1rem))' }} className="font-sans">
+          <div className="flex items-center justify-between border-b border-line px-3 py-2">
+            <h2 className="text-sm font-medium text-ink">Preferred Transport</h2>
+            <IconButton icon={X} label="Close Transport" size="sm" onClick={closeTransport} />
+          </div>
+          <fieldset className="flex flex-col gap-2 p-3 text-sm text-ink">
+            <legend className="sr-only">Preferred Transport</legend>
+            {TRANSPORTS.map(t => <label key={t} className="flex min-h-9 items-center gap-2">
+              <input type="radio" name="transport" value={t} checked={transport === t} disabled={t === 'webrtc' && !rtcAvailable}
+                onChange={() => { viewer.setTransport(t); closeTransport(); }} />
+              {TRANSPORT_LABEL[t]}
+            </label>)}
+          </fieldset>
+          <p className="border-t border-line px-3 py-2 text-xs text-ink-3">{transportHint}{transport === 'webrtc' && videoVia !== 'webrtc' && recovery.reason ? `. ${recovery.reason}` : ''}</p>
+        </Popover>, document.querySelector('[data-viewer]') ?? document.body)}
+      <span className="ml-auto flex min-w-8 items-center gap-1 overflow-x-auto [scrollbar-width:none] sm:gap-1.5">
         <ClipboardControl viewer={viewer} />
         {onTerminal && status === 'connected' && permissions.includes('commands.execute') && (
           <button id="terminal-toggle" type="button" aria-label="Terminal" title="Terminal" aria-expanded={terminal && !controlsHidden} onClick={onTerminal} className={control}>

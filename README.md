@@ -237,7 +237,7 @@ HTTPS hostname, TLS termination with `--no-tls`, and separate UDP ports for opti
 ## Transport
 
 The video travels on the WebSocket. A viewer can move it to a WebRTC data channel (UDP, ordered and
-reliable) with the Transport select in the status bar. The page offers and the server answers with
+reliable) by opening the transport status control in the status bar. The page offers and the server answers with
 candidates that the UI addresses using the page's hostname and the server's UDP port, with `--rtc-addr` overriding the hostname. The frames move to the channel once it opens; input, audio, events and the signalling
 stay on the WebSocket either way, so the socket is needed whatever carries the video.
 
@@ -252,7 +252,8 @@ See [stream reliability](docs/stream-reliability.md) for the controlled-link che
 The selected transport stays WebRTC during fallback. Socket video continues while a fresh channel
 connects. Failed attempts retry with jittered exponential delays of about 1 to 30 seconds; ten seconds
 without channel loss or stalls resets the backoff. Each attempt has a ten-second total budget.
-The status bar shows the actual path and recovery state, with Retry now while waiting. Statistics
+The transport control shows the actual path and recovery state, with Retry Now beside it while waiting.
+Its popover selects the preferred transport; choosing WebRTC does not claim it is already carrying video. Statistics
 also shows the reason, retry count and next attempt. Selecting WebSocket cancels recovery. A server
 or browser without WebRTC support stays on the socket without retrying, preserving the preference.
 Quality selection and its adaptive ceiling are independent of transport recovery.
