@@ -452,7 +452,7 @@ Escape releases capture through the browser.
 Certificate and tokens live in `$XDG_CONFIG_HOME/elsewhere/`; delete them to regenerate.
 
 The [session audio visualiser](docs/audio-visualiser.md) loads when opened.
-The About dialog links to [acknowledgements](ACKNOWLEDGEMENTS.md) and the source repository.
+Click the Elsewhere logo to open About, which links to [acknowledgements](ACKNOWLEDGEMENTS.md) and the source repository.
 
 ## Source code
 

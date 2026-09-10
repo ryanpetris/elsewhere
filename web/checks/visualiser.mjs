@@ -45,7 +45,7 @@ try {
   await page.waitForFunction(() => !!window.elsewhere?.store);
   await page.evaluate(() => window.elsewhere.store.set({ status: 'connected', role: 'viewer', permissions: ['desktop.view', 'audio.listen'], audioAvailable: true, micAvailable: false }));
   assert.equal(chunks.length, 0, 'renderer must not load until opened');
-  const aboutButton = page.getByRole('button', { name: 'About', exact: true });
+  const aboutButton = page.getByRole('button', { name: 'About Elsewhere', exact: true });
   await aboutButton.click();
   const about = page.getByRole('dialog', { name: 'About Elsewhere' });
   await about.waitFor();
@@ -67,6 +67,40 @@ try {
   await page.keyboard.press('Escape');
   assert(await aboutButton.evaluate(node => node === document.activeElement), 'Escape restores About trigger focus');
   assert.equal(chunks.length, 0, 'About does not load the visualiser');
+  for (const windowMode of [false, true]) {
+    const brandPage = await context.newPage();
+    brandPage.on('pageerror', error => errors.push(error.message));
+    await brandPage.goto(`${process.env.ELSEWHERE_TEST_URL || `http://127.0.0.1:${server.address().port}`}${windowMode ? '?window=1' : ''}`);
+    await brandPage.waitForFunction(() => !!window.elsewhere?.store);
+    await brandPage.evaluate(() => window.elsewhere.store.set({ status: 'connected', role: 'controller', permissions: ['desktop.view', 'desktop.control', 'apps.launch', 'server.manage'] }));
+    for (const width of [1280, 375, 320]) {
+      await brandPage.setViewportSize({ width, height: 800 });
+      const logo = brandPage.getByRole('button', { name: 'About Elsewhere', exact: true });
+      await logo.focus();
+      await brandPage.keyboard.press('Enter');
+      const dialog = brandPage.getByRole('dialog', { name: 'About Elsewhere' });
+      await dialog.waitFor();
+      assert.equal(await logo.getAttribute('aria-expanded'), 'true');
+      const box = await dialog.boundingBox();
+      assert(box.x < 20 && box.x + box.width <= width, 'About fits beside the left edge');
+      assert(await brandPage.locator('header').evaluate(node => node.scrollWidth <= node.clientWidth), 'top bar fits the viewport');
+      assert.match(await dialog.innerText(), /Copyright/);
+      await brandPage.keyboard.press('Tab');
+      assert(await dialog.getByRole('link', { name: 'GitHub Repository', exact: true }).evaluate(node => node === document.activeElement));
+      await brandPage.keyboard.press('Escape');
+      assert(await logo.evaluate(node => node === document.activeElement));
+      assert.equal(await logo.getAttribute('aria-expanded'), 'false');
+      await logo.click();
+      await dialog.waitFor();
+      await logo.click();
+      assert.equal(await dialog.count(), 0, 'logo toggles About closed');
+      assert(await logo.evaluate(node => node !== document.activeElement), 'mouse toggle releases focus for desktop input');
+      await logo.click();
+      await dialog.waitFor();
+      await dialog.getByRole('button', { name: 'Close About', exact: true }).click();
+    }
+    await brandPage.close();
+  }
 
   await page.getByRole('button', { name: 'Audio Mixer', exact: true }).click();
   await page.getByRole('region', { name: 'Audio Mixer', exact: true }).waitFor();

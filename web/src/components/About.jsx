@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { ExternalLink, GitBranch, ScrollText, X } from 'lucide-react';
 import { Popover } from './Launcher.jsx';
-import { IconButton, Logo } from './ui.jsx';
+import { IconButton } from './ui.jsx';
 
 export function About({ viewer, onClose }) {
   const close = useRef(null);
@@ -22,13 +22,8 @@ export function About({ viewer, onClose }) {
   const link = 'flex items-center gap-3 rounded-md px-2 py-2 text-sm text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent';
   return (
     <Popover id="viewer-about" role="dialog" aria-label="About Elsewhere" onClose={onClose} onKeyDown={keyDown} onPaste={event => event.stopPropagation()}
-      className="right-2 max-h-[calc(100dvh-4rem)] w-[22rem] max-w-[calc(100vw-1rem)] overflow-y-auto text-sm select-text sm:right-3">
-      <div className="flex items-start gap-3 border-b border-line p-4">
-        <Logo className="size-10" />
-        <div className="min-w-0 flex-1">
-          <h2 className="text-base leading-tight font-semibold text-ink">Elsewhere</h2>
-          <p className="mt-0.5 text-xs text-ink-3">A desktop in your browser.</p>
-        </div>
+      className="left-2 max-h-[calc(100dvh-4rem)] w-[22rem] max-w-[calc(100vw-1rem)] overflow-y-auto text-sm select-text sm:left-3">
+      <div className="flex justify-end px-2 pt-2">
         <IconButton ref={close} icon={X} label="Close About" size="sm" onClick={onClose} />
       </div>
       <div className="flex flex-col gap-0.5 p-2">

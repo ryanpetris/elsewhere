@@ -1,5 +1,5 @@
 // The top bar: brand and context, the launchers, the connection state, and the viewer's own controls.
-import { PanelTopClose, PictureInPicture2, CornerUpLeft, Expand, Eye, Info, Hand, Keyboard, LayoutGrid, MousePointer2, PanelRightClose, PanelRightOpen, Power, Settings } from 'lucide-react';
+import { PanelTopClose, PictureInPicture2, CornerUpLeft, Expand, Eye, Hand, Keyboard, LayoutGrid, MousePointer2, PanelRightClose, PanelRightOpen, Power, Settings } from 'lucide-react';
 import { useStore } from '../store.js';
 import { WINDOW, PIP } from '../api.js';
 import { Badge, Divider, IconButton, Logo, codecName, cx } from './ui.jsx';
@@ -90,8 +90,12 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, o
   );
   return (
     <header onClick={event => { if (!event.target.closest('[data-menu-trigger]')) onMenu(null); }} className="flex h-12 shrink-0 items-center border-b border-line bg-surface px-1 max-sm:[&_button]:size-7 max-sm:[&_button]:px-0 sm:gap-2 sm:px-3">
-      <div className="hidden min-w-0 shrink items-center gap-2.5 pr-1 sm:flex">
-        <Logo />
+      <div className="flex min-w-0 shrink items-center gap-2.5 pr-1">
+        <button type="button" data-menu-trigger id="about-toggle" aria-label="About Elsewhere" title="About Elsewhere"
+          aria-haspopup="dialog" aria-expanded={menu === 'about'} aria-controls="viewer-about" onClick={event => { onMenu('about'); event.currentTarget.blur(); }}
+          className="inline-flex shrink-0 rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+          <Logo />
+        </button>
         <span className="hidden min-w-0 truncate text-sm font-semibold tracking-tight text-ink md:inline">{title}</span>
       </div>
       {acts('apps.launch') && <Divider className="hidden sm:block" />}
@@ -117,7 +121,6 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, o
             <Divider className="hidden sm:block" />
           </>
         )}
-        <IconButton data-menu-trigger id="about-toggle" icon={Info} label="About" active={menu === 'about'} aria-haspopup="dialog" aria-expanded={menu === 'about'} aria-controls="viewer-about" onClick={() => onMenu('about')} />
         {viewer.pip.supported && <IconButton icon={PictureInPicture2} label="Picture-in-Picture" onClick={() => viewer.pip.open()} />}
         <IconButton id="hide-controls" icon={PanelTopClose} label="Hide Controls (Ctrl+Alt+Shift+H)" onClick={onHideControls} />
         <IconButton icon={Expand} label="Fullscreen" onClick={onFullscreen} />
