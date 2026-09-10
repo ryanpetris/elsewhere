@@ -134,8 +134,11 @@ background window does not make it look focused.
 `control()` resolves the id among mapped and minimized windows and dispatches to the functions the
 compositor already had: `focus_window` (after `unminimize`), `send_close`/`x11.close()`, `minimize`,
 `unminimize`, the fill/unfill paths for maximize and fullscreen, `map_element` for `move` (plus an X11
-configure), a pending size plus configure for `resize`. Move and resize are ignored for windows that are
-not floating. `spawn` reuses the `--exec` spawner and environment.
+configure), a pending size plus configure for `resize`. Move requires a floating window. Resize requires
+a mapped window with kiosk off; it clears maximized/fullscreen state, clamps the requested size to the
+client's advertised minimum and maximum, and positions that geometry within the decorated work area
+when it fits. A size larger than the work area stays anchored at its top-left. `spawn` reuses the
+`--exec` spawner and environment.
 
 ## Snapshots
 
@@ -486,6 +489,10 @@ reference order. Events go to window sessions as well as the viewer, by `try_sen
 are forwarded as window-relative `Input` moves, resolved on the compositor thread; a `Resize` becomes a
 `resize` control for the window. Page: `?window=ID` (see `docs/protocol.md`); the panel's ↗ button opens a popup the window's
 size, and `sessionStorage` (the token) is copied into it by the browser.
+Resizing the popup sizes the application to the stage's CSS dimensions, subject to the client's size
+constraints. With kiosk off this also applies to maximized or fullscreen windows, including windows
+maximized on kiosk exit. With kiosk on, windows stay fullscreen. Popup resizing never changes the
+desktop output resolution, whether it is fixed or automatic.
 
 ## Document picture-in-picture
 

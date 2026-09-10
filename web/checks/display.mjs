@@ -1,4 +1,4 @@
-// Docker: built binary and viewer, Chromium, foot and xmessage. Exercises the real compositor and streams.
+// Docker: built binary and viewer, Chromium, Python GI and GTK 3. Exercises the real compositor and streams.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, open, readFile, rm } from 'node:fs/promises';
@@ -19,7 +19,7 @@ try {
     const log = await open(root + '/server.log', 'w');
     const server = spawn(binary, ['--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codecs', 'vp8',
       '--listen', '127.0.0.1:8096', '--screen-size', '1024x768', '--socket-name', 'wayland-display',
-      '--exec', 'foot --app-id=display-initial', ...(initialKiosk ? ['--kiosk'] : [])],
+      '--exec', 'GDK_BACKEND=wayland GTK_CSD=0 /usr/bin/python3 /src/crates/elsewhere-compositor/checks/restore-client.py display-initial 1 1 900 650', ...(initialKiosk ? ['--kiosk'] : [])],
     { cwd: root, env: { ...process.env, HOME: root, XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime' }, stdio: ['ignore', log.fd, log.fd] });
     let context;
     try {
@@ -35,8 +35,62 @@ try {
       const windows = async () => (await request('/api/windows')).json();
       const window = async id => (await windows()).find(w => w.id === id);
       const control = async (id, op, args = {}) => { assert.equal((await request('/api/control', { id, op, ...args })).status, 202); };
-      await wait('initial window', async () => (await windows()).some(w => w.app_id === 'display-initial'));
-      const first = (await windows()).find(w => w.app_id === 'display-initial');
+      const outputSize = async () => {
+        const response = await request('/api/screenshot.png');
+        assert.equal(response.status, 200);
+        const png = Buffer.from(await response.arrayBuffer());
+        return [png.readUInt32BE(16), png.readUInt32BE(20)];
+      };
+      const popupResize = async (ids, kiosk, pendingFill) => {
+        const states = new Map(await Promise.all(ids.map(async id => [id, await window(id)])));
+        for (const mode of ['fixed', 'auto']) {
+          await settings({ resolution: mode === 'fixed' ? { mode, width: 1024, height: 768 } : { mode } });
+          const output = await outputSize();
+          for (const id of ids) {
+            if (!kiosk) {
+              const state = states.get(id);
+              if (state.maximized) await control(id, 'maximize');
+              if (state.fullscreen) await control(id, 'fullscreen');
+              await wait('popup initial window state', async () => { const w = await window(id); return w.maximized === state.maximized && w.fullscreen === state.fullscreen; });
+            }
+            const popupContext = await browser.newContext({ viewport: { width: 600, height: 450 }, deviceScaleFactor: 2 });
+            try {
+              const page = await popupContext.newPage();
+              const errors = []; page.on('pageerror', error => errors.push(error.message));
+              await page.goto(origin + '/?window=' + id + '#token=' + token);
+              await page.waitForFunction(() => elsewhere.store.get().stats.frames > 0);
+              const before = await window(id);
+              if (pendingFill) process.kill(before.pid, 'SIGSTOP');
+              try {
+                if (pendingFill) await control(id, pendingFill);
+                await page.setViewportSize({ width: before.w === 700 ? 740 : 700, height: 540 });
+                await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+                if (pendingFill) await page.waitForTimeout(350);
+              } finally { if (pendingFill) process.kill(before.pid, 'SIGCONT'); }
+              const box = await page.locator('.viewer-stage').boundingBox();
+              const expected = [Math.round(box.width), Math.round(box.height)];
+              if (kiosk) {
+                await page.waitForTimeout(400);
+                const w = await window(id);
+                assert(w.fullscreen && !w.minimized);
+                assert.deepEqual([w.x, w.y, w.w, w.h], [before.x, before.y, before.w, before.h], 'popup resize preserves kiosk fullscreen geometry');
+              } else {
+                assert.notDeepEqual(expected, [before.w, before.h], 'popup stage must request a different application size');
+                await wait('popup resizes application to CSS stage size', async () => {
+                  const w = await window(id);
+                  return !w.maximized && !w.fullscreen && w.w === expected[0] && w.h === expected[1] && w.x >= 0 && w.y >= w.decoration && w.x + w.w <= output[0] && w.y + w.h <= output[1];
+                });
+              }
+              assert.deepEqual(await outputSize(), output, 'window popup resize never resizes the desktop output');
+              assert.deepEqual(errors, []);
+            } finally { await popupContext.close(); }
+          }
+        }
+        await settings({ resolution: { mode: 'fixed', width: 1024, height: 768 } });
+        console.log(`Popup resize passed with kiosk ${kiosk ? 'on' : 'off'}${pendingFill ? ` and pending ${pendingFill}` : ''}, fixed and auto resolution, and HiDPI CSS sizing`);
+      };
+      await wait('initial window', async () => (await windows()).some(w => w.title === 'display-initial'));
+      const first = (await windows()).find(w => w.title === 'display-initial');
       assert.equal(first.fullscreen, initialKiosk);
       assert.deepEqual(await settings(), { kiosk: initialKiosk, resolution: { mode: 'fixed', width: 1024, height: 768 } });
       assert.equal((await request('/api/display', { kiosk: !initialKiosk }, spectatorToken)).status, 403);
@@ -44,18 +98,57 @@ try {
         assert.equal((await request('/api/display', patch)).status, 400);
         assert.equal((await settings()).kiosk, initialKiosk);
       }
+      await control(0, 'spawn', { cmd: 'GDK_BACKEND=x11 GTK_CSD=0 /usr/bin/python3 /src/crates/elsewhere-compositor/checks/restore-client.py display-x11 1 1 300 180' });
+      await wait('X11 window', async () => (await windows()).some(w => w.x11 && w.title === 'display-x11'));
+      const x11 = (await windows()).find(w => w.x11 && w.title === 'display-x11');
       if (initialKiosk) {
+        await popupResize([first.id, x11.id], true);
         await settings({ kiosk: false });
         await wait('startup kiosk exit maximizes', async () => { const w = await window(first.id); return w.maximized && !w.fullscreen && w.y >= w.decoration && w.h + w.decoration === 768; });
+        await popupResize([first.id, x11.id], false);
+        await control(first.id, 'maximize');
+        await wait('startup window maximized before restore', async () => (await window(first.id)).maximized);
         await control(first.id, 'unmaximize');
         await wait('startup kiosk unmaximize stays in work area', async () => { const w = await window(first.id); return !w.maximized && w.y + w.h <= 768; });
         console.log('startup kiosk exit and unmaximize stay within decorated work area');
         continue;
       }
 
-      await control(0, 'spawn', { cmd: 'xmessage -name display-x11 -geometry 300x180 display-check > xmessage.log 2>&1' });
-      await wait('X11 window', async () => (await windows()).some(w => w.x11));
-      const x11 = (await windows()).find(w => w.x11);
+      for (const [id, other] of [[first.id, x11.id], [x11.id, first.id]]) {
+        await control(other, 'activate');
+        await wait('other window focused', async () => (await window(other)).focused);
+        const order = (await windows()).map(w => [w.id, w.z, w.focused]);
+        await control(id, 'resize', { w: 400, h: 300 });
+        await wait('floating resize', async () => { const w = await window(id); return w.w === 400 && w.h === 300; });
+        assert.deepEqual((await windows()).map(w => [w.id, w.z, w.focused]), order, 'floating resize preserves stacking and focus');
+      }
+      for (const backend of ['wayland', 'x11']) {
+        const title = 'display-limits-' + backend;
+        await control(0, 'spawn', { cmd: `GDK_BACKEND=${backend} GTK_CSD=0 /usr/bin/python3 /src/crates/elsewhere-compositor/checks/restore-client.py ${title} 800 600 900 650 950 700` });
+        await wait('limited window', async () => (await windows()).some(w => w.title === title));
+        const limited = (await windows()).find(w => w.title === title);
+        await control(limited.id, 'move', { x: 600, y: 500 });
+        await control(limited.id, 'resize', { w: 400, h: 300 });
+        await wait('minimum size and positioning', async () => {
+          const w = await window(limited.id);
+          return w.w === 800 && w.h === 600 && w.x >= 0 && w.y >= w.decoration && w.x + w.w <= 1024 && w.y + w.h <= 768;
+        });
+        await control(limited.id, 'resize', { w: 1200, h: 900 });
+        await wait('maximum size and positioning', async () => {
+          const w = await window(limited.id);
+          return w.w === 950 && w.h === 700 && w.x >= 0 && w.y >= w.decoration && w.x + w.w <= 1024 && w.y + w.h <= 768;
+        });
+        await control(limited.id, 'close');
+        await wait('limited window closed', async () => !(await window(limited.id)));
+      }
+      console.log('Floating resize preserves stacking and respects Wayland and X11 client size limits');
+      await popupResize([first.id, x11.id], false);
+      for (const op of ['maximize', 'fullscreen']) await popupResize([first.id], false, op);
+      for (const op of ['maximize', 'fullscreen']) {
+        for (const id of [first.id, x11.id]) await control(id, op);
+        await wait(op, async () => (await windows()).every(w => op === 'maximize' ? w.maximized : w.fullscreen));
+        await popupResize([first.id, x11.id], false);
+      }
       await control(x11.id, 'maximize');
       await wait('X11 maximized', async () => (await window(x11.id)).maximized);
       await control(x11.id, 'minimize');
@@ -64,17 +157,21 @@ try {
       await settings({ kiosk: true });
       await wait('existing windows kiosk', async () => (await windows()).every(w => w.fullscreen));
       assert((await window(x11.id)).minimized, 'kiosk preserves minimized state');
-      await control(0, 'spawn', { cmd: 'foot --app-id=display-new' });
-      await wait('new kiosk window', async () => (await windows()).some(w => w.app_id === 'display-new' && w.fullscreen));
-      const added = (await windows()).find(w => w.app_id === 'display-new');
-      await control(0, 'spawn', { cmd: 'xmessage -name display-born-x11 -geometry 300x180 kiosk > born-x11.log 2>&1' });
-      await wait('new kiosk X11', async () => (await windows()).some(w => w.x11 && w.id !== x11.id && w.fullscreen));
-      const bornX11 = (await windows()).find(w => w.x11 && w.id !== x11.id);
+      await control(0, 'spawn', { cmd: 'GDK_BACKEND=wayland GTK_CSD=0 /usr/bin/python3 /src/crates/elsewhere-compositor/checks/restore-client.py display-new 1 1 900 650' });
+      await wait('new kiosk window', async () => (await windows()).some(w => w.title === 'display-new' && w.fullscreen));
+      const added = (await windows()).find(w => w.title === 'display-new');
+      await control(0, 'spawn', { cmd: 'GDK_BACKEND=x11 GTK_CSD=0 /usr/bin/python3 /src/crates/elsewhere-compositor/checks/restore-client.py display-born-x11 1 1 300 180' });
+      await wait('new kiosk X11', async () => (await windows()).some(w => w.x11 && w.title === 'display-born-x11' && w.fullscreen));
+      const bornX11 = (await windows()).find(w => w.x11 && w.title === 'display-born-x11');
+      await popupResize([added.id, bornX11.id], true);
       await settings({ kiosk: false });
       await wait('restore floating geometry', async () => { const w = await window(first.id); return !w.fullscreen && !w.maximized && ['x', 'y', 'w', 'h'].every(key => w[key] === before[key]); });
       await wait('new kiosk window maximized', async () => { const w = await window(added.id); return w.maximized && !w.fullscreen && w.h + w.decoration === 768; });
       assert((await window(x11.id)).maximized && (await window(x11.id)).minimized);
+      await popupResize([added.id, bornX11.id], false);
       for (const id of [added.id, bornX11.id]) {
+        await control(id, 'maximize');
+        await wait('kiosk-created window maximized before restore', async () => (await window(id)).maximized);
         await control(id, 'unmaximize');
         await wait('new kiosk window unmaximize stays in work area', async () => { const w = await window(id); return !w.maximized && !w.fullscreen && w.y >= w.decoration && w.y + w.h <= 768; });
       }
@@ -154,8 +251,6 @@ try {
       console.log('kiosk layout restoration, minimized X11, new windows, permissions, validation, live resolution, HiDPI auto, handoff and replay passed');
     } catch (error) {
       console.error((await readFile(root + '/server.log', 'utf8')).split('\n').slice(-12).join('\n'));
-      console.error(await readFile(root + '/xmessage.log', 'utf8').catch(() => ''));
-      console.error(await readFile(root + '/born-x11.log', 'utf8').catch(() => ''));
       console.error(error);
       throw error;
     } finally {

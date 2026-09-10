@@ -327,7 +327,10 @@ WebCodecs).
 
 The ↗ button on a window's row in the panel opens it in a popup of its own, streaming only that window
 (`/?window=ID`): the pointer, keyboard and clipboard work there as in the viewer, resizing the popup
-resizes the window, and the popup reports when the window closes. Each such popup has its own encoder.
+resizes the window, and the popup reports when the window closes. With kiosk off, popup resizing also
+resizes maximized or fullscreen applications, including windows maximized after kiosk exit. With kiosk
+on, applications stay fullscreen. Popup resizing leaves the desktop resolution unchanged. Each popup
+has its own encoder.
 
 Picture-in-picture is also available in supporting browsers on a secure origin. The top-bar action
 opens the whole desktop; a window row's action opens that application. One PiP window belongs to each

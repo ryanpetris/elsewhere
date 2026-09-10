@@ -184,8 +184,12 @@ impl State {
             return self.spawn_client(cmd);
         }
         let Some(window) = self.window_by_id(msg.id) else { return };
-        let info = self.window_info(&window, None);
-        let floating = self.space.element_location(&window).is_some() && !info.maximized && !info.fullscreen;
+        let (maximized, fullscreen) = match window.underlying_surface() {
+            WindowSurface::Wayland(t) => t.with_pending_state(|s| (s.states.contains(XdgState::Maximized), s.states.contains(XdgState::Fullscreen))),
+            WindowSurface::X11(x) => (x.is_maximized(), x.is_fullscreen()),
+        };
+        let mapped = self.space.element_location(&window).is_some();
+        let floating = mapped && !maximized && !fullscreen;
         match msg.op {
             ControlOp::Activate => {
                 self.unminimize(&window);
@@ -209,15 +213,21 @@ impl State {
                     let _ = x11.configure(Rectangle::new((x, y).into(), window.geometry().size));
                 }
             }
-            ControlOp::Resize { w, h } if floating => {
-                let size = (w.max(1), h.max(1)).into();
+            ControlOp::Resize { w, h } if mapped && !self.kiosk => {
+                if maximized { self.fill(&window, XdgState::Maximized, false); }
+                if fullscreen { self.fill(&window, XdgState::Fullscreen, false); }
+                let size = self.constrain_size(&window, (w, h).into());
+                let work = self.fill_rect(&window, false);
+                let mut loc = self.space.element_location(&window).unwrap_or_default();
+                loc.x = loc.x.clamp(work.loc.x, (work.loc.x + work.size.w - size.w).max(work.loc.x));
+                loc.y = loc.y.clamp(work.loc.y, (work.loc.y + work.size.h - size.h).max(work.loc.y));
+                self.space.relocate_element(&window, loc);
                 match window.underlying_surface() {
                     WindowSurface::Wayland(t) => {
                         t.with_pending_state(|s| s.size = Some(size));
                         t.send_pending_configure();
                     }
                     WindowSurface::X11(x11) => {
-                        let loc = self.space.element_location(&window).unwrap_or_default();
                         let _ = x11.configure(Rectangle::new(loc, size));
                     }
                 }

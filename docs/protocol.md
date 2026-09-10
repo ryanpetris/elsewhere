@@ -122,8 +122,9 @@ One application window as its own video, for a tab or popup that shows just that
 the viewer's panel opens one, sized to the window). The same messages as `/ws`, with these differences:
 
 - No `Resize` is needed: the stream is the window's geometry at the output's scale (even-rounded), and
-  follows it. A `Resize` the page sends resizes the *window* to the given CSS size (a floating window
-  only, like `resize` below).
+  follows it. A `Resize` the page sends resizes the *window* to the given CSS size, clearing maximized
+  or fullscreen state while kiosk is off, including after kiosk exit. Kiosk-on resize is ignored.
+  The desktop output size stays unchanged in both fixed and automatic resolution modes.
 - Pointer positions are relative to the window's geometry, as in the input message (they are forwarded
   as one, resolved against the live geometry). Keys and buttons go where they always go (the focused
   window, the pointer). Any desktop.control session drives its popup, whoever controls the desktop; a
@@ -255,7 +256,7 @@ paths reject input. Keys follow the compositor's current keyboard focus in both 
 | `minimize`, `unminimize` | |
 | `maximize`, `unmaximize`, `fullscreen`, `unfullscreen` | through the same paths as the client's own requests; a minimized window is restored first |
 | `move` (`x`, `y`) | floating windows only (mapped, not maximized or fullscreen) |
-| `resize` (`w`, `h`) | floating windows only; a size hint for Wayland clients, a configure for X11 |
+| `resize` (`w`, `h`) | mapped windows while kiosk is off; clears maximized/fullscreen state and clamps the size to the client's advertised minimum and maximum, then sends a size hint to Wayland clients or a configure to X11. Keeps the window and its compositor title bar within the work area when that size fits; larger sizes are anchored at the work area's top-left. |
 | `spawn` (`cmd`) | `sh -c cmd` with the `--exec` environment: `WAYLAND_DISPLAY`, `DISPLAY`, `PULSE_SINK`, `XDG_SESSION_TYPE` and the toolkits' backend switches |
 | `launch` (`app`) | start an installed application: `app` is an `id` from `GET /api/applications`, its `Exec` line runs like `spawn`; `404` over HTTP for an unknown id |
 | `quit` | Elsewhere exits, every window with it |

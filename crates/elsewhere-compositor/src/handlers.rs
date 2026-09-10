@@ -34,7 +34,7 @@ use smithay::{
             protocol::{wl_buffer::WlBuffer, wl_output::WlOutput, wl_seat::WlSeat, wl_surface::WlSurface},
         },
     },
-    utils::{IsAlive, Logical, Point, Rectangle, SERIAL_COUNTER, Serial},
+    utils::{IsAlive, Logical, Point, Rectangle, Size, SERIAL_COUNTER, Serial},
     wayland::{
         buffer::BufferHandler,
         seat::WaylandFocus,
@@ -529,10 +529,8 @@ impl State {
         work
     }
 
-    /// Fit a restored window inside the decorated work area, respecting client size limits.
-    /// A minimum larger than the available space stays anchored at the area's top-left edge.
-    pub(crate) fn restore_rect(&self, window: &Window, mut rect: Rectangle<i32, Logical>) -> Rectangle<i32, Logical> {
-        let work = self.fill_rect(window, false);
+    /// Clamp a content size to the client's advertised limits.
+    pub(crate) fn constrain_size(&self, window: &Window, size: Size<i32, Logical>) -> Size<i32, Logical> {
         let (min, max) = match window.underlying_surface() {
             WindowSurface::Wayland(t) => with_states(t.wl_surface(), |states| {
                 let mut guard = states.cached_state.get::<SurfaceCachedState>();
@@ -541,12 +539,18 @@ impl State {
             }),
             WindowSurface::X11(x) => (x.min_size().unwrap_or_default(), x.max_size().unwrap_or_default()),
         };
-        let size = |saved: i32, available: i32, min: i32, max: i32| {
+        let clamp = |value: i32, min: i32, max: i32| {
             let min = min.max(1);
-            saved.min(available).clamp(min, if max == 0 { i32::MAX } else { max.max(min) })
+            value.clamp(min, if max == 0 { i32::MAX } else { max.max(min) })
         };
-        rect.size.w = size(rect.size.w, work.size.w, min.w, max.w);
-        rect.size.h = size(rect.size.h, work.size.h, min.h, max.h);
+        (clamp(size.w, min.w, max.w), clamp(size.h, min.h, max.h)).into()
+    }
+
+    /// Fit a restored window inside the decorated work area, respecting client size limits.
+    /// A minimum larger than the available space stays anchored at the area's top-left edge.
+    pub(crate) fn restore_rect(&self, window: &Window, mut rect: Rectangle<i32, Logical>) -> Rectangle<i32, Logical> {
+        let work = self.fill_rect(window, false);
+        rect.size = self.constrain_size(window, (rect.size.w.min(work.size.w), rect.size.h.min(work.size.h)).into());
         rect.loc.x = rect.loc.x.clamp(work.loc.x, (work.loc.x + work.size.w - rect.size.w).max(work.loc.x));
         rect.loc.y = rect.loc.y.clamp(work.loc.y, (work.loc.y + work.size.h - rect.size.h).max(work.loc.y));
         rect

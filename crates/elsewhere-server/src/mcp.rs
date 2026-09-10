@@ -299,7 +299,7 @@ impl Mcp {
         self.control(&parts, window, ControlOp::Move { x, y })
     }
 
-    #[tool(description = "Resize a floating window's geometry to w h (logical px).")]
+    #[tool(description = "Resize a mapped window to w h (logical px), clamped to the client's advertised minimum and maximum size, clearing maximized/fullscreen state. Ignored while kiosk is on.")]
     fn resize_window(&self, Extension(parts): Extension<Parts>, Parameters(ResizeWindowArgs { window, w, h }): Parameters<ResizeWindowArgs>) -> ToolResult {
         self.control(&parts, window, ControlOp::Resize { w, h })
     }
