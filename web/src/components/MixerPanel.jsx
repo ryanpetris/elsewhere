@@ -66,8 +66,8 @@ function MixerRow({ viewer, node, nodes, controls, routing }) {
       </div>}
       <div className="flex items-center gap-2 text-[11px] text-ink-3">
         <span className="w-12 shrink-0">Level</span>
-        <meter min="0" max="1" value={node.meter_active ? Math.min(1, peak) : 0} aria-label={`${node.name} Peak Level`} aria-valuetext={level} title={node.meter_before_volume ? 'Before Volume and Mute' : 'After Volume and Mute'} className="meter flex-1" />
-        <span className="w-16 shrink-0 text-right font-mono text-ink-2 tabular-nums">{level}</span>
+        <meter min="0" max="1" value={node.meter_active ? Math.min(1, peak) : 0} aria-label={`${node.name} Peak Level`} aria-valuetext={level} title={node.meter_before_volume ? 'Before Volume and Mute' : 'After Volume and Mute'} className="meter min-w-0 flex-1" />
+        <span className="w-[11ch] shrink-0 whitespace-nowrap text-right font-mono text-ink-2 tabular-nums">{level}</span>
       </div>
       {node.meter_error && <p className="callout callout-warn">Meter unavailable: {node.meter_error}</p>}
     </article>
