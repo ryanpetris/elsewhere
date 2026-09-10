@@ -136,6 +136,7 @@ function Metric({ icon: Icon, value, width, title, warn = false, className = '' 
 const control = 'inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md px-1.5 font-sans text-[11px] font-medium text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent aria-expanded:bg-accent/15 aria-expanded:text-accent-2';
 
 export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixer, terminal, onTerminal, controlsHidden, onShowControls }) {
+  const panelWindows = useStore(viewer.store, st => st.panelWindows);
   const s = useStore(viewer.store, st => st.stats);
   const renderer = useStore(viewer.store, st => st.renderer);
   const mic = useStore(viewer.store, st => st.mic);
@@ -185,12 +186,12 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
           </button>
         )}
         {listens && onMixer && (
-          <button id="session-mixer-toggle" type="button" aria-label="Audio Mixer" title="Audio Mixer" aria-expanded={mixerPanel && !controlsHidden} onClick={onMixer} className={control}>
+          <button id="session-mixer-toggle" type="button" aria-label={panelWindows.mixer ? 'Focus Audio Mixer Window' : 'Audio Mixer'} title={panelWindows.mixer ? 'Focus Audio Mixer Window' : 'Audio Mixer'} aria-expanded={panelWindows.mixer ? undefined : mixerPanel && !controlsHidden} onClick={onMixer} className={cx(control, panelWindows.mixer && 'bg-accent/15 text-accent-2')}>
             <SlidersHorizontal className="size-3.5" />
           </button>
         )}
         {listens && onAudioPanel && (
-          <button type="button" aria-label="Audio Visualizer" title="Audio Visualizer" aria-expanded={audioPanel && !controlsHidden} onClick={onAudioPanel} className={control}>
+          <button type="button" aria-label={panelWindows.audio ? 'Focus Audio Visualizer Window' : 'Audio Visualizer'} title={panelWindows.audio ? 'Focus Audio Visualizer Window' : 'Audio Visualizer'} aria-expanded={panelWindows.audio ? undefined : audioPanel && !controlsHidden} onClick={onAudioPanel} className={cx(control, panelWindows.audio && 'bg-accent/15 text-accent-2')}>
             <AudioLines className="size-3.5" />
           </button>
         )}

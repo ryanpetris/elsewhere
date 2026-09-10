@@ -25,8 +25,9 @@ const until = async (condition, message) => {
   const deadline = Date.now() + 5000;
   while (!await condition()) { assert(Date.now() < deadline, message); await delay(25); }
 };
+let context;
 try {
-  const context = process.env.BROWSER_CDP ? browser.contexts()[0] : await browser.newContext({ deviceScaleFactor: 2 });
+  context = process.env.BROWSER_CDP ? browser.contexts()[0] : await browser.newContext({ deviceScaleFactor: 2 });
   context.setDefaultTimeout(5000);
   const errors = [], commands = [];
   let connections = 0;
@@ -92,7 +93,9 @@ try {
   await until(async () => await edges() === 2, 'one analysis branch and one speaker connection');
   assert.equal(connections, 1, 'popout shares the viewer socket');
   assert.equal(await audio.evaluate(() => typeof window.elsewhere), 'undefined', 'popout does not create a viewer');
-  await show('Audio Visualizer');
+  const focusAudio = page.getByRole('button', { name: 'Focus Audio Visualizer Window', exact: true });
+  assert.equal(await focusAudio.getAttribute('aria-expanded'), null, 'window focus is not a collapsed-panel action');
+  await focusAudio.click();
   assert.equal(context.pages().length, 2, 'status button focuses the existing popout');
   assert.equal(await region(page, 'Audio Visualizer').count(), 0);
   await audio.getByRole('combobox', { name: /^Style/ }).selectOption('radial');
@@ -193,6 +196,23 @@ try {
     audio = await open('Audio Visualizer', 'Pop Out Visualizer');
     await page.evaluate(() => elsewhere.setPlaybackEnabled(false));
     await until(() => audio.isClosed(), 'desktop PiP playback handoff closes visualizer popup');
+    // An isolated teardown failure must not prevent the other window from closing.
+    const brokenWindow = page.waitForEvent('popup');
+    await page.evaluate(() => {
+      const original = window.open;
+      let win;
+      window.open = () => (win = original.call(window, 'about:blank', '_blank', 'popup'));
+      try {
+        elsewhere.panels.open('audio');
+        elsewhere.panels.attach(win, 'audio').ready(() => { throw new Error('Injected cleanup failure'); });
+      } finally { window.open = original; }
+    });
+    const brokenAudio = await brokenWindow;
+    const endedMixer = await open('Audio Mixer', 'Pop Out Mixer');
+    await page.evaluate(() => elsewhere.store.set({ status: 'quit' }));
+    await until(() => brokenAudio.isClosed() && endedMixer.isClosed(), 'session end closes both windows despite failed cleanup');
+    assert.equal(await page.getByRole('button', { name: 'Audio Mixer', exact: true }).getAttribute('aria-expanded'), 'false');
+    await page.evaluate(() => elsewhere.store.set({ status: 'connected' }));
     const lastMixer = await open('Audio Mixer', 'Pop Out Mixer');
     await page.reload();
     await until(() => lastMixer.isClosed(), 'parent navigation closes popup');
@@ -203,4 +223,8 @@ try {
     assert.equal(await orphan.evaluate(() => typeof window.elsewhere), 'undefined');
     console.log('panel popouts: shared connection/audio, URL prefix, controls, permissions, visibility, sizing, fullscreen, preferences, reconnect, blocked popup, repeated cleanup, PiP handoff and parent navigation passed');
   }
-} finally { await browser.close(); server.close(); }
+  assert.equal(errors.length, 0, errors.join('\n'));
+} finally {
+  for (const page of context?.pages() ?? []) await page.close();
+  await browser.close(); server.close();
+}

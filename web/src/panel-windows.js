@@ -6,14 +6,16 @@ const titles = { audio: 'Audio Visualizer', mixer: 'Audio Mixer' };
 export function createPanelWindows(viewer) {
   const windows = new Map();
   let disposed = false;
+  const publish = (kind, open) => viewer.store.set({ panelWindows: { ...viewer.store.get().panelWindows, [kind]: open } });
 
   function close(kind) {
     const entry = windows.get(kind);
     if (!entry) return;
     windows.delete(kind);
     clearTimeout(entry.timer);
-    entry.cleanup?.();
-    entry.win.close();
+    try { entry.cleanup?.(); }
+    catch (error) { console.warn('Panel cleanup failed', error); }
+    finally { entry.win.close(); publish(kind, false); }
   }
 
   function focus(kind) {
@@ -35,9 +37,11 @@ export function createPanelWindows(viewer) {
       windows.set(kind, entry);
       entry.timer = setTimeout(() => {
         if (windows.get(kind) !== entry) return;
+        const cancelled = entry.win.closed;
         close(kind);
-        viewer.notice(`${titles[kind]} could not load. Reopen the panel to try again.`);
+        if (!cancelled) viewer.notice(`${titles[kind]} could not load. Reopen the panel to try again.`);
       }, 15000);
+      publish(kind, true);
       return true;
     } catch {
       viewer.notice(`${titles[kind]} could not open. Allow pop-ups for this site and try again.`);
@@ -63,9 +67,13 @@ export function createPanelWindows(viewer) {
   }
 
   const closeAll = () => { for (const kind of windows.keys()) close(kind); };
+  const unsubscribe = viewer.store.subscribe(() => {
+    if (['unauthorized', 'no-token', 'error', 'gone', 'closed', 'quit'].includes(viewer.store.get().status)) closeAll();
+  });
   window.addEventListener('pagehide', closeAll);
   return { open, focus, close, attach, dispose() {
     disposed = true;
+    unsubscribe();
     closeAll();
     window.removeEventListener('pagehide', closeAll);
   } };

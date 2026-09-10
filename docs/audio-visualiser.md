@@ -21,8 +21,9 @@ preferences and playback source. Its visibility and fullscreen controls belong t
 that window, so hiding the main viewer does not pause a visible pop-out. The
 status-bar button focuses an existing pop-out. Closing the pop-out leaves the
 visualiser closed; the status-bar button can open the docked panel again.
-The main viewer must stay open. Navigating away or transferring desktop playback
-to picture-in-picture closes the visualiser pop-out.
+The main viewer must stay open. Navigating or reloading either window, ending the
+server session, or transferring desktop playback to picture-in-picture closes the
+visualiser pop-out. Temporary reconnects keep it open.
 
 ## Verification
 
@@ -32,11 +33,13 @@ Chromium.
 `npm run check:panel-windows` checks both audio pop-outs, shared connection and
 audio ownership, URL prefixes, independent visibility, resize and fullscreen,
 mixer permissions and subscriptions, reconnects, blocked pop-ups and cleanup.
-For actual background-tab behavior, start ordinary Chromium with remote debugging
-in the Docker rig under Xvfb and set `BROWSER_CDP` to its debugging endpoint when
+For an additional check of actual background-tab behavior, start ordinary Chromium
+with remote debugging and `--autoplay-policy=no-user-gesture-required` in an
+isolated Docker rig under Xvfb. Set `BROWSER_CDP` to its debugging endpoint when
 running `check:panel-windows`. This mode avoids Playwright's forced visibility and
 checks animation and mixer volume commands while the opener is in a background
-tab. Both browser modes passed, as did `check:viewer-disposal`.
+tab. It supplements the default suite; run both modes for full coverage. Both
+modes passed, as did `check:viewer-disposal`.
 The checks cover graph ownership, repeated disposal and click listener counts,
 style changes, HiDPI, fullscreen, reduced motion, animation off, delayed audio
 initialization and source replacement.

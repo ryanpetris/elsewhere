@@ -37,6 +37,7 @@ jobs:
           npm run check:codec-negotiation
           ELSEWHERE_BINARY="$PWD/../target/release/elsewhere" npm run check:codec-recovery
           npm run check:visualiser
+          npm run check:panel-windows
           npm run check:viewer-disposal
       - name: Software broadcast and TLS checks
         run: BROADCAST_SOURCE="$PWD/target/release/examples/broadcast-source" python3 web/checks/broadcast-native.py

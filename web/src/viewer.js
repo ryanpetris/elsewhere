@@ -25,6 +25,7 @@ export function createViewer() {
     // The role tracks desktop input ownership; permissions govern feature access.
     role: null,
     controlsHidden: false,
+    panelWindows: {},
     display: null,
     permissions: [],
     sessionId: null,
