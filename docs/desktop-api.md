@@ -409,9 +409,9 @@ with a `copy` first line) besides the paths as text; the compositor reads the UR
 shows file names and download buttons inside the clipboard popover, and `GET /api/clipboard/files/{index}` streams the
 `index`th file of the list currently on the clipboard (only that list: the route can't read anything
 else). The other way, files pasted into the page are staged first (`PUT /api/drop/{batch}/{name}`), then
-`POST /api/clipboard/files` with that `"batch"` makes them the desktop clipboard as a URI list offered under both mimes (the
+`PasteClipboard` with the saved names and batch makes them the desktop clipboard as a URI list offered under both mimes (the
 gnome one rewritten the way file managers write it: `copy`, then one URI per line, LF only, no trailing
-newline; Nautilus refuses a CR or an empty line), and the paste chord follows through the API; Thunar
+newline; Nautilus refuses a CR or an empty line), then the compositor performs the eligible paste chord; Thunar
 and Nautilus paste them as copies.
 
 The page writes received text to the browser clipboard at once when it may, otherwise on the next
@@ -419,9 +419,13 @@ gesture; a received image is fetched from the API and written as a `ClipboardIte
 Shift+Insert are not forwarded immediately: the browser's `paste` event (which needs no permission)
 delivers the text, which goes to the desktop as `SetClipboard`, and the key press and release follow, so
 the application pastes the browser's content; if no paste event comes within 150 ms the key goes
-through on its own. A pasted image goes by `PUT /api/clipboard` instead, and the user's chord is dropped
-(its modifier may be released before the upload ends): once the upload succeeded the same chord is
-pressed through `POST /api/input`, and not at all if it failed. The compositor reports its own
+through on its own. Images and staged file selections travel with the intended chord in one
+`PasteClipboard` socket message. The compositor installs the selection before tapping the chord,
+under the originating token and session's admission. Desktop paste requires the same control tenure
+captured before uploading. A window paste requires its window still to be focused. Non-driving and
+write-only viewers can install the clipboard without injecting input; revocation, disconnect and
+cancelled uploads cannot submit a late paste. A partial upload never installs a partial selection.
+The compositor reports its own
 clipboard back as an `Event::Clipboard` like an application's, so the server's cache and every viewer
 follow one ordered stream.
 

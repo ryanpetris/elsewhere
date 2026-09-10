@@ -106,7 +106,7 @@ try {
         await wait(() => { frame = popup.frames().find(f => f.parentFrame()); return !!frame; });
         await frame.waitForFunction(() => !!window.elsewhere?.store && !!window.socket);
         await frame.evaluate(({ ROLE, CONFIG }) => {
-          packet([ROLE, 2, 0]);
+          packet([ROLE, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
           packet([CONFIG, ...new TextEncoder().encode(JSON.stringify({ streamId: 1, codec: 'vp8', width: 640, height: 480, scale: 1 }))]);
           elsewhere.setCaptureOnClick(true);
         }, { ROLE, CONFIG });
@@ -144,7 +144,7 @@ try {
       await navigate(`http://${hostname}:${server.address().port}/?check=${++visit}${windowMode ? '&window=1' : ''}#token=test`);
       await wait(() => js(() => !!window.elsewhere?.store && !!window.socket)).catch(async error => { console.error(await js(() => ({ errors: window.errors, text: document.body.innerText, viewer: !!window.elsewhere }))); throw error; });
       await js((ROLE, CONFIG) => {
-        packet([ROLE, 2, 0]);
+        packet([ROLE, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         packet([CONFIG, ...new TextEncoder().encode(JSON.stringify({ streamId: 1, codec: 'vp8', width: 1280, height: 720, scale: 1 }))]);
         elsewhere.setCaptureOnClick(true);
       }, ROLE, CONFIG);
@@ -268,11 +268,11 @@ try {
       await js(() => elsewhere.setCaptureOnClick(true));
       await enter(); await escape('fullscreen re-entry restores keyboard capture');
 
-      await js(ROLE => packet([ROLE, 0, 0]), ROLE);
+      await js(ROLE => packet([ROLE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ROLE);
       await wait(() => js(() => !document.pointerLockElement));
       if (name === 'firefox') await wait(() => js(() => !elsewhere.isFullscreen()));
       if (await js(() => elsewhere.isFullscreen())) await js(() => document.exitFullscreen());
-      await js(ROLE => packet([ROLE, 2, 0]), ROLE);
+      await js(ROLE => packet([ROLE, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ROLE);
       await enter();
       await js(() => socket.onclose({ code: 4003, reason: 'check' }));
       await wait(() => js(() => !document.pointerLockElement));
@@ -299,7 +299,7 @@ try {
       await click('button[title="Fullscreen"]');
       await wait(() => js(() => !!window.finishFullscreen));
       await js((cancel, ROLE) => {
-        if (cancel === 'role') packet([ROLE, 0, 0]);
+        if (cancel === 'role') packet([ROLE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         if (cancel === 'disconnect') socket.onclose({ code: 4003, reason: 'check' });
         if (cancel === 'dispose') elsewhere.dispose();
         if (cancel === 'blur') window.dispatchEvent(new Event('blur'));
@@ -322,7 +322,7 @@ try {
         await click('button[title="Fullscreen"]');
         await wait(() => js(() => !!window.finishKeyboard));
         await js((cancel, ROLE) => {
-          if (cancel === 'role') packet([ROLE, 0, 0]);
+          if (cancel === 'role') packet([ROLE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
           if (cancel === 'disconnect') socket.onclose({ code: 4003, reason: 'check' });
           if (cancel === 'dispose') elsewhere.dispose();
           if (cancel === 'blur') window.dispatchEvent(new Event('blur'));

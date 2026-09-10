@@ -13,6 +13,7 @@ mod mixer;
 pub use mixer::{Mixer, MixerAudience};
 pub mod files;
 mod notify;
+mod paste;
 pub mod rtc;
 mod protocol;
 #[cfg(test)]
@@ -405,12 +406,12 @@ fn mcp_service(app: Arc<App>) -> StreamableHttpService<mcp::Mcp, LocalSessionMan
 
 /// Unauthenticated until the first message (see `ws::session`).
 async fn websocket(ws: WebSocketUpgrade, State(app): State<Arc<App>>) -> Response {
-    ws.max_message_size(1 + (1 << 20)).on_upgrade(move |socket| ws::session(socket, app)) // a pasted clipboard can be 1 MiB
+    ws.max_message_size(10 + (16 << 20)).max_frame_size(10 + (16 << 20)).on_upgrade(move |socket| ws::session(socket, app)) // PNG paste carries up to 16 MiB
 }
 
 /// One window as its own stream (see `ws::window_session`).
 async fn window_websocket(ws: WebSocketUpgrade, UrlPath(id): UrlPath<u64>, State(app): State<Arc<App>>) -> Response {
-    ws.max_message_size(1 + (1 << 20)).on_upgrade(move |socket| ws::window_session(socket, app, id))
+    ws.max_message_size(10 + (16 << 20)).max_frame_size(10 + (16 << 20)).on_upgrade(move |socket| ws::window_session(socket, app, id))
 }
 
 /// Bearer authentication creates one live token context for the request and its response body.

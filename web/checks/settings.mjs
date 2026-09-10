@@ -113,8 +113,8 @@ try {
   assert.deepEqual(await keyPackets(), [], 'a new connection cannot release an old connection key');
   await page.keyboard.down('Shift');
   await page.evaluate(() => {
-    socket.onmessage({ data: new Uint8Array([8, 0, 4]).buffer });
-    socket.onmessage({ data: new Uint8Array([8, 2, 4]).buffer });
+    socket.onmessage({ data: new Uint8Array([8, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0]).buffer });
+    socket.onmessage({ data: new Uint8Array([8, 2, 4, 0, 0, 0, 0, 0, 0, 0, 0]).buffer });
   });
   assert.equal(await page.evaluate(() => elsewhere.store.get().role), 'controller');
   await resetPackets(); await page.keyboard.up('Shift');

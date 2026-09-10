@@ -73,8 +73,7 @@ const download = async (path, name) => {
 };
 export const downloadFile = (name, path) => download(fileUrl(name, path), name);
 
-// Files on the clipboard: put files of the transfer folder, or of a staged batch, there; fetch the i-th file copied in the desktop.
-export const clipboardFiles = (names, batch) => api('/api/clipboard/files', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ names, batch }) });
+// Fetch the i-th file copied in the desktop.
 export const downloadClipboardFile = (index, name) => download(`/api/clipboard/files/${index}`, name);
 
 // A notification's icon as a blob URL (the caller revokes it), or null.

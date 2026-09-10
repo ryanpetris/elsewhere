@@ -6,12 +6,12 @@ import { createPip } from './pip.js';
 import { createPanelWindows } from './panel-windows.js';
 import { createClipboard } from './clipboard.js';
 import { KEYCODES } from './keycodes.js';
-import { TOKEN, WINDOW, PIP, api, elementsOf, snapshot, control, uploadFile, clipboardFiles, pref } from './api.js';
+import { TOKEN, WINDOW, PIP, api, elementsOf, snapshot, control, uploadFile, pref } from './api.js';
 import { createStore } from './store.js';
 import { startMic, stopMic } from './mic.js';
 import { startCam, stopCam } from './cam.js';
 import { openRtc, rtcEndpoint, RTC_TIMING } from './rtc.js';
-import { PERMISSIONS, DISPLAY, CONFIG, VIDEO, CURSOR, POINTER_LOCK, AUDIO, WINDOWS, CLIPBOARD, ROLE, NOTICE, CLIPBOARD_DATA, NOTIFICATIONS, STREAM_STATE, RTC, ROLES, CODEC_FAMILIES, EFFORTS, PRESETS, AUTH, HELLO, RESIZE, MOTION_ABS, MOTION_REL, BUTTON, AXIS, KEY, REQUEST_KEYFRAME, BLUR, POINTER_LOCK_LOST, POINTER_LOCK_GAINED, CONTROL, SET_CLIPBOARD, TAKE_CONTROL, NOTIFY, STREAM, DRAG, INPUT, TOUCH, MIC, CAM, RTC_CLIENT, REPORT, BTN, MIXER_STATE, MIXER_LEVELS, MIXER_ERROR, MIXER_CLIENT, SESSION, HANDOFF, FILE_RESULT } from './protocol.js';
+import { PASTE_CLIPBOARD, PERMISSIONS, DISPLAY, CONFIG, VIDEO, CURSOR, POINTER_LOCK, AUDIO, WINDOWS, CLIPBOARD, ROLE, NOTICE, CLIPBOARD_DATA, NOTIFICATIONS, STREAM_STATE, RTC, ROLES, CODEC_FAMILIES, EFFORTS, PRESETS, AUTH, HELLO, RESIZE, MOTION_ABS, MOTION_REL, BUTTON, AXIS, KEY, REQUEST_KEYFRAME, BLUR, POINTER_LOCK_LOST, POINTER_LOCK_GAINED, CONTROL, SET_CLIPBOARD, TAKE_CONTROL, NOTIFY, STREAM, DRAG, INPUT, TOUCH, MIC, CAM, RTC_CLIENT, REPORT, BTN, MIXER_STATE, MIXER_LEVELS, MIXER_ERROR, MIXER_CLIENT, SESSION, HANDOFF, FILE_RESULT } from './protocol.js';
 
 const AUDIO_LEAD = 0.06;
 const qualityName = name => PRESETS.includes(name) ? name : 'medium';
@@ -76,6 +76,7 @@ export function createViewer() {
   const dropBatches = new Map();
   let mixerSubscribed = false, mixerTimer = 0;
   const mixerVolumes = new Map();
+  let controlEpoch = 0n, pasteGeneration = 0;
   let ws, decoder, stream = null, configuredSocket = null, awaitingKey = true;
   let disposed = false, reconnectTimer;
   let frames = 0, received = 0, windowFrames = 0, windowBytes = 0, lastInput = 0, latencyMs = 0, lockRequests = 0, lockError = '', wantLock = false, connects = 0, closes = [], keyframes = 0, decodeErrors = 0, dropped = 0;
@@ -513,6 +514,7 @@ export function createViewer() {
       case ROLE: {
         const role = ROLES[dv.getUint8(1)] ?? 'viewer';
         const features = dv.getUint8(2);
+        controlEpoch = dv.getBigUint64(3, true);
         store.set({ role, audioAvailable: !!(features & 4), micAvailable: !!(features & 1), camAvailable: !!(features & 2) });
         if (!driving()) forwardedKeys.clear();
         if (!(features & 4)) stopPlayback();
@@ -1038,14 +1040,14 @@ export function createViewer() {
   // --- files ---------------------------------------------------------------------------------
   // Capture the directory before queuing any part of a batch. Desktop transfers use cache staging.
   let uploadQueue = Promise.resolve(), uploadAbort;
-  function uploadFiles(list, batch) {
+  function uploadFiles(list, batch, eligible = () => true) {
     const files = [...list], path = state().filesPath;
     const run = async () => {
-      if (disposed || !can('files.upload')) return [];
+      if (disposed || !can('files.upload') || !eligible()) return [];
       const saved = [], failures = [];
       uploadAbort = new AbortController();
       for (const [index, file] of files.entries()) {
-        if (uploadAbort.signal.aborted) break;
+        if (uploadAbort.signal.aborted || !eligible()) break;
         store.set({ upload: { name: file.name, index: index + 1, count: files.length, path: batch ? 'desktop staging' : path } });
         try { saved.push(await uploadFile(file, batch, path, uploadAbort.signal)); }
         catch (e) { failures.push(`${file.name}: ${e.message}`); }
@@ -1142,17 +1144,31 @@ export function createViewer() {
     const image = files.length === 1 && files[0].type === 'image/png' && files[0].name === 'image.png' ? files[0] : null; // a screenshot (browsers name pasted pixels so), not a copied file
     if (files.length && !image && !can('files.upload')) { notice('File paste requires file upload permission'); return; }
     if (image || files.length) {
-      // The user's chord is dropped (its modifier may go up before the upload is done); once the picture, or
-      // the files, are on the desktop clipboard the same chord is pressed through the API, and not at all
-      // if the upload failed. Files are staged first and the clipboard then names them there.
-      const chord = pendingPaste === KEYCODES.Insert ? 'shift+Insert' : 'ctrl+v';
+      // The socket binds installation and its optional chord to this viewer and control tenure.
+      const shiftInsert = pendingPaste === KEYCODES.Insert;
+      const socket = ws, epoch = controlEpoch, generation = pasteGeneration, paste = driving();
+      const eligible = () => !disposed && ws === socket && socket?.readyState === WebSocket.OPEN && generation === pasteGeneration && can('clipboard.write');
       swallowKeyup = pendingPaste; pendingPaste = null; clearTimeout(pasteTimer);
       clearPasteTarget();
-      const batch = crypto.randomUUID();
-      const put = image
-        ? api('/api/clipboard', { method: 'PUT', headers: { 'Content-Type': 'image/png' }, body: image, signal: AbortSignal.timeout(5000) })
-        : uploadFiles(files, batch).then(names => (names.length === files.length ? clipboardFiles(names, batch) : { ok: false })); // a file that didn't land isn't pasted, and the notice says what did
-      put.then(r => { if (r.ok && driving()) return api('/api/input', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'key', keys: chord }) }); }).catch(() => {});
+      const install = (payload, fileList) => {
+        if (!eligible()) return;
+        const focused = !WINDOW || document.hasFocus();
+        if (paste && !focused) notice('Paste skipped because the window viewer lost focus.');
+        const header = new ArrayBuffer(10), dv = new DataView(header);
+        dv.setUint8(0, PASTE_CLIPBOARD);
+        dv.setUint8(1, (paste && focused ? 1 : 0) | (shiftInsert ? 2 : 0) | (fileList ? 4 : 0));
+        dv.setBigUint64(2, epoch, true);
+        socket.send(new Blob([header, payload]));
+      };
+      if (image) {
+        if (image.size > 16 * 1024 * 1024) notice('Clipboard image exceeds 16 MiB');
+        else install(image, false);
+      } else {
+        const batch = crypto.randomUUID();
+        uploadFiles(files, batch, eligible).then(names => {
+          if (names.length === files.length) install(JSON.stringify({ names, batch }), true);
+        }).catch(error => notice(`Clipboard paste failed: ${error.message}`));
+      }
       return;
     }
     sendText(SET_CLIPBOARD, e.clipboardData?.getData('text/plain') ?? ''); // an empty browser clipboard clears the desktop's
@@ -1370,7 +1386,7 @@ export function createViewer() {
     setChoice,
     setTransport,
     uploadFiles,
-    cancelUpload: () => uploadAbort?.abort(),
+    cancelUpload: () => { pasteGeneration++; uploadAbort?.abort(); },
     openFiles(path) {
       if (PIP && window.parent.elsewhereOpenFiles) return window.parent.elsewhereOpenFiles(path);
       store.set({ filesPath: path, filesOpen: state().filesOpen + 1 });

@@ -93,7 +93,7 @@ pub async fn distribute_audio(app: Arc<App>, mut rx: mpsc::Receiver<StreamMsg>) 
             if let Ok(permit) = events.reserve().await {
                 let viewers = app.viewers.lock().unwrap();
                 if viewers.sessions.contains_key(&id) {
-                    permit.send(protocol::role(viewers.role_of(id), app.features(&viewers.sessions[&id].key)));
+                    permit.send(protocol::role(viewers.role_of(id), app.features(&viewers.sessions[&id].key), viewers.control_epoch));
                 }
             }
         });
@@ -258,7 +258,7 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
             v.control_epoch = v.control_epoch.wrapping_add(1);
         }
         app.mixer_audience(&v);
-        let replay: Vec<Bytes> = [Some(protocol::session(id)), key.has(P::AudioListen).then(|| protocol::mixer_state(&app.mixer_state())), v.cursor.clone(), v.windows.clone(), v.locked.then(|| Bytes::from(vec![protocol::POINTER_LOCK, 1])), Some(protocol::role(v.role_of(id), app.features(&key))), Some(notifications.clone())].into_iter().flatten().collect();
+        let replay: Vec<Bytes> = [Some(protocol::session(id)), key.has(P::AudioListen).then(|| protocol::mixer_state(&app.mixer_state())), v.cursor.clone(), v.windows.clone(), v.locked.then(|| Bytes::from(vec![protocol::POINTER_LOCK, 1])), Some(protocol::role(v.role_of(id), app.features(&key), v.control_epoch)), Some(notifications.clone())].into_iter().flatten().collect();
         (id, replay)
     };
     for msg in replay {
@@ -382,6 +382,7 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
                             _ => {}
                         },
                         Some(ClientMsg::Report { delay_ms, dropped }) => auto.report(delay_ms, dropped),
+                        Some(ClientMsg::PasteClipboard(msg)) => app.paste_clipboard(&key, id, msg),
                         Some(m) => app.viewer_message(id, &key, m),
                         None => {}
                     }
@@ -471,7 +472,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
     let replay: Vec<Bytes> = {
         let v = app.viewers.lock().unwrap();
         let role = if key.has(P::DesktopControl) { Role::Controller } else { Role::Viewer };
-        [v.cursor.clone(), v.windows.clone(), v.locked.then(|| Bytes::from(vec![protocol::POINTER_LOCK, 1])), Some(protocol::role(role, 0))].into_iter().flatten().collect()
+        [v.cursor.clone(), v.windows.clone(), v.locked.then(|| Bytes::from(vec![protocol::POINTER_LOCK, 1])), Some(protocol::role(role, 0, 0))].into_iter().flatten().collect()
     };
     for msg in replay {
         let _ = send(&mut socket, &key, msg).await;
@@ -607,6 +608,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                         }
                         Some(ClientMsg::Control(m)) if key.has(auth::control_permission(&m)) => app.command_for(m).ok(),
                         Some(ClientMsg::SetClipboard(text)) if key.has(P::ClipboardWrite) => Some(Command::SetClipboard { mime: api::TEXT.into(), data: text.into(), operation: None }),
+                        Some(ClientMsg::PasteClipboard(msg)) => { app.paste_clipboard(&key, rtc_key, msg); None },
                         Some(ClientMsg::Control(_) | ClientMsg::SetClipboard(_)) => None,
                         Some(_) if !key.has(P::DesktopControl) => None,
                         // window-relative, resolved against the live geometry on the compositor thread
@@ -747,8 +749,8 @@ impl App {
     }
 
     /// A message from a viewer session: its size always counts (the output's if it controls, its own
-    /// stream's scale otherwise); input only from the controller; window actions and the clipboard
-    /// from any token with desktop.control.
+    /// stream's scale otherwise); input only from the controller. Window actions use their own grants;
+    /// clipboard writes require clipboard.write independently of control.
     fn viewer_message(&self, id: u64, key: &Key, m: ClientMsg) {
         let Ok(_admission) = key.admit() else { return; };
         let mut v = self.viewers.lock().unwrap();
@@ -861,7 +863,7 @@ impl App {
         }
         for id in [old, next].into_iter().flatten() {
             if let Some(s) = v.sessions.get(&id) {
-                let _ = s.events.try_send(protocol::role(v.role_of(id), self.features(&s.key)));
+                let _ = s.events.try_send(protocol::role(v.role_of(id), self.features(&s.key), v.control_epoch));
             }
         }
     }

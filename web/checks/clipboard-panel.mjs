@@ -82,7 +82,7 @@ try {
     await page.goto(`http://127.0.0.1:${server.address().port}/?check=${serial}&window=${windowMode ? '1' : ''}#token=${token}`);
     await page.waitForFunction(() => !!window.elsewhere?.store && !!window.socket);
     await page.evaluate(({ ROLE, CONFIG, token }) => {
-      packet([ROLE, token === 'viewer' ? 0 : 2, 0]);
+      packet([ROLE, token === 'viewer' ? 0 : 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
       packet([CONFIG, ...new TextEncoder().encode(JSON.stringify({ streamId: 1, codec: 'vp8', width: 1280, height: 720, scale: 1 }))]);
     }, { ROLE, CONFIG, token });
     await page.waitForFunction(() => elsewhere.store.get().clipboardState.status === 'ready');
@@ -206,9 +206,9 @@ try {
   await page.waitForFunction(() => elsewhere.store.get().clipboardState.text === 'after reconnect');
   assert.equal(await page.evaluate(() => copies.length), copiesBeforeReconnect, 'reconnect refresh does not copy to browser');
   assert.equal(await panel.getByRole('textbox').inputValue(), 'cannot save', 'reconnect preserves draft');
-  await page.evaluate(ROLE => packet([ROLE, 0, 0]), ROLE);
+  await page.evaluate(ROLE => packet([ROLE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ROLE);
   assert.equal(await panel.getByRole('button', { name: 'Replace with Draft' }).isDisabled(), false, 'clipboard grant does not depend on input role');
-  await page.evaluate(ROLE => packet([ROLE, 2, 0]), ROLE);
+  await page.evaluate(ROLE => packet([ROLE, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ROLE);
   await page.waitForFunction(() => elsewhere.store.get().clipboardState.text === 'after reconnect');
   await panel.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.mouse.click(1, 1);

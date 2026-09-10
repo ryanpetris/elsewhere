@@ -362,13 +362,17 @@ impl App {
     /// Files of the transfer folder, or with `batch` of the batch a paste staged, as the desktop clipboard's
     /// URI list (a file manager's copy).
     pub fn set_clipboard_files(&self, key: &Key, names: &[String], batch: Option<&str>) -> Result<(), ApiError> {
+        self.set_clipboard(crate::api::URI_LIST, self.clipboard_file_list(key, names, batch)?.into())
+    }
+
+    pub(crate) fn clipboard_file_list(&self, key: &Key, names: &[String], batch: Option<&str>) -> Result<Vec<u8>, ApiError> {
         let dir = match batch {
             Some(b) => self.owned_batch(key, b)?,
             None => self.files_dir.clone(),
         };
         let list = uri_list(&dir, names)?;
         self.validate_clipboard_uris(key, &list)?;
-        self.set_clipboard(crate::api::URI_LIST, list.into())
+        Ok(list)
     }
 
     /// The browser's drag as a compositor command. A drop names the files of its batch and drops their

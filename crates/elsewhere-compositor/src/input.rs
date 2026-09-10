@@ -116,6 +116,13 @@ impl State {
             }
             Command::Input(msg) => self.input(msg),
             Command::SetClipboard { mime, data, operation } => self.set_clipboard(mime, data, operation),
+            Command::PasteClipboard { mime, data, shift_insert, window, admission } => admission.execute(Box::new(|input| {
+                let input = input && window.is_none_or(|id| self.active.as_ref().is_some_and(|w| window_id(w) == id && self.space.element_location(w).is_some()));
+                if input { self.release_all(); }
+                self.set_clipboard(mime, data, None);
+                if input { self.input(InputMsg::Key { keys: if shift_insert { "shift+Insert" } else { "ctrl+v" }.into() }); }
+                input
+            })),
             Command::Drag(drag) => self.drag(drag),
             Command::Touch { kind, slot, x, y } => self.touch(kind, slot, (x, y).into()),
             Command::ReleaseAllInput => self.release_all(),

@@ -58,6 +58,8 @@ pub enum Command {
     ShellCommand { reply: std::sync::mpsc::Sender<std::process::Command> },
     /// Text or an image (`image/png`) from the browser or the API becomes the desktop clipboard.
     SetClipboard { mime: String, data: Vec<u8>, operation: Option<u64> },
+    /// Install a selection and optionally tap its paste chord under the originating session's admission.
+    PasteClipboard { mime: String, data: Vec<u8>, shift_insert: bool, window: Option<u64>, admission: Box<dyn ClipboardPaste> },
     /// The browser is dragging local files over the desktop (the pointer is already where the drag is).
     Drag(Drag),
     /// A finger on the browser's touchscreen, as a `wl_touch` point (`slot` tells fingers apart); the
@@ -74,6 +76,13 @@ pub enum Command {
     /// the stream, so two viewers of the same window don't disturb each other.
     WindowStream { key: u64, window: u64, sink: Option<Box<dyn FrameSink>> },
     Quit,
+}
+
+/// Runs on the compositor thread. Admission holds authority through selection installation and input;
+/// `false` permits only the clipboard write; `apply` returns whether it tapped the chord.
+/// A cancelled operation does not call `apply`.
+pub trait ClipboardPaste: std::fmt::Debug + Send {
+    fn execute(self: Box<Self>, apply: Box<dyn FnOnce(bool) -> bool + '_>);
 }
 
 /// Straight-alpha RGBA, top row first.

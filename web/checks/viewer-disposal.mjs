@@ -68,7 +68,7 @@ try {
       };
       let seq = 0;
       probe.configure = () => {
-        socket.onmessage({ data: new Uint8Array([ROLE, 2, 0]).buffer });
+        socket.onmessage({ data: new Uint8Array([ROLE, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]).buffer });
         socket.onmessage({ data: new Uint8Array([CONFIG, ...new TextEncoder().encode(JSON.stringify({ streamId: 1, codec: 'vp8', width: 64, height: 64, scale: 1 }))]).buffer });
       };
       probe.feed = () => {

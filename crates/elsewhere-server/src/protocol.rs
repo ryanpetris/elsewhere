@@ -62,6 +62,7 @@ pub const BLUR: u8 = 0x89;
 pub const POINTER_LOCK_LOST: u8 = 0x8A;
 /// The browser acquired pointer lock; resume pending client locks without delivering a click.
 pub const POINTER_LOCK_GAINED: u8 = 0x99;
+pub const PASTE_CLIPBOARD: u8 = 0x9A;
 /// `[CONTROL][JSON ControlMsg]`
 pub const CONTROL: u8 = 0x8B;
 /// UTF-8 text the browser pasted: becomes the desktop clipboard.
@@ -113,9 +114,11 @@ pub enum Role {
     Controller = 2,
 }
 
-/// `[ROLE][role][features]`: what the session may do, and what the desktop takes (`FEATURE_*` bits).
-pub fn role(role: Role, features: u8) -> Bytes {
-    Bytes::from(vec![ROLE, role as u8, features])
+/// `[ROLE][role][features][control epoch: u64]`: session capabilities and its current control tenure.
+pub fn role(role: Role, features: u8, epoch: u64) -> Bytes {
+    let mut packet = vec![ROLE, role as u8, features];
+    packet.extend_from_slice(&epoch.to_le_bytes());
+    packet.into()
 }
 pub fn permissions(grants: &std::collections::BTreeSet<crate::tokens::Permission>) -> Bytes {
     let mut packet = vec![PERMISSIONS];
@@ -318,6 +321,7 @@ pub enum ClientMsg {
     PointerLockGained,
     Control(ControlMsg),
     SetClipboard(String),
+    PasteClipboard(PasteMsg),
     TakeControl,
     Handoff(u64),
     Notify(NotifyMsg),
@@ -358,8 +362,22 @@ pub struct NotifyMsg {
     pub action: Option<String>,
 }
 
+#[derive(Debug, PartialEq)]
+pub struct PasteMsg {
+    pub paste: bool,
+    pub shift_insert: bool,
+    pub epoch: u64,
+    pub selection: PasteSelection,
+}
+#[derive(Debug, PartialEq)]
+pub enum PasteSelection { Png(Vec<u8>), Files(PasteFiles) }
+#[derive(Debug, PartialEq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PasteFiles { pub names: Vec<String>, pub batch: String }
+
 /// Malformed messages decode to `None` and are ignored.
 pub fn decode(b: &[u8]) -> Option<ClientMsg> {
+    if b.first() != Some(&PASTE_CLIPBOARD) && b.len() > 1 + (1 << 20) { return None; }
     let u8_at = |i: usize| b.get(i).copied();
     let u16_at = |i: usize| Some(u16::from_le_bytes(b.get(i..i + 2)?.try_into().ok()?));
     let f32_at = |i: usize| Some(f32::from_le_bytes(b.get(i..i + 4)?.try_into().ok()?));
@@ -380,6 +398,22 @@ pub fn decode(b: &[u8]) -> Option<ClientMsg> {
         POINTER_LOCK_GAINED => ClientMsg::PointerLockGained,
         CONTROL => ClientMsg::Control(serde_json::from_slice(&b[1..]).ok()?),
         SET_CLIPBOARD => ClientMsg::SetClipboard(String::from_utf8(b[1..].to_vec()).ok()?),
+        PASTE_CLIPBOARD => {
+            let flags = u8_at(1)?;
+            if flags & !7 != 0 { return None; }
+            let epoch = u64::from_le_bytes(b.get(2..10)?.try_into().ok()?);
+            let payload = b.get(10..)?;
+            let selection = if flags & 4 != 0 {
+                if payload.len() > 1 << 20 { return None; }
+                let files: PasteFiles = serde_json::from_slice(payload).ok()?;
+                if files.names.is_empty() { return None; }
+                PasteSelection::Files(files)
+            } else {
+                if payload.len() > 16 << 20 { return None; }
+                PasteSelection::Png(payload.to_vec())
+            };
+            ClientMsg::PasteClipboard(PasteMsg { paste: flags & 1 != 0, shift_insert: flags & 2 != 0, epoch, selection })
+        },
         TAKE_CONTROL => ClientMsg::TakeControl,
         HANDOFF if b.len() == 9 => ClientMsg::Handoff(u64::from_le_bytes(b[1..].try_into().ok()?)),
         NOTIFY => ClientMsg::Notify(serde_json::from_slice(&b[1..]).ok()?),
@@ -403,6 +437,24 @@ pub fn decode(b: &[u8]) -> Option<ClientMsg> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compound_paste_payload_boundaries() {
+        let packet = |flags: u8, body: &[u8]| [&[PASTE_CLIPBOARD, flags][..], &42u64.to_le_bytes(), body].concat();
+        let png = packet(3, &[137, 80, 78, 71]);
+        assert!(matches!(decode(&png), Some(ClientMsg::PasteClipboard(PasteMsg { paste: true, shift_insert: true, epoch: 42, selection: PasteSelection::Png(_) }))));
+        for end in 0..10 { assert_eq!(decode(&png[..end]), None); }
+        assert_eq!(decode(&packet(8, &[])), None);
+        assert_eq!(decode(&packet(4, br#"{"names":[],"batch":"b"}"#)), None);
+        assert_eq!(decode(&packet(4, br#"{"names":["a"],"batch":"b","unexpected":1}"#)), None);
+        assert!(matches!(decode(&packet(5, br#"{"names":["a","b"],"batch":"batch"}"#)), Some(ClientMsg::PasteClipboard(PasteMsg { selection: PasteSelection::Files(_), .. }))));
+        assert!(decode(&packet(0, &vec![0; 16 << 20])).is_some());
+        assert_eq!(decode(&packet(0, &vec![0; (16 << 20) + 1])), None);
+        assert_eq!(decode(&packet(4, &vec![b' '; (1 << 20) + 1])), None);
+        let text = [&[SET_CLIPBOARD][..], &vec![b'a'; 1 << 20]].concat();
+        assert!(decode(&text).is_some());
+        assert_eq!(decode(&[text, vec![b'a']].concat()), None);
+    }
 
     #[test]
     fn quality_levels_and_handshake_defaults() {
@@ -507,7 +559,7 @@ mod tests {
         assert_eq!(decode(&handoff), None);
         assert_eq!(&session(target)[1..], &target.to_le_bytes());
         assert_eq!(decode(&[0x96, 0x64, 0, 2, 0]), Some(ClientMsg::Report { delay_ms: 100, dropped: 2 }));
-        assert_eq!(role(Role::Controller, FEATURE_CAM).as_ref(), &[0x08, 2, 2]);
+        assert_eq!(role(Role::Controller, FEATURE_CAM, 0x102).as_ref(), &[0x08, 2, 2, 2, 1, 0, 0, 0, 0, 0, 0]);
         let control = |json: &str| decode(&[&[CONTROL][..], json.as_bytes()].concat());
         assert_eq!(
             control(r#"{"id":3,"op":"move","x":10,"y":-2}"#),
