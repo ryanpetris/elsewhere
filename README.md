@@ -10,8 +10,8 @@ Design notes: [docs/architecture.md](docs/architecture.md), [docs/protocol.md](d
 
 ## Install
 
-Releases made from `vX.Y.Z` tags carry separate native packages and tarballs for Debian stable,
-Ubuntu 24.04 and current Ubuntu, plus an Arch package. Choose the artifact for your distribution;
+Releases made from `vX.Y.Z` tags carry separate native packages and tarballs for Debian stable
+and current Ubuntu, plus an Arch package. Choose the artifact for your distribution;
 FFmpeg shared-library ABIs differ between releases.
 Building from source needs Rust stable, Node 24 for the viewer, Clang, pkg-config and the development
 packages for FFmpeg, libva, PipeWire, libgbm, libEGL and libxkbcommon; `make` builds the viewer and then
@@ -39,7 +39,7 @@ to check the broadcast helper's trusted, untrusted and wrong-host TLS connection
 
 - Linux, with a GPU render node (`/dev/dri/renderD128`) and Mesa for hardware rendering and encoding, or
   none at all (Mesa's llvmpipe renders and the CPU encodes; see below).
-- FFmpeg 6.1 or later, with VAAPI support for hardware encoding. `--software-encoding` uses
+- FFmpeg 7.1 or later, with VAAPI support for hardware encoding. `--software-encoding` uses
   libvpx, x264 or OpenH264, x265, and libaom, according to the installed FFmpeg build.
   Software encoding runs the desktop at 30 Hz. Standard distribution FFmpeg packages supply these
   libraries; codec availability is checked by opening an encoder and producing a keyframe.

@@ -38,8 +38,6 @@ jobs:
         include:
           - name: debian-trixie
             image: debian:trixie
-          - name: ubuntu-24.04
-            image: ubuntu:24.04
           - name: ubuntu-current
             image: ubuntu:latest
     container: ${{ matrix.image }}
@@ -87,8 +85,6 @@ jobs:
         include:
           - name: debian-trixie
             image: debian:trixie
-          - name: ubuntu-24.04
-            image: ubuntu:24.04
           - name: ubuntu-current
             image: ubuntu:latest
     container: ${{ matrix.image }}

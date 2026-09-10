@@ -399,6 +399,6 @@ from other descriptors and permits the live desktop's bounded DMA buffer pool on
 Run `python3 scripts/check-allocator.py` in a glibc Docker image to verify the actual startup
 `mallopt` call and explicit allocator overrides against the selected `ELSEWHERE_BINARY`.
 Native release builds and this startup check passed on Arch with glibc 2.44, Debian 13 with glibc
-2.41, Ubuntu 24.04 with glibc 2.39 and Ubuntu 26.04 with glibc 2.43. The allocator comparison and
-viewer timing checks above ran on Arch; the other distributions have startup coverage, not repeated
-viewer performance measurements. Builds using another C library do not apply the glibc policy.
+2.41 and Ubuntu 26.04 with glibc 2.43. The allocator comparison and viewer timing checks above ran
+on Arch; the other distributions have startup coverage, not repeated viewer performance measurements.
+Builds using another C library do not apply the glibc policy.

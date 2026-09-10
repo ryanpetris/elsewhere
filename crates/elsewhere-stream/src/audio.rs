@@ -213,15 +213,13 @@ impl OpusEncoder {
         let mut encoder = av::codec::context::Context::new_with_codec(codec).encoder().audio()?;
         encoder.set_rate(RATE as i32);
         encoder.set_channel_layout(av::ChannelLayout::STEREO);
-        // ch_layout is present on every supported FFmpeg version, including 6.1.
-        unsafe { av::ffi::av_channel_layout_default(&mut (*encoder.as_mut_ptr()).ch_layout, 2); }
         encoder.set_format(av::format::Sample::F32(av::format::sample::Type::Packed));
         encoder.set_time_base((1, RATE as i32));
         encoder.set_bit_rate(96_000);
         let mut options = av::Dictionary::new();
         options.set("application", "audio");
         options.set("frame_duration", "20");
-        // FFmpeg 6.1 has no DTX option. Silence remains correctly clocked when it is absent.
+        // Enable DTX when the installed FFmpeg encoder exposes it.
         unsafe {
             if !av::ffi::av_opt_find((*encoder.as_ptr()).priv_data, c"dtx".as_ptr(), std::ptr::null(), 0, 0).is_null() { options.set("dtx", "1"); }
         }
