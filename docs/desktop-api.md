@@ -704,6 +704,12 @@ Settings also exposes shared kiosk and resolution controls through `/api/display
 `desktop.control` and apply without restarting the server. See [display settings](protocol.md#display-settings)
 for the request and event formats. Turning kiosk off restores saved layouts; windows opened in kiosk
 become maximized, respecting panel reservations and compositor decorations.
+Restoring a maximized or fullscreen window fits its saved geometry into the current work area,
+including compositor decorations, while honoring advertised client size limits. A client minimum larger than
+the work area keeps that minimum size with its top-left corner and title bar in the work area.
+Saved geometry that still fits is preserved.
 
 Run `npm run check:display` in the Docker rig to exercise live resizing, controller handoffs, kiosk
 layout restoration, startup kiosk exit, permissions and settings replay.
+Run `node checks/window-restore.mjs` in the Docker rig with Python GI and GTK 3 to check Wayland and
+X11 restoration after resolution shrink, including kiosk-created windows and oversized minimums.

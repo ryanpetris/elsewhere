@@ -55,14 +55,14 @@ impl State {
                     *window.user_data().get::<RestoreLocation>().unwrap().borrow_mut() = Some(self.fill_rect(window, false));
                 }
                 if let Some(layout) = layout.filter(|s| !s.fullscreen && !s.maximized) {
-                    let location = self.clamp_to_output(window, layout.geometry.loc);
-                    self.space.map_element(window.clone(), location, false);
+                    let geometry = self.restore_rect(window, layout.geometry);
+                    self.space.map_element(window.clone(), geometry.loc, false);
                     match window.underlying_surface() {
                         WindowSurface::Wayland(t) => {
-                            t.with_pending_state(|s| s.size = Some(layout.geometry.size));
+                            t.with_pending_state(|s| s.size = Some(geometry.size));
                             t.send_pending_configure();
                         }
-                        WindowSurface::X11(x) => { let _ = x.configure(Rectangle::new(location, layout.geometry.size)); }
+                        WindowSurface::X11(x) => { let _ = x.configure(geometry); }
                     }
                 }
             }

@@ -300,9 +300,8 @@ impl State {
             return self.place_x11(&win, &window, geo); // still filled the other way: re-fit to that rect
         }
         let saved = win.user_data().get::<RestoreLocation>().and_then(|r| r.borrow_mut().take());
-        if let Some(mut rect) = saved {
-            rect.loc = self.clamp_to_output(&win, rect.loc); // the output may have shrunk meanwhile
-            self.place_x11(&win, &window, rect);
+        if let Some(rect) = saved {
+            self.place_x11(&win, &window, self.restore_rect(&win, rect));
         }
     }
 }
