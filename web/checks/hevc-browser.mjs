@@ -1,3 +1,4 @@
+import { visibleVideoFrame } from '../src/video-frame.js';
 import { createToken } from './token-fixture.mjs';
 // Docker GPU check: a headed Wayland Chromium exposes the actual VAAPI HEVC decoder.
 import assert from 'node:assert/strict';
@@ -15,7 +16,7 @@ async function desktop(name, port, software) {
   const log = await open(`${root}/${name}.log`, 'w'); logs.push(log);
   const child = spawn(binary, ['--no-audio', '--no-rtc', '--no-tls', '--listen', `127.0.0.1:${port}`,
     '--render-node', software ? (process.env.ELSEWHERE_BROWSER_RENDER_NODE ?? '/dev/dri/renderD128') : (process.env.ELSEWHERE_RENDER_NODE ?? '/dev/dri/renderD128'),
-    '--socket-name', name, '--screen-size', '1280x720', '--codecs', software ? 'vp8' : 'hevc',
+    '--socket-name', name, '--screen-size', software ? '1600x1200' : (process.env.ELSEWHERE_SCREEN_SIZE ?? '1346x908'), '--codecs', software ? 'vp8' : (process.env.ELSEWHERE_CODECS ?? 'hevc'),
     ...(software ? ['--software-encoding'] : [])],
   { env: { ...process.env, XDG_RUNTIME_DIR: runtime, XDG_CONFIG_HOME: runtime + '/config' }, stdio: ['ignore', log.fd, log.fd] });
   children.push(child);
@@ -35,6 +36,7 @@ try {
     args: ['--no-sandbox', '--ozone-platform=wayland'],
     env: { ...process.env, XDG_RUNTIME_DIR: host, WAYLAND_DISPLAY: 'browser-host' } });
   const context = await browser.newContext({ viewport: { width: 1100, height: 800 } });
+  await context.addInitScript({ content: `window.visibleVideoFrame = ${visibleVideoFrame.toString()};` });
   await context.addInitScript(() => {
     const NativeDecoder = VideoDecoder, NativeSocket = WebSocket;
     window.hevcKeys = [];
@@ -55,7 +57,7 @@ try {
       const stream = elsewhere.store.get().stream;
       const key = hevcKeys.findLast(key => key.streamId === stream.streamId);
       let frames = 0, failure, width, height;
-      const decoder = new NativeDecoder({ output(frame) { frames++; width = frame.displayWidth; height = frame.displayHeight; frame.close(); }, error(error) { failure = error.message; } });
+      const decoder = new NativeDecoder({ output(frame) { frame = visibleVideoFrame(frame, stream); frames++; width = frame.displayWidth; height = frame.displayHeight; frame.close(); }, error(error) { failure = error.message; } });
       try {
         decoder.configure(key.config);
         decoder.decode(new EncodedVideoChunk({ type: 'key', data: key.data, timestamp: key.timestamp }));
@@ -69,6 +71,7 @@ try {
     const page = await context.newPage();
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(`http://127.0.0.1:8849/${id ? '?window=' + id : ''}#token=${token}`);
+    if (id) await page.evaluate(() => elsewhere.setChoice({ codec: 'hevc' }));
     await page.waitForFunction(() => elsewhere.store.get().stats.frames > 0 && elsewhere.store.get().streamState?.codec === 'hevc' && hevcKeys.length > 0);
     assert.ok(await page.evaluate(() => elsewhere.store.get().decodable.includes('hevc')));
     assert.equal(await page.evaluate(async () => (await VideoDecoder.isConfigSupported({ codec: hevcKeys.at(-1).config.codec,

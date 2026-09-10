@@ -8,7 +8,8 @@ See the [NVIDIA setup](../README.md#nvidia) for native and Docker requirements.
 
 Docker checks used an RTX 3070 Ti Laptop GPU, NVIDIA 610.57.04, FFmpeg 9.0.1, Arch Linux and
 Chromium 152. The headed viewer ran on a separate Intel GPU so Chromium could expose its HEVC
-decoder. H.264 and HEVC passed. The AV1 encoder probe correctly rejected this GPU; AV1 encoding
+decoder. H.264 and HEVC passed. Startup checks an initial key, a delta frame and a requested recovery key
+with increasing timestamps; NVENC forces IDRs for all three candidate codecs. The AV1 encoder probe correctly rejected this GPU; AV1 encoding
 still needs validation on hardware that supports it. Multiple physical NVIDIA GPUs and older
 FFmpeg/driver combinations were not tested. The tested FFmpeg library embeds a minimum NVIDIA
 driver requirement of 610.00, corresponding to its NVENC 13.1 build. The requirement comes from
@@ -23,18 +24,21 @@ report the required API and minimum driver when initialization fails.
 | Desktop/window Document PiP, PiP from popout, reopen and resize | `gpu-surfaces.mjs`, actual child viewer rendering |
 | Canvas2D and WebGPU | `gpu-surfaces.mjs`, pixels read from the presented canvas or GPU texture |
 | WebSocket and WebRTC | `gpu-surfaces.mjs`, active transport and fresh painted recovery picture |
+| Large desktop startup and codec fallback | 5120×1440 starts with H.264/HEVC allowed, falls back to HEVC, fresh recovery keys decode |
 | Desktop resolution changes and existing window target resize | `gpu-surfaces.mjs`, Config, normalized frame and canvas dimensions |
+| Small NVENC windows | Pictures below the startup-proven 320×180 encoder surface are black-padded; Config and the shared browser crop retain native size and input coordinates |
 | Odd native window sizes | Native 1263×869 PNG and even 1264×870 encoded window |
 | HTTP and MCP screenshots/snapshots | `screenshot-sizing.mjs`, native, width, height, percentage, DPR 1/1.5/2 |
 | Sidebar thumbnails and snapshot downloads | `thumbnails.mjs`, Wayland/X11, popups, subsurfaces, minimized windows, updates and visibility |
 | Quality, effort, reconnect and congestion adaptation | `encoding-effort.mjs`, desktop/window H.264, presets p1/p3/p5 |
 | HEVC recovery keys and encoder reopening | `hevc-browser.mjs`, fresh decoder for each requested key and quality/effort change |
+| Compositor backpressure with NVIDIA texture targets | `render-retry` with `ELSEWHERE_MEMORY_FRAMES=1`, Held/Deferred/RetryAt and final pictures |
 | Repeated viewer resize/effort changes and teardown | `viewer-lifecycle.mjs`, five isolated cycles, FDs and threads return to baseline |
 | NVENC session limit | Additional viewer fails without closing its socket, an existing viewer still paints, retry succeeds after releasing sessions |
 | Returned encoder errors | `codec-recovery.mjs`, desktop/window retry, codec fallback, exhaustion and explicit retry |
 | Fixed/automatic desktop sizing and control handoffs | `fixed-screen-size.mjs` |
 | RTMP broadcasts sharing NVIDIA readback | `broadcasts.mjs`, 30/60 fps, output dimensions and keyframes |
-| Intel VA-API, CPU-only, NVIDIA with CPU encoding | `viewer-lifecycle.mjs --colors`, primary colors, gray ramp and alpha against compositor PNGs |
+| NVIDIA NVENC H.264, Intel VA-API, CPU-only, NVIDIA with CPU encoding | `viewer-lifecycle.mjs --colors`, primary colors, gray ramp and alpha against compositor PNGs |
 
 The live edge checks include 1920×1080, 1346×908 and 1264×870. They assert the normalized picture
 and canvas dimensions and inspect all four colored edges. Original decoder dimensions remain in
@@ -104,6 +108,7 @@ ELSEWHERE_RENDER_NODE=/dev/dri/renderD129 EFFORT_CODECS=h264 EFFORT_SIZE=1920x10
 
 Replace the node with the GPU being tested. `ELSEWHERE_BROWSER_RENDER_NODE` selects the separate
 browser host for the surface/HEVC checks and defaults to `/dev/dri/renderD128`. Run checks that use
-the same listen ports sequentially. `ELSEWHERE_TEST_CAPACITY` optionally adds viewers until NVENC
+the same listen ports sequentially. For the compositor retry fixture, set `ELSEWHERE_MEMORY_FRAMES=1` with the NVIDIA render node.
+`ELSEWHERE_TEST_CAPACITY` optionally adds viewers until NVENC
 rejects another session and verifies retry after releasing sessions; choose a count above the
 particular driver's limit and run without competing GPU checks.

@@ -183,12 +183,17 @@ impl Active {
         let source = settings.source.context("missing video source")?;
         let source_size = (source.geometry.width_px, source.geometry.height_px);
         let size = settings.size.unwrap_or(source_size);
+        // NVENC must accept at least the startup probe size. Pad smaller pictures; Config keeps
+        // their visible size, and the shared browser crop preserves window and pointer geometry.
+        let encoded_size = if matches!(encoders.backend, Backend::Nvenc(_)) {
+            (size.0.max(320), size.1.max(180))
+        } else { size };
         let converter = match &encoders.backend {
             Backend::Vaapi(node) => Converter::Hardware(crate::gpu::Converter::new(node, source_size.0, source_size.1, source.fourcc, source.modifier, size)?),
-            _ => Converter::Software(SoftwareConverter::new(source_size.0, source_size.1, source.fourcc, size)?),
+            _ => Converter::Software(SoftwareConverter::new(source_size.0, source_size.1, source.fourcc, size)?.padded(encoded_size)),
         };
         let frames = match &converter { Converter::Hardware(gpu) => gpu.hw_frames_ctx(), Converter::Software(_) => std::ptr::null_mut() };
-        let encoder = VideoEncoder::open(encoders.choice(settings.codec)?, &encoders.backend, size, (source.geometry.refresh_mhz / 1000).max(1) as u32, settings.quality, settings.effort, frames)?;
+        let encoder = VideoEncoder::open(encoders.choice(settings.codec)?, &encoders.backend, encoded_size, (source.geometry.refresh_mhz / 1000).max(1) as u32, settings.quality, settings.effort, frames)?;
         let stream_id = STREAM_SEQ.fetch_add(1, Ordering::Relaxed);
         let scale = source.geometry.scale * size.0 as f64 / source_size.0 as f64;
         Ok(Self { encoder, converter, settings, epoch, stream_id, info: Some(StreamInfo { stream_id, codec: String::new(), width: size.0, height: size.1, scale }) })
@@ -281,7 +286,7 @@ fn run(shared: &Shared, encoders: &Encoders, tx: &mpsc::Sender<StreamMsg>, redra
                 let data = packet.data().context("empty video packet")?;
                 if let Some(mut info) = running.info.take() {
                     ensure!(keyframe, "first video packet is not a recovery keyframe");
-                    info.codec = crate::codec_string(settings.codec, data, info.width, info.height).context("recovery keyframe lacks codec headers")?;
+                    info.codec = running.encoder.codec_string(settings.codec, data).context("recovery keyframe lacks codec headers")?;
                     tracing::info!(codec = %info.codec, width = info.width, height = info.height, "stream started");
                     messages.push(StreamMsg::Info(epoch, info));
                 }

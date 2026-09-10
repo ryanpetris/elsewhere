@@ -200,7 +200,10 @@ YUV420P and submits it to NVENC. No compositor DMA-buf is imported into CUDA. Th
 address is matched against visible CUDA devices before probing H.264, HEVC and AV1 independently.
 Each candidate must produce a recovery keyframe; unsupported codecs are omitted. NVENC uses CBR,
 ultra-low-latency tuning, no B-frames or lookahead, and immediate output. Effort selects presets
-p1, p3 or p5. Quality changes reopen the encoder and begin a new stream with a keyframe.
+p1, p3 or p5. Pictures smaller than the startup probe surface are converted at their visible size
+into a black-padded encoder frame of at least 320×180. Config retains the visible dimensions and
+scale; the browser's shared crop strips the padding before either renderer presents it.
+Quality changes reopen the encoder and begin a new stream with a keyframe.
 
 With `--software-encoding`, the compositor supplies memory or linear DMA-buf pixels. The worker maps
 and synchronizes DMA-buf CPU access, converts through libswscale, and uses libvpx, libx264 or

@@ -52,6 +52,7 @@ try {
       constructor(init) {
         super({ ...init, output(frame) {
           probe.outputs++;
+          probe.colorSpace = frame.colorSpace.toJSON();
           probe.dimensions = [frame.codedWidth, frame.codedHeight, frame.displayWidth, frame.displayHeight];
           probe.visible = { x: frame.visibleRect.x, y: frame.visibleRect.y, width: frame.visibleRect.width, height: frame.visibleRect.height };
           init.output(frame);
@@ -64,6 +65,8 @@ try {
       if (this.canvas.matches?.('canvas.stage')) {
         probe.paints++;
         probe.painted = [args[0].displayWidth, args[0].displayHeight];
+        probe.paintedVisible = [args[0].visibleRect.width, args[0].visibleRect.height];
+        probe.paintedGeneration = probe.outputs;
       }
       return result;
     };
@@ -95,12 +98,14 @@ try {
         const imp = GPUDevice.prototype.importExternalTexture;
         GPUDevice.prototype.importExternalTexture = function (d) {
           probe.painted = [d.source.displayWidth, d.source.displayHeight];
+          probe.paintedVisible = [d.source.visibleRect.width, d.source.visibleRect.height];
           return imp.call(this, d);
         };
         const submit = GPUQueue.prototype.submit;
         GPUQueue.prototype.submit = function (commands) {
           submit.call(this, commands);
           if (!probe.texture) return;
+          const generation = probe.outputs, painted = probe.painted, visible = probe.paintedVisible;
           const device = probe.device,
             texture = probe.texture,
             width = texture.width,
@@ -117,17 +122,22 @@ try {
             .mapAsync(GPUMapMode.READ)
             .then(() => {
               const pixels = new Uint8Array(buffer.getMappedRange());
-              probe.gpuColors = [
+              const colors = [
                 [0.5, 0],
                 [0, 0.5],
                 [1, 0.5],
-                [0.5, 1]
+                [0.5, 1],
+                [0.5, 0.5]
               ].map(([x, y]) => {
                 const p =
                     Math.min(height - 1, Math.floor(y * height)) * row + Math.min(width - 1, Math.floor(x * width)) * 4,
                   c = [...pixels.slice(p, p + 4)];
                 return probe.format.startsWith('bgra') ? [c[2], c[1], c[0], c[3]] : c;
               });
+              if (generation > (probe.gpuGeneration ?? 0)) {
+                probe.gpuColors = colors; probe.gpuGeneration = generation;
+                probe.gpuPainted = painted; probe.gpuVisible = visible;
+              }
               probe.gpuReads++;
               buffer.unmap();
               buffer.destroy();
@@ -145,29 +155,34 @@ try {
   async function capture(page, name, size = null) {
     await page.waitForFunction(() => window.elsewhere?.store.get().stats.frames > 0);
     const before = await page.evaluate(() => {
-      const before = probe.paints + probe.gpuReads;
+      const before = probe.outputs;
       probe.socket.send(new Uint8Array([0x88]));
       return before;
     });
-    await page.waitForFunction(before => probe.paints + probe.gpuReads > before, before);
+    await page.waitForFunction(before => (elsewhere.store.get().renderer === 'webgpu' ? probe.gpuGeneration : probe.paintedGeneration) > before, before);
     const result = await page.evaluate(() => {
       const canvas = document.querySelector('canvas.stage'), state = elsewhere.store.get();
       let colors = probe.gpuColors;
       if (state.renderer !== 'webgpu') {
         const ctx = canvas.getContext('2d');
-        colors = [[.5, 0], [0, .5], [1, .5], [.5, 1]].map(([x, y]) => [...ctx.getImageData(
+        colors = [[.5, 0], [0, .5], [1, .5], [.5, 1], [.5, .5]].map(([x, y]) => [...ctx.getImageData(
           Math.min(canvas.width - 1, Math.floor(x * canvas.width)), Math.min(canvas.height - 1, Math.floor(y * canvas.height)), 1, 1).data]);
       }
-      return { canvas: [canvas.width, canvas.height], configured: [state.stream.width, state.stream.height], dimensions: probe.dimensions, visible: probe.visible,
-        colors, painted: probe.painted, via: state.videoVia, renderer: state.renderer, codec: state.streamState?.codec, errors: probe.errors, frames: state.stats.frames, packets: probe.packets };
+      return { canvas: [canvas.width, canvas.height], configured: [state.stream.width, state.stream.height], dimensions: probe.dimensions, visible: probe.visible, colorSpace: probe.colorSpace,
+        colors, painted: state.renderer === 'webgpu' ? probe.gpuPainted : probe.painted,
+        paintedVisible: state.renderer === 'webgpu' ? probe.gpuVisible : probe.paintedVisible, decodeErrors: state.stats.decodeErrors, via: state.videoVia, renderer: state.renderer, codec: state.streamState?.codec, errors: probe.errors, frames: state.stats.frames, packets: probe.packets };
     });
     assert.deepEqual(result.canvas, size ?? result.configured, name);
     assert.equal(result.codec, codec);
+    assert.deepEqual(result.colorSpace, { primaries: 'bt709', transfer: 'bt709', matrix: 'bt709', fullRange: false }, name + ': coded color metadata');
     assert.deepEqual(result.errors, [], name);
+    assert.equal(result.decodeErrors, 0, name);
+    assert.deepEqual(result.paintedVisible, size ?? result.configured, name + ': normalized visible rectangle');
     // Normalization may crop padded decoder pictures before they reach either renderer.
     assert.deepEqual(result.painted, size ?? result.configured, name + ': normalized picture dimensions');
     for (const [i, expected] of [[255, 0, 0], [0, 0, 255], [255, 0, 255], [255, 255, 0]].entries())
       assert(result.colors[i].slice(0, 3).every((v, c) => Math.abs(v - expected[c]) < 40), `${name}: edge ${i}: ${result.colors[i]}`);
+    assert(result.colors[4].slice(0, 3).every(v => Math.abs(v - 128) < 5), name + ': neutral gray value');
     console.log(JSON.stringify({ name, ...result }));
     return result;
   }
@@ -240,6 +255,17 @@ try {
   await odd.waitForFunction(() => elsewhere.store.get().stream.width === 1002 && elsewhere.store.get().stream.height === 706);
   await capture(odd, 'resized-window', [1002, 706]);
   console.log('Odd native window PNG, even encoding and live window resize passed');
+  const smallGpu = await context.newPage();
+  await smallGpu.goto(`${origin}/?window=${id}&renderer=webgpu#token=${token}`);
+  for (const size of [[120, 40], [160, 60]]) {
+    await main.evaluate(({ id, size }) => elsewhere.control({ id, op: 'resize', w: size[0], h: size[1] }), { id, size });
+    await odd.waitForFunction(size => elsewhere.store.get().stream.width === size[0] && elsewhere.store.get().stream.height === size[1], size);
+    await capture(odd, 'small-window', size);
+    await smallGpu.waitForFunction(size => elsewhere.store.get().stream.width === size[0] && elsewhere.store.get().stream.height === size[1], size);
+    assert.equal((await capture(smallGpu, 'small-window-webgpu', size)).renderer, 'webgpu');
+  }
+
+  await smallGpu.close();
   await main.evaluate(cmd => elsewhere.spawn(cmd), `glxinfo -B > ${root}/glx-info`);
   for (let i = 0; i < 100; i++) {
     if ((await readFile(root + '/glx-info', 'utf8').catch(() => '')).includes('OpenGL renderer string:')) break;

@@ -12,7 +12,13 @@ pub fn pci_device(node: &Path) -> Result<Option<String>> {
     Ok(Some(device.file_name().and_then(|name| name.to_str()).context("NVIDIA device has no PCI address")?.to_owned()))
 }
 
+fn pci_identity(address: &str) -> Result<[u32; 4]> {
+    let parts: Vec<_> = address.split([':', '.']).map(|part| u32::from_str_radix(part, 16)).collect::<std::result::Result<_, _>>()?;
+    parts.try_into().map_err(|_| anyhow::anyhow!("invalid PCI address: {address}"))
+}
+
 pub fn cuda_device(pci: &str) -> Result<i32> {
+    let wanted = pci_identity(pci)?;
     // Loaded only for NVENC: other backends do not need an installed NVIDIA userspace driver.
     // Each symbol's signature is from the CUDA Driver API; the library outlives every call.
     unsafe {
@@ -31,11 +37,23 @@ pub fn cuda_device(pci: &str) -> Result<i32> {
             let mut address = [0 as libc::c_char; 32];
             checked(bus(address.as_mut_ptr(), address.len() as i32, device))?;
             let address = CStr::from_ptr(address.as_ptr()).to_str()?;
-            if address.eq_ignore_ascii_case(pci) {
+            if pci_identity(address)? == wanted {
                 tracing::info!(pci, ordinal, "matched NVIDIA encoder device");
                 return Ok(ordinal);
             }
         }
     }
     bail!("selected NVIDIA render device {pci} is not visible to CUDA; check container device access and CUDA_VISIBLE_DEVICES")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn pci_domains_and_padding() {
+        assert_eq!(pci_identity("0000:01:0a.0").unwrap(), pci_identity("00000000:1:0A.0").unwrap());
+        assert_ne!(pci_identity("10000:01:00.0").unwrap(), pci_identity("0000:01:00.0").unwrap());
+        assert_ne!(pci_identity("0000:01:00.1").unwrap(), pci_identity("0000:01:00.0").unwrap());
+        assert!(pci_identity("0000:01:00").is_err());
+    }
 }

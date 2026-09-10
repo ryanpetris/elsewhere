@@ -52,10 +52,15 @@ impl Encoders {
                     let choice = Choice { codec, name, low_power };
                     let result = (|| -> Result<()> {
                         let mut enc = VideoEncoder::open(&choice, &backend, (320, 180), 30, Quality { bitrate_kbps: 1000, max_fps: 0 }, EncodingEffort::Fast, hardware.as_ref().map_or(ptr::null_mut(), |h| h.frames))?;
-                        let frame = if let Some(hardware) = &hardware { hardware.picture()? } else { black(Pixel::YUV420P, 320, 180) };
-                        let packets = enc.encode(frame, true)?;
-                        let key = packets.iter().find(|p| p.is_key()).context("encoder did not produce a recovery keyframe")?;
-                        super::codec_string(codec, key.data().context("empty keyframe")?, 320, 180).context("keyframe lacks codec configuration")?;
+                        for (index, keyframe) in [true, false, true].into_iter().enumerate() {
+                            let mut frame = if let Some(hardware) = &hardware { hardware.picture()? } else { black(Pixel::YUV420P, 320, 180) };
+                            frame.set_pts(Some(index as i64 * 1_000_000 / 30));
+                            let packets = enc.encode(frame, keyframe)?;
+                            if keyframe {
+                                let key = packets.iter().find(|p| p.is_key()).context("encoder did not produce a recovery keyframe")?;
+                                enc.codec_string(codec, key.data().context("empty keyframe")?).context("keyframe lacks codec configuration")?;
+                            }
+                        }
                         Ok(())
                     })();
                     match result {
@@ -76,11 +81,7 @@ impl Encoders {
         if let Backend::Vaapi(node) = &self.backend { return crate::gpu::probe(node, frame); }
         let size = (frame.width, frame.height);
         let mut converter = SoftwareConverter::new(size.0, size.1, frame.fourcc, size)?;
-        let picture = converter.convert(frame)?;
-        if matches!(self.backend, Backend::Nvenc(_)) {
-            VideoEncoder::open(&self.choices[0], &self.backend, size, 60,
-                Quality { bitrate_kbps: 1000, max_fps: 0 }, EncodingEffort::Fast, ptr::null_mut())?.encode(picture, true)?;
-        }
+        converter.convert(frame)?;
         Ok(())
     }
 
@@ -155,7 +156,7 @@ impl VideoEncoder {
                 options.set("rc-lookahead", "0");
                 options.set("zerolatency", "1");
                 options.set("delay", "0");
-                if choice.codec != Codec::Av1 { options.set("forced-idr", "1"); }
+                options.set("forced-idr", "1");
                 state.setting = Some(format!("preset={preset}"));
             } else {
                 match choice.name {
@@ -206,10 +207,16 @@ impl VideoEncoder {
             let mut raw_options = options.disown();
             let result = av::avcodec_open2(video.as_mut_ptr(), codec.as_ptr(), &mut raw_options);
             let unused = ffmpeg::Dictionary::own(raw_options);
-            check(result).context("open video encoder")?;
+            check(result).context(if matches!(backend, Backend::Nvenc(_)) {
+                "open NVENC encoder; check NVIDIA driver support, frame size and available encoding sessions"
+            } else { "open video encoder" })?;
             ensure!(unused.iter().next().is_none(), "video encoder rejected options: {unused:?}");
         }
         Ok(Self { context: ffmpeg::codec::encoder::video::Encoder(video), effort: state, live_rate: choice.name == "libx264" })
+    }
+
+    pub fn codec_string(&self, codec: Codec, key: &[u8]) -> Option<String> {
+        super::codec_string(codec, key, self.context.width(), self.context.height())
     }
 
     pub fn set_rate(&mut self, kbps: u32) -> Result<()> {
@@ -250,7 +257,7 @@ fn rate(context: &mut av::AVCodecContext, kbps: u32) -> Result<()> {
 
 pub(crate) fn check(code: i32) -> Result<()> { if code < 0 { Err(ffmpeg::Error::from(code).into()) } else { Ok(()) } }
 
-pub(crate) struct SoftwareConverter { context: ffmpeg::software::scaling::Context, size: (u32, u32) }
+pub(crate) struct SoftwareConverter { context: ffmpeg::software::scaling::Context, size: (u32, u32), extent: (u32, u32) }
 impl SoftwareConverter {
     pub fn new(width: u32, height: u32, fourcc: u32, target: (u32, u32)) -> Result<Self> {
         ensure!([u32::from_le_bytes(*b"XR24"), u32::from_le_bytes(*b"AR24")].contains(&fourcc), "unsupported RGB layout");
@@ -259,12 +266,21 @@ impl SoftwareConverter {
             let coefficients = av::sws_getCoefficients(av::SWS_CS_ITU709);
             check(av::sws_setColorspaceDetails(context.as_mut_ptr(), coefficients, 1, coefficients, 0, 0, 1 << 16, 1 << 16))?;
         }
-        Ok(Self { context, size: target })
+        Ok(Self { context, size: target, extent: target })
+    }
+
+    /// Keep a small picture at its native size in the top-left of a larger encoder surface.
+    pub fn padded(mut self, extent: (u32, u32)) -> Self {
+        self.extent = (extent.0.max(self.size.0), extent.1.max(self.size.1));
+        self
     }
 
     pub fn convert(&mut self, frame: Frame) -> Result<ffmpeg::frame::Video> {
         let (width, height) = (frame.width, frame.height);
-        let mut converted = ffmpeg::frame::Video::new(Pixel::YUV420P, self.size.0, self.size.1);
+        let mut converted = if self.extent == self.size {
+            ffmpeg::frame::Video::new(Pixel::YUV420P, self.size.0, self.size.1)
+        } else { black(Pixel::YUV420P, self.extent.0, self.extent.1) };
+        let converted_height = self.size.1;
         let convert = |context: &mut ffmpeg::software::scaling::Context, output: &mut ffmpeg::frame::Video, data: &[u8], stride: u32| -> Result<()> {
             ensure!(stride >= width.checked_mul(4).context("invalid RGB width")? && stride <= i32::MAX as u32, "invalid RGB stride");
             let required = (height as usize).checked_sub(1).and_then(|h| h.checked_mul(stride as usize)).and_then(|n| n.checked_add(width as usize * 4)).context("invalid RGB size")?;
@@ -274,7 +290,7 @@ impl SoftwareConverter {
                 let strides = [stride as i32, 0, 0, 0];
                 let out = &mut *output.as_mut_ptr();
                 let rows = av::sws_scale(context.as_mut_ptr(), input.as_ptr(), strides.as_ptr(), 0, height as i32, out.data.as_ptr(), out.linesize.as_ptr());
-                ensure!(rows == output.height() as i32, "incomplete RGB conversion");
+                ensure!(rows == converted_height as i32, "incomplete RGB conversion");
             }
             Ok(())
         };
