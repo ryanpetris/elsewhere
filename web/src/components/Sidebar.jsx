@@ -7,7 +7,7 @@ import { queueSnapshot, snapshot, windowIcon } from '../api.js';
 import { BroadcastsPanel } from './BroadcastsPanel.jsx';
 import { FilesPanel } from './FilesPanel.jsx';
 import { thumbnailScheduler } from '../thumbnails.js';
-import { Badge, Eyebrow, codecName, cx, windowColor } from './ui.jsx';
+import { Badge, Eyebrow, IconButton, codecName, cx, windowColor } from './ui.jsx';
 import { STATUS_BAR_HEIGHT } from './StatusBar.jsx';
 
 const TABS = [['windows', 'Windows', AppWindow], ['files', 'Files', FolderOpen], ['stats', 'Statistics', Activity], ['broadcasts', 'Broadcasts', Radio]];
@@ -125,7 +125,7 @@ function WinIcon({ w }) {
 
 function WindowRow({ viewer, w, acts, eligible, dpr }) {
   const badges = [w.fullscreen && 'fullscreen', w.maximized && 'maximized', w.minimized && 'minimized'].filter(Boolean);
-  const act = (op, e) => { e.stopPropagation(); e.currentTarget.blur(); viewer.control({ id: w.id, op }); };
+  const act = (op, e) => { e.stopPropagation(); viewer.control({ id: w.id, op }); };
   return (
     <div
       onClick={() => acts && viewer.activate(w.id)}
@@ -151,30 +151,22 @@ function WindowRow({ viewer, w, acts, eligible, dpr }) {
       </div>
       {/* the actions float over the row's end on hover, so titles keep the width */}
       <div className="absolute top-1/2 right-2 flex -translate-y-1/2 items-center gap-px rounded-md border border-line-2 bg-surface-3 p-0.5 opacity-0 shadow-pop transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-        <Action icon={ExternalLink} label="Open in New Window" onClick={e => {
-          e.stopPropagation(); e.currentTarget.blur();
+        <IconButton className="hover:bg-surface-4!" size="xs" icon={ExternalLink} label="Open in New Window" onClick={e => {
+          e.stopPropagation();
           // The window's size plus its top and status bars, so it shows 1:1.
           window.open(url(`/?window=${w.id}`), storageKey(`window-${w.id}`), `popup,width=${w.w},height=${w.h + 48 + STATUS_BAR_HEIGHT}`);
         }} />
-        {viewer.pip.supported && <Action icon={PictureInPicture2} label="Picture-in-Picture" onClick={e => { e.stopPropagation(); viewer.pip.open(w.id); }} />}
-        <Action icon={Camera} label="Snapshot (PNG)" onClick={e => {
-          e.stopPropagation(); e.currentTarget.blur();
+        {viewer.pip.supported && <IconButton className="hover:bg-surface-4!" size="xs" blurOnClick={false} icon={PictureInPicture2} label="Picture-in-Picture" onClick={e => { e.stopPropagation(); viewer.pip.open(w.id); }} />}
+        <IconButton className="hover:bg-surface-4!" size="xs" icon={Camera} label="Snapshot (PNG)" onClick={e => {
+          e.stopPropagation();
           const tab = window.open('', '_blank'); // opened now, inside the click, so popup blockers allow it
           snapshot(w.id).then(b => { tab.location = URL.createObjectURL(b); }).catch(() => tab.close());
         }} />
-        {acts && <Action icon={w.maximized ? Minimize2 : Maximize2} label={w.maximized ? 'Restore' : 'Maximize'} onClick={e => act(w.maximized ? 'unmaximize' : 'maximize', e)} />}
-        {acts && <Action icon={w.minimized ? ChevronUp : ChevronDown} label={w.minimized ? 'Restore' : 'Minimize'} onClick={e => act(w.minimized ? 'activate' : 'minimize', e)} />}
-        {acts && <Action icon={X} label="Close" onClick={e => act('close', e)} className="hover:bg-bad/15 hover:text-bad" />}
+        {acts && <IconButton className="hover:bg-surface-4!" size="xs" icon={w.maximized ? Minimize2 : Maximize2} label={w.maximized ? 'Restore' : 'Maximize'} onClick={e => act(w.maximized ? 'unmaximize' : 'maximize', e)} />}
+        {acts && <IconButton className="hover:bg-surface-4!" size="xs" icon={w.minimized ? ChevronUp : ChevronDown} label={w.minimized ? 'Restore' : 'Minimize'} onClick={e => act(w.minimized ? 'activate' : 'minimize', e)} />}
+        {acts && <IconButton size="xs" icon={X} label="Close" onClick={e => act('close', e)} tone="danger" />}
       </div>
     </div>
-  );
-}
-
-function Action({ icon: Icon, label, onClick, className = '' }) {
-  return (
-    <button type="button" title={label} aria-label={label} onClick={onClick} className={cx('inline-flex size-6 items-center justify-center rounded text-ink-3 hover:bg-surface-4 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent', className)}>
-      <Icon className="size-3.5" strokeWidth={1.75} />
-    </button>
   );
 }
 

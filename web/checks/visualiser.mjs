@@ -185,6 +185,27 @@ try {
     await checkEdges(2);
   }
   assert(await panel.locator('canvas').evaluate(c => c.width >= c.clientWidth * 1.9), 'HiDPI canvas');
+  for (const name of ['Expand', 'Pop Out Visualizer', 'Fullscreen Visualizer', 'Close Visualizer']) {
+    const button = panel.getByRole('button', { name, exact: true });
+    assert.equal(await button.innerText(), '', 'panel controls use icons');
+    assert.equal(await button.getAttribute('title'), await button.getAttribute('aria-label'));
+    assert.equal(await button.getAttribute('aria-pressed'), null, 'panel actions are not pressed toggles');
+    assert.equal((await button.boundingBox()).width, 28);
+  }
+  const sidebarToggle = page.getByRole('button', { name: 'Windows and Statistics', exact: true });
+  const pressed = await sidebarToggle.getAttribute('aria-pressed');
+  assert(['true', 'false'].includes(pressed));
+  await sidebarToggle.click();
+  assert.equal(await sidebarToggle.getAttribute('aria-pressed'), pressed === 'true' ? 'false' : 'true');
+  await sidebarToggle.click();
+  assert.equal(await sidebarToggle.getAttribute('aria-pressed'), pressed);
+  await panel.getByRole('button', { name: 'Expand', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  const collapse = panel.getByRole('button', { name: 'Collapse', exact: true });
+  assert.equal(await collapse.getAttribute('aria-expanded'), 'true');
+  assert(await collapse.evaluate(button => button === document.activeElement), 'expand keeps keyboard focus');
+  await page.keyboard.press('Space');
+  assert.equal(await panel.getByRole('button', { name: 'Expand', exact: true }).getAttribute('aria-expanded'), 'false');
   await panel.getByRole('button', { name: 'Fullscreen Visualizer', exact: true }).click();
   await page.waitForFunction(() => !!document.fullscreenElement);
   assert(await panel.isVisible(), 'fullscreen panel remains visible');

@@ -187,7 +187,12 @@ try {
 
   set('text/uri-list', 'file:///shared/copied.txt\n'); await notify();
   await panel.getByText('copied.txt', { exact: true }).waitFor();
-  const download = page.waitForEvent('download'); await panel.getByRole('button', { name: 'Download copied.txt' }).click();
+  const fileButton = panel.getByRole('button', { name: 'Download copied.txt' });
+  assert.equal(await fileButton.getAttribute('title'), 'Download copied.txt');
+  assert.equal(await fileButton.getAttribute('aria-pressed'), null, 'download is an action, not a toggle');
+  const download = page.waitForEvent('download');
+  await fileButton.focus(); await page.keyboard.press('Enter');
+  assert(await fileButton.evaluate(button => button === document.activeElement), 'clipboard download retains local focus');
   assert.equal((await download).suggestedFilename(), 'copied.txt');
   await page.keyboard.press('Escape');
   await connect('viewer', true); await open();

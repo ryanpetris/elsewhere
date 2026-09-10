@@ -120,7 +120,7 @@ export function ClipboardControl({ viewer }) {
             : state.preview !== 'available' ? <p className="text-ink-3">Preview Unavailable</p>
             : state.mime === 'image/png' && state.blob ? <ImagePreview blob={state.blob} />
             : state.files.length ? <ul className="flex flex-col gap-1">{state.files.map((name, index) => <li key={index} className="flex items-center gap-2 rounded-md bg-surface-2 px-2 py-1.5">
-              <FileText className="size-3.5 shrink-0 text-ink-4" /><span className="min-w-0 flex-1 break-all">{name}</span>{readable && permissions.includes('files.download') && <button type="button" className="btn btn-ghost size-6 shrink-0 px-0" aria-label={`Download ${name}`} title={`Download ${name}`} onClick={() => downloadClipboardFile(index, name).catch(error => setError(error.message))}><Download className="size-3.5" /></button>}
+              <FileText className="size-3.5 shrink-0 text-ink-4" /><span className="min-w-0 flex-1 break-all">{name}</span>{readable && permissions.includes('files.download') && <IconButton icon={Download} label={`Download ${name}`} size="xs" blurOnClick={false} onClick={() => downloadClipboardFile(index, name).catch(error => setError(error.message))} />}
             </li>)}</ul>
             : state.text !== null ? <pre tabIndex={0} className="max-h-64 overflow-auto rounded-lg border border-line bg-canvas p-2.5 font-mono text-xs break-words whitespace-pre-wrap text-ink focus-visible:outline-2 focus-visible:outline-accent">{state.text}</pre>
             : <p role="status" className="text-ink-3">Loading preview…</p>}

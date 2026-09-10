@@ -88,12 +88,12 @@ export function AudioPanel({ viewer, hidden = false, onClose, onPopOut, poppedOu
         <AudioLines className="size-3.5 text-ink-3" />
         <strong className="font-medium text-ink">Audio Visualizer</strong>
         <span className="ml-auto flex items-center gap-1">
-          {!poppedOut && <button type="button" className="btn btn-ghost btn-xs" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>{expanded ? <><ChevronsDownUp className="size-3" /> Collapse</> : <><ChevronsUpDown className="size-3" /> Expand</>}</button>}
+          {!poppedOut && <IconButton icon={expanded ? ChevronsDownUp : ChevronsUpDown} label={expanded ? 'Collapse' : 'Expand'} size="sm" blurOnClick={false} onClick={() => setExpanded(!expanded)} aria-expanded={expanded} />}
           {onPopOut && <IconButton icon={ExternalLink} label="Pop Out Visualizer" size="sm" onClick={onPopOut} />}
-          {document.fullscreenEnabled && <button type="button" className="btn btn-ghost btn-xs" onClick={() => {
+          {document.fullscreenEnabled && <IconButton icon={fullscreen ? Minimize : Maximize} label={fullscreen ? 'Exit Fullscreen' : 'Fullscreen Visualizer'} size="sm" blurOnClick={false} onClick={() => {
             const action = fullscreen ? document.exitFullscreen() : panel.current.requestFullscreen();
             action.catch(() => setError('Fullscreen unavailable.'));
-          }}>{fullscreen ? <><Minimize className="size-3" /> Exit Fullscreen</> : <><Maximize className="size-3" /> Fullscreen Visualizer</>}</button>}
+          }} />}
           <IconButton icon={X} label="Close Visualizer" size="sm" onClick={onClose} />
         </span>
       </div>

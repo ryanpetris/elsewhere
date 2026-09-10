@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Bell, X } from 'lucide-react';
 import { useStore } from '../store.js';
 import { notificationIcon } from '../api.js';
+import { IconButton } from './ui.jsx';
 
 // Notification bodies may carry a little markup (<b>, <a>); only their text is shown.
 const plain = html => new DOMParser().parseFromString(html, 'text/html').body.textContent ?? '';
@@ -49,7 +50,7 @@ function Toast({ n, viewer }) {
             </div>
           )}
         </div>
-        <button type="button" onClick={e => act(e, undefined)} title="Dismiss" aria-label="Dismiss" className="-mt-1 -mr-1 rounded-md p-1 text-ink-4 transition-colors hover:bg-surface-3 hover:text-ink"><X className="size-4" /></button>
+        <IconButton icon={X} label="Dismiss" size="xs" blurOnClick={false} onClick={e => act(e, undefined)} className="-mt-1 -mr-1" />
       </div>
     </div>
   );

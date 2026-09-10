@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, ChevronLeft, ChevronRight, Download, File, Folder, FolderInput, FolderPlus, Home, Link2, Loader2, Pencil, RefreshCw, Trash2, Upload, X } from 'lucide-react';
 import { useStore } from '../store.js';
 import { files, deleteFile, downloadFile, manageFile } from '../api.js';
-import { cx } from './ui.jsx';
+import { IconButton, cx } from './ui.jsx';
 
 const join = (path, name) => `${path === '/' ? '' : path}/${name}`;
 const size = n => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`;
@@ -123,9 +123,9 @@ export function FilesPanel({ viewer, open }) {
             <div className="font-mono text-[10px] text-ink-4 tabular-nums">{!folder && `${size(entry.size)} · `}{new Date(entry.modified_ms).toLocaleString()}</div>
           </div>
           <div className="flex shrink-0 items-center gap-px">
-            {downloads && downloadable && <button className="btn btn-ghost size-6 px-0" title="Download" aria-label="Download" onClick={() => downloadFile(entry.name, listing.path).catch(e => viewer.notice(e.message))}><Download className="size-3.5" /></button>}
-            {manages && <button className="btn btn-ghost size-6 px-0" title="Rename" aria-label="Rename" onClick={() => { const new_name = prompt('Rename', entry.name); if (new_name && new_name !== entry.name) mutate(path => manageFile({ op: 'rename', path, name: entry.name, new_name })); }}><Pencil className="size-3.5" /></button>}
-            {manages && entry.kind !== 'directory' && <button className="btn btn-ghost size-6 px-0 hover:bg-bad/10 hover:text-bad" title="Delete" aria-label="Delete" onClick={() => { if (confirm(`Delete ${entry.name}?`)) mutate(path => deleteFile(entry.name, path)); }}><Trash2 className="size-3.5" /></button>}
+            {downloads && downloadable && <IconButton icon={Download} label="Download" size="xs" blurOnClick={false} onClick={() => downloadFile(entry.name, listing.path).catch(e => viewer.notice(e.message))} />}
+            {manages && <IconButton icon={Pencil} label="Rename" size="xs" blurOnClick={false} onClick={() => { const new_name = prompt('Rename', entry.name); if (new_name && new_name !== entry.name) mutate(path => manageFile({ op: 'rename', path, name: entry.name, new_name })); }} />}
+            {manages && entry.kind !== 'directory' && <IconButton icon={Trash2} label="Delete" size="xs" tone="danger" blurOnClick={false} onClick={() => { if (confirm(`Delete ${entry.name}?`)) mutate(path => deleteFile(entry.name, path)); }} />}
           </div>
         </div>;
       })}

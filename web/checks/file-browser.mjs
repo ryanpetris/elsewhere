@@ -464,7 +464,7 @@ try {
                0);
   await ro.locator('#clipboard-toggle').click();
   const clipboardPanel = ro.getByRole('dialog', {name : 'Desktop Clipboard', exact : true});
-  await clipboardPanel.getByText('Preview unavailable', {exact : true}).waitFor();
+  await clipboardPanel.getByText('Preview Unavailable', {exact : true}).waitFor();
   assert.equal(
       await clipboardPanel.getByRole('button', {name : /^Download /}).count(),
       0);
@@ -505,6 +505,12 @@ try {
   await p.waitForFunction(() => elsewhere.store.get().stats.frames > 0);
   await p.screenshot({path : root + '/file-browser.png'});
   console.log('Native keyboard input and video frames passed');
+  const fileDownload = q.locator('[data-file-name="client-b.txt"]').getByRole('button', {name: 'Download', exact: true});
+  assert.equal(await fileDownload.getAttribute('aria-pressed'), null);
+  const downloaded = q.waitForEvent('download');
+  await fileDownload.focus(); await q.keyboard.press('Enter');
+  assert.equal((await downloaded).suggestedFilename(), 'client-b.txt');
+  assert(await fileDownload.evaluate(button => button === document.activeElement), 'file download retains local focus');
   const otherRequests = requests.length;
   q.once('dialog', dialog => dialog.accept('renamed.txt'));
   await q.locator('[data-file-name="client-b.txt"]')

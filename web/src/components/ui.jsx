@@ -3,8 +3,8 @@
 /// Class names, skipping the falsy ones.
 export const cx = (...parts) => parts.filter(Boolean).join(' ');
 
-/// An icon button; `active` marks a toggle that is on. Focus leaves it after a click so keys go to the desktop.
-export function IconButton({ icon: Icon, label, active = false, onClick, className = '', size = 'md', tone = 'neutral', ...props }) {
+/// An icon button; `active` gives toggle semantics. Local actions can retain focus with `blurOnClick={false}`.
+export function IconButton({ icon: Icon, label, active, onClick, blurOnClick = true, className = '', size = 'md', tone = 'neutral', ...props }) {
   return (
     <button
       {...props}
@@ -12,7 +12,7 @@ export function IconButton({ icon: Icon, label, active = false, onClick, classNa
       title={label}
       aria-label={label}
       aria-pressed={active}
-      onClick={e => { onClick?.(e); e.currentTarget.blur(); }}
+      onClick={e => { onClick?.(e); if (blurOnClick) e.currentTarget.blur(); }}
       className={cx(
         'inline-flex shrink-0 items-center justify-center rounded-md transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent',
         size === 'sm' ? 'size-7' : size === 'xs' ? 'size-6' : 'size-8',
