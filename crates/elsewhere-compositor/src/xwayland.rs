@@ -102,7 +102,7 @@ impl XwmHandler for State {
 
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, window: X11Surface) {
         // menus, tooltips: they know where they want to be
-        let loc = window.geometry().loc;
+        let loc = window.last_configure().loc + window.geometry().loc;
         self.space.map_element(Window::new_x11_window(window), loc, false);
         self.dirty = true;
     }
@@ -127,8 +127,8 @@ impl XwmHandler for State {
     }
 
     fn configure_request(&mut self, _xwm: XwmId, window: X11Surface, _x: Option<i32>, _y: Option<i32>, w: Option<u32>, h: Option<u32>, _reorder: Option<Reorder>) {
-        // clients may pick their size, not their position
-        let mut geo = window.geometry();
+        // Clients may pick their size; all other root coordinates retain the last configure.
+        let mut geo = window.last_configure();
         if let Some(w) = w {
             geo.size.w = w as i32;
         }
@@ -140,9 +140,11 @@ impl XwmHandler for State {
 
     fn configure_notify(&mut self, _xwm: XwmId, window: X11Surface, geometry: Rectangle<i32, Logical>, _above: Option<u32>) {
         if let Some(win) = self.window_for_x11(&window) {
+            // Space locations include the visible-geometry offset of override-redirect windows.
+            let loc = geometry.loc + if window.is_override_redirect() { window.geometry().loc } else { (0, 0).into() };
             // map_element puts the window on top, so only remap when it actually moved
-            if self.space.element_location(&win) != Some(geometry.loc) {
-                self.space.map_element(win, geometry.loc, false);
+            if self.space.element_location(&win) != Some(loc) {
+                self.space.map_element(win, loc, false);
             }
             self.dirty = true;
         }
