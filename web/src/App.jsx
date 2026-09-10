@@ -116,7 +116,7 @@ export function App({ viewer }) {
       </div>
       {audioPanel && !windowMode && <AudioPanel viewer={viewer} hidden={hidden} onClose={() => setAudioPanel(false)} onPopOut={() => { if (viewer.panels.open('audio')) setAudioPanel(false); }} />}
       {mixerPanel && !windowMode && <MixerPanel viewer={viewer} hidden={hidden} onPopOut={() => { if (viewer.panels.open('mixer')) setMixerPanel(false); }} onClose={() => { setMixerPanel(false); document.getElementById('session-mixer-toggle')?.focus(); }} />}
-      {!PIP && <StatusBar terminal={terminal} onTerminal={!windowMode ? toggleTerminal : undefined} controlsHidden={hidden} onShowControls={() => viewer.setControlsHidden(false)} mixerPanel={mixerPanel} onMixer={!windowMode ? () => { if (viewer.panels.focus('mixer')) return; viewer.setControlsHidden(false); setMixerPanel(hidden || !mixerPanel); } : undefined} viewer={viewer} audioPanel={audioPanel} onAudioPanel={!windowMode ? () => { if (viewer.panels.focus('audio')) return; viewer.setControlsHidden(false); setAudioPanel(hidden || !audioPanel); } : undefined} />}
+      {!PIP && <StatusBar canType={canType} terminal={terminal} onTerminal={!windowMode ? toggleTerminal : undefined} controlsHidden={hidden} onShowControls={() => viewer.setControlsHidden(false)} mixerPanel={mixerPanel} onMixer={!windowMode ? () => { if (viewer.panels.focus('mixer')) return; viewer.setControlsHidden(false); setMixerPanel(hidden || !mixerPanel); } : undefined} viewer={viewer} audioPanel={audioPanel} onAudioPanel={!windowMode ? () => { if (viewer.panels.focus('audio')) return; viewer.setControlsHidden(false); setAudioPanel(hidden || !audioPanel); } : undefined} />}
       {(status === 'no-token' || status === 'unauthorized') && <TokenForm viewer={viewer} />}
     </div>
   );

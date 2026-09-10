@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
-import { CONFIG, ROLE, CLIPBOARD, KEY } from '../src/protocol.js';
+import { CONFIG, ROLE, CLIPBOARD, KEY, INPUT } from '../src/protocol.js';
 
 const root = await mkdtemp('/tmp/elsewhere-clipboard-panel-');
 let serial = 0, operation = 0, clipboard, queued = [], previewReads = 0, fileReads = 0, failWrite = false, delayPreview, releasePreview;
@@ -94,6 +94,8 @@ try {
   const panel = page.getByRole('dialog', { name: 'Desktop Clipboard', exact: true });
   const toggle = page.locator('#clipboard-toggle');
   const open = () => toggle.click();
+  const typed = () => page.evaluate(INPUT => sent.filter(packet => packet[0] === INPUT).map(packet => JSON.parse(new TextDecoder().decode(Uint8Array.from(packet.slice(1))))), INPUT);
+  const typeButton = panel.getByRole('button', { name: 'Type Text', exact: true });
   const text = value => panel.locator('pre').filter({ hasText: value });
   const applyWrite = () => { const write = queued.shift(); assert.ok(write); set('text/plain;charset=utf-8', write.text, { operation: write.operation }); };
 
@@ -108,9 +110,17 @@ try {
   await page.keyboard.press('Control+c');
   await page.keyboard.press('a');
   assert.deepEqual(await page.evaluate(KEY => sent.filter(p => p[0] === KEY), KEY), [], 'preview keydown and keyup stay local');
+  assert.equal(await typeButton.getAttribute('aria-describedby'), 'clipboard-typing-help');
+  await typeButton.click();
+  await panel.waitFor({ state: 'hidden' });
+  assert.deepEqual(await typed(), [{ type: 'text', text: 'initial private text' }]);
+  assert.equal(queued.length, 0, 'typing does not save the clipboard');
+  assert(await page.locator('canvas.stage').evaluate(canvas => canvas === document.activeElement));
+  await open();
   const copiesBeforeOwnerClear = await page.evaluate(() => copies.length);
   set(null); await notify();
   await panel.getByText('Clipboard Empty', { exact: true }).waitFor();
+  assert(await typeButton.isDisabled(), 'empty clipboard cannot be typed');
   assert.equal(await page.evaluate(() => copies.length), copiesBeforeOwnerClear, 'owner clear must not erase the browser clipboard');
   const beforeLive = previewReads;
   set('text/plain;charset=utf-8', 'live text'); await notify();
@@ -134,6 +144,13 @@ try {
   await panel.getByRole('textbox').press('a');
   await panel.getByRole('textbox').fill('  draft\n');
   assert.deepEqual(await page.evaluate(KEY => sent.filter(p => p[0] === KEY), KEY), [], 'local typing stays local');
+  await typeButton.focus(); await page.keyboard.press('Enter');
+  await panel.waitFor({ state: 'hidden' });
+  assert.deepEqual(await typed(), [{ type: 'text', text: '  draft\n' }]);
+  assert.equal(clipboard.data.toString(), ' \n\t', 'typing a draft preserves clipboard contents');
+  assert.equal(queued.length, 0);
+  await open();
+  assert.equal(await panel.getByRole('textbox').inputValue(), '  draft\n');
   set('text/plain;charset=utf-8', 'external'); await notify();
   await panel.getByText('Clipboard Changed', { exact: true }).waitFor();
   assert.equal(await panel.getByRole('textbox').inputValue(), '  draft\n');
@@ -155,6 +172,7 @@ try {
   const png = Buffer.from(await page.evaluate(() => { const c = document.createElement('canvas'); c.width = 2; c.height = 3; return c.toDataURL('image/png').split(',')[1]; }), 'base64');
   set('image/png', png); await notify();
   await panel.getByRole('img').waitFor(); await panel.getByText('2 × 3').waitFor();
+  assert.equal(await typeButton.count(), 0, 'images cannot be typed');
   assert.equal(await page.evaluate(() => liveUrls.size), 1);
   await page.keyboard.press('Escape'); await panel.waitFor({ state: 'hidden' });
   await wait(() => page.evaluate(() => liveUrls.size === 0));
@@ -187,6 +205,7 @@ try {
 
   set('text/uri-list', 'file:///shared/copied.txt\n'); await notify();
   await panel.getByText('copied.txt', { exact: true }).waitFor();
+  assert.equal(await typeButton.count(), 0, 'file lists cannot be typed');
   const fileButton = panel.getByRole('button', { name: 'Download copied.txt' });
   assert.equal(await fileButton.getAttribute('title'), 'Download copied.txt');
   assert.equal(await fileButton.getAttribute('aria-pressed'), null, 'download is an action, not a toggle');
@@ -203,6 +222,7 @@ try {
 
   set('text/plain;charset=utf-8', 'before slow read'); await connect();
   delayPreview = true; await open(); await wait(() => !!releasePreview);
+  assert(await typeButton.isDisabled(), 'loading text cannot be typed');
   set(null); await notify(); await panel.getByText('Clipboard Empty', { exact: true }).waitFor();
   releasePreview(); releasePreview = null;
   await new Promise(resolve => setTimeout(resolve, 150));
@@ -227,6 +247,7 @@ try {
   assert.equal(await page.evaluate(() => copies.length), copiesBeforeReconnect, 'reconnect refresh does not copy to browser');
   assert.equal(await panel.getByRole('textbox').inputValue(), 'cannot save', 'reconnect preserves draft');
   await page.evaluate(ROLE => packet([ROLE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ROLE);
+  assert(await typeButton.isDisabled(), 'input role revocation disables typing preserved drafts');
   assert.equal(await panel.getByRole('button', { name: 'Replace with Draft' }).isDisabled(), false, 'clipboard grant does not depend on input role');
   await page.evaluate(ROLE => packet([ROLE, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ROLE);
   await page.waitForFunction(() => elsewhere.store.get().clipboardState.text === 'after reconnect');
@@ -234,6 +255,24 @@ try {
   await page.mouse.click(1, 1);
   await panel.waitFor({ state: 'hidden' });
   assert.equal(await toggle.evaluate(el => document.activeElement === el), true, 'outside click restores toggle focus');
+  set('text/plain;charset=utf-8', 'permission check');
+  await connect('viewer', true); await open(); await text('permission check').waitFor();
+  assert(await typeButton.isDisabled(), 'view-only window cannot type');
+  await typeButton.dispatchEvent('click');
+  assert.deepEqual(await typed(), []);
+  await connect(); await open(); await text('permission check').waitFor();
+  await page.evaluate(() => elsewhere.store.set({ role: 'participant' }));
+  assert(await typeButton.isDisabled(), 'desktop participant cannot type');
+  await typeButton.dispatchEvent('click');
+  assert.deepEqual(await typed(), []);
+  await page.evaluate(() => elsewhere.store.set({ role: 'controller', status: 'retrying' }));
+  assert(!await typeButton.count() || await typeButton.isDisabled(), 'disconnected controller cannot type');
+  assert.deepEqual(await typed(), []);
+  await connect('control', true); await open(); await text('permission check').waitFor();
+  await page.evaluate(() => elsewhere.store.set({ role: 'participant' }));
+  assert(await typeButton.isEnabled(), 'authorized window input does not require desktop control ownership');
+  await typeButton.click();
+  assert.deepEqual(await typed(), [{ type: 'text', text: 'permission check' }]);
   assert.deepEqual(errors, []);
   assert.deepEqual(await page.evaluate(() => failures), []);
   console.log('clipboard panel: state, whitespace, drafts/conflicts, observed writes, clear, PNG limits, files/restrictions, stale reads, local input, viewport, failures and disconnect passed');

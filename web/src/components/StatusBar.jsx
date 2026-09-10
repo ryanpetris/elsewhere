@@ -144,7 +144,7 @@ function Metric({ icon: Icon, value, width, title, warn = false, className = '' 
 
 const control = 'inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md px-1.5 font-sans text-[11px] font-medium text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent aria-expanded:bg-accent/15 aria-expanded:text-accent-2';
 
-export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixer, terminal, onTerminal, controlsHidden, onShowControls }) {
+export function StatusBar({ viewer, canType, audioPanel, onAudioPanel, mixerPanel, onMixer, terminal, onTerminal, controlsHidden, onShowControls }) {
   const panelWindows = useStore(viewer.store, st => st.panelWindows);
   const s = useStore(viewer.store, st => st.stats);
   const renderer = useStore(viewer.store, st => st.renderer);
@@ -246,7 +246,7 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
           </div>
         </Popover>, document.querySelector('[data-viewer]') ?? document.body)}
       <span className="ml-auto flex min-w-8 items-center gap-1 overflow-x-auto [scrollbar-width:none] sm:gap-1.5">
-        <ClipboardControl viewer={viewer} />
+        <ClipboardControl viewer={viewer} canType={canType} />
         {onTerminal && status === 'connected' && permissions.includes('commands.execute') && (
           <button id="terminal-toggle" type="button" aria-label="Terminal" title="Terminal" aria-expanded={terminal && !controlsHidden} onClick={onTerminal} className={control}>
             <Terminal className="size-3.5" />

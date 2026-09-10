@@ -402,7 +402,10 @@ The status bar's clipboard button opens a preview of the desktop clipboard. Text
 edited or cleared; images have a bounded preview, and copied files have download buttons. An unfinished
 text draft survives closing the panel. If another application copies while you edit, the panel lets
 you load that content or replace it with your draft. Opening the panel does not change the browser's
-clipboard. View-only sessions can inspect permitted content but cannot edit it or download copied files.
+clipboard. Type Text sends the preview or unsaved draft as keystrokes to the focused application.
+It uses the active keyboard layout, with Enter for newlines and Tab for tabs; unsupported characters
+are skipped. Save changes the clipboard without typing. View-only sessions can inspect permitted
+content but cannot edit it or download copied files.
 
 ## Agents: MCP and skill
 

@@ -39,7 +39,7 @@ function ImagePreview({ blob }) {
   </>;
 }
 
-export function ClipboardControl({ viewer }) {
+export function ClipboardControl({ viewer, canType }) {
   const state = useStore(viewer.store, s => s.clipboardState);
   const permissions = useStore(viewer.store, s => s.permissions);
   const status = useStore(viewer.store, s => s.status);
@@ -74,6 +74,17 @@ export function ClipboardControl({ viewer }) {
     finally { setPending(false); }
   };
   const loading = readable && (state.status === 'loading' || state.status === 'ready' && state.preview === 'loading');
+  const typingText = draft?.text ?? (readable && editable && state.status === 'ready' && state.preview === 'available' ? text : '');
+  const typingReason = status !== 'connected' ? 'Connect to type text.' : !canType ? 'Keyboard control is unavailable.'
+    : pending ? 'Wait for the clipboard write to finish.' : loading ? 'Wait for clipboard text to load.'
+    : !typingText.length ? 'Enter text to type.' : '';
+  const typingEnabled = !typingReason;
+  const type = () => {
+    if (!typingEnabled) return;
+    viewer.type(typingText);
+    setOpen(false);
+    document.querySelector('canvas.stage')?.focus({ preventScroll: true });
+  };
   const label = !readable ? 'Write Desktop Clipboard' : loading ? 'Desktop Clipboard: Loading'
     : state.status === 'unavailable' ? 'Desktop Clipboard: Unavailable'
     : state.present ? 'Desktop Clipboard: Has Contents' : 'Desktop Clipboard: Empty';
@@ -129,6 +140,10 @@ export function ClipboardControl({ viewer }) {
             <button type="button" className="btn btn-outline btn-xs" disabled={pending || (readable && state.status !== 'ready')} onClick={() => write('')}>Clear</button>
           </div>}
         </>}
+        {(draft || editable) && <div className="flex flex-col items-end gap-2 border-t border-line pt-3">
+          <button type="button" className="btn btn-outline btn-xs" disabled={!typingEnabled} title={typingReason || undefined} aria-describedby="clipboard-typing-help" onClick={type}>Type Text</button>
+          <p id="clipboard-typing-help" className="text-xs text-ink-3">Types through the active keyboard layout. Newlines press Enter; tabs press Tab. Unsupported characters are skipped.</p>
+        </div>}
         {pending && <p role="status" className="flex items-center gap-2 text-ink-3"><LoaderCircle className="size-3 animate-spin" /> Saving…</p>}
         {(error || state.error) && <p role="alert" className="callout callout-bad">{error || state.error}</p>}
       </div>
