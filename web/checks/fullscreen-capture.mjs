@@ -30,7 +30,7 @@ window.sent = []; window.errors = [];
 addEventListener('unhandledrejection', event => errors.push(String(event.reason)));
 window.WebSocket = class {
   static OPEN = 1; readyState = 1;
-  constructor() { window.socket = this; queueMicrotask(() => this.onopen?.({})); }
+  constructor() { window.socket = this; queueMicrotask(() => { this.onopen?.({}); this.onmessage?.({ data: new Uint8Array([0x15, ...new TextEncoder().encode(JSON.stringify(["desktop.view", "desktop.control", "clipboard.read", "clipboard.write"]))]).buffer }); }); }
   send(data) { sent.push([...new Uint8Array(data)]); }
   close() {}
 };
@@ -45,7 +45,7 @@ if (!isSecureContext) window.VideoDecoder = class {
 const server = createServer(async (req, res) => {
   try {
     const path = new URL(req.url, 'http://localhost').pathname;
-    if (path === '/api/me') { res.setHeader('Content-Type', 'application/json'); return res.end(JSON.stringify({ permissions: ['desktop.view', 'desktop.control', 'clipboard.read', 'clipboard.write'] })); }
+
     if (path.startsWith('/api/')) { res.setHeader('Content-Type', 'application/json'); return res.end('[]'); }
     res.setHeader('Content-Type', path.endsWith('.js') ? 'text/javascript' : path.endsWith('.css') ? 'text/css' : 'text/html');
     let data = await readFile(new URL('../dist/' + (path === '/' ? 'index.html' : path.slice(1)), import.meta.url));

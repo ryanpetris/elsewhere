@@ -8,7 +8,7 @@ const server = createServer(async (req, res) => {
   try {
     const path = new URL(req.url, 'http://localhost').pathname;
     if (path === '/api/codecs') { res.setHeader('Content-Type', 'application/json'); return res.end(JSON.stringify([{ codec: 'vp8', hardware: false }])); }
-    if (path === '/api/me') { res.setHeader('Content-Type', 'application/json'); return res.end(JSON.stringify({ permissions: ['desktop.view', 'desktop.control', 'apps.launch', 'commands.execute', 'server.manage', 'clipboard.read', 'clipboard.write', 'audio.listen', 'files.browse', 'broadcasts.manage'] })); }
+
     if (path.startsWith('/api/')) { res.setHeader('Content-Type', 'application/json'); return res.end(path === '/api/applications' ? JSON.stringify([{ id: 'local-test.desktop', name: 'Local Test', categories: ['Utility'] }]) : '[]'); }
     const data = await readFile(new URL('../dist/' + (path === '/' ? 'index.html' : path.slice(1)), import.meta.url));
     res.setHeader('Content-Type', path.endsWith('.js') ? 'text/javascript' : path.endsWith('.css') ? 'text/css' : 'text/html');
@@ -25,7 +25,7 @@ try {
     window.WebSocket = class extends EventTarget {
       static OPEN = 1;
       readyState = 1;
-      constructor() { super(); window.socket = this; queueMicrotask(() => this.onopen?.({})); }
+      constructor() { super(); window.socket = this; queueMicrotask(() => { this.onopen?.({}); this.onmessage?.({ data: new Uint8Array([0x15, ...new TextEncoder().encode(JSON.stringify(["desktop.view", "desktop.control", "apps.launch", "commands.execute", "server.manage", "clipboard.read", "clipboard.write", "audio.listen", "files.browse", "broadcasts.manage"]))]).buffer }); }); }
       send(data) { window.sent.push([...new Uint8Array(data)]); }
       close() {}
     };

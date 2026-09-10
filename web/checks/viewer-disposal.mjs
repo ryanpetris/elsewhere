@@ -12,7 +12,7 @@ const server = createServer(async (req, res) => {
   const path = new URL(req.url, 'http://localhost').pathname;
   if (path.startsWith('/api/')) {
     res.setHeader('Content-Type', 'application/json');
-    return res.end(JSON.stringify(path === '/api/codecs' ? [{ codec: 'vp8', hardware: false }] : path === '/api/me' ? { permissions: ['desktop.view', 'desktop.control', 'clipboard.read', 'clipboard.write'] } : path === '/api/clipboard/state' ? { observation: 'fixture:0', operation: null, present: false, mime: null, size: 0, preview: 'empty' } : []));
+    return res.end(JSON.stringify(path === '/api/codecs' ? [{ codec: 'vp8', hardware: false }] : path === '/api/clipboard/state' ? { observation: 'fixture:0', operation: null, present: false, mime: null, size: 0, preview: 'empty' } : []));
   }
   try {
     res.setHeader('Content-Type', path.endsWith('.js') ? 'text/javascript' : path.endsWith('.css') ? 'text/css' : 'text/html');
@@ -63,7 +63,7 @@ try {
       }
       window.WebSocket = class {
         static OPEN = 1; readyState = 1;
-        constructor() { window.socket = this; queueMicrotask(() => this.onopen?.({})); }
+        constructor() { window.socket = this; queueMicrotask(() => { this.onopen?.({}); this.onmessage?.({ data: new Uint8Array([0x15, ...new TextEncoder().encode(JSON.stringify(["desktop.view", "desktop.control", "clipboard.read", "clipboard.write"]))]).buffer }); }); }
         send() {} close() {}
       };
       let seq = 0;

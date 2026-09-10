@@ -146,3 +146,7 @@ backup if they must also be restored.
 Permissions gate application features; they do not isolate programs sharing the server's OS user.
 A desktop terminal, command, or filesystem access that reaches the database can manage credentials
 directly. Keep that limit in mind when assigning desktop control, file access or execution grants.
+
+The viewer receives its permission list from the authenticated desktop or window WebSocket.
+It starts and reconnects without a permission HTTP preflight. A token denied desktop viewing stays
+valid for its other grants; the viewer reports the denial and retains the token.

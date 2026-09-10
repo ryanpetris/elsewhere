@@ -11,7 +11,7 @@ import { createStore } from './store.js';
 import { startMic, stopMic } from './mic.js';
 import { startCam, stopCam } from './cam.js';
 import { openRtc, rtcEndpoint, RTC_TIMING } from './rtc.js';
-import { DISPLAY, CONFIG, VIDEO, CURSOR, POINTER_LOCK, AUDIO, WINDOWS, CLIPBOARD, ROLE, NOTICE, CLIPBOARD_DATA, NOTIFICATIONS, STREAM_STATE, RTC, ROLES, CODEC_FAMILIES, EFFORTS, PRESETS, AUTH, HELLO, RESIZE, MOTION_ABS, MOTION_REL, BUTTON, AXIS, KEY, REQUEST_KEYFRAME, BLUR, POINTER_LOCK_LOST, POINTER_LOCK_GAINED, CONTROL, SET_CLIPBOARD, TAKE_CONTROL, NOTIFY, STREAM, DRAG, INPUT, TOUCH, MIC, CAM, RTC_CLIENT, REPORT, BTN, MIXER_STATE, MIXER_LEVELS, MIXER_ERROR, MIXER_CLIENT, SESSION, HANDOFF, FILE_RESULT } from './protocol.js';
+import { PERMISSIONS, DISPLAY, CONFIG, VIDEO, CURSOR, POINTER_LOCK, AUDIO, WINDOWS, CLIPBOARD, ROLE, NOTICE, CLIPBOARD_DATA, NOTIFICATIONS, STREAM_STATE, RTC, ROLES, CODEC_FAMILIES, EFFORTS, PRESETS, AUTH, HELLO, RESIZE, MOTION_ABS, MOTION_REL, BUTTON, AXIS, KEY, REQUEST_KEYFRAME, BLUR, POINTER_LOCK_LOST, POINTER_LOCK_GAINED, CONTROL, SET_CLIPBOARD, TAKE_CONTROL, NOTIFY, STREAM, DRAG, INPUT, TOUCH, MIC, CAM, RTC_CLIENT, REPORT, BTN, MIXER_STATE, MIXER_LEVELS, MIXER_ERROR, MIXER_CLIENT, SESSION, HANDOFF, FILE_RESULT } from './protocol.js';
 
 const AUDIO_LEAD = 0.06;
 const qualityName = name => PRESETS.includes(name) ? name : 'medium';
@@ -171,16 +171,9 @@ export function createViewer() {
     if (disposed) return;
     clearTimeout(reconnectTimer);
     if (!TOKEN) { store.set({ status: 'no-token' }); return; }
+    store.set({ permissions: [] });
     let capabilities;
     try {
-      const response = await api('/api/me', { signal: AbortSignal.timeout(5000) });
-      if (disposed) return;
-      if (response.status === 401) { forgetToken(); store.set({ status: 'unauthorized', permissions: [], reason: 'Invalid or expired token' }); return; }
-      if (!response.ok) throw Error('Could not load permissions');
-      const { permissions } = await response.json();
-      if (disposed) return;
-      store.set({ permissions });
-      if (!can('desktop.view')) { store.set({ status: 'unauthorized', reason: 'This token does not allow desktop viewing' }); return; }
       capabilities = await discoverCodecs();
       if (disposed) return;
       if (!capabilities.length) { store.set({ status: 'error', reason: 'This browser cannot decode any available video codec' }); return; }
@@ -199,12 +192,8 @@ export function createViewer() {
       send(AUTH, t.length, dv => new Uint8Array(dv.buffer, 1).set(t));
       store.set({ status: 'connecting', streamState: null, codecs: [] });
       sendHello();
-      if (disposed || ws !== socket || socket.readyState !== WebSocket.OPEN) return;
-      if (mixerSubscribed) sendText(MIXER_CLIENT, JSON.stringify({ op: 'subscribe', enabled: true }));
-      if (!WINDOW) sendResize(); // a window stream is the window's size
-      else if (document.hasFocus()) sendControl({ id: +WINDOW, op: 'activate' }); // a popup is focused before its script runs
     };
-    ws.onmessage = e => { if (!disposed && ws === socket) onMessage(e.data); };
+    ws.onmessage = e => { if (!disposed && ws === socket && socket.readyState === WebSocket.OPEN) onMessage(e.data); };
     ws.onclose = e => {
       if (disposed || ws !== socket) return;
       forwardedKeys.clear();
@@ -219,9 +208,9 @@ export function createViewer() {
       recovery('unavailable', 'WebSocket disconnected');
       uploadAbort?.abort();
       store.set({ display: null, permissions: [], sessionId: null, role: null, playback: null, audioAvailable: false, micAvailable: false, camAvailable: false, rtcAvailable: false, videoVia: 'websocket' });
-      if (e.code === 4001) {
+      if (e.code === 4001 || e.code === 4004) {
         stream = null;
-        forgetToken();
+        if (e.code === 4001) forgetToken();
         if (document.fullscreenElement) document.exitFullscreen(); // restore the viewer controls for authentication
         store.set({ status: 'unauthorized', reason: e.reason || 'wrong token', stream: null });
         return;
@@ -331,7 +320,7 @@ export function createViewer() {
 
   // The output takes the stage's size (CSS px × devicePixelRatio); in window mode a Resize resizes the window.
   function sendResize() {
-    if (!stage.w || !stage.h) return;
+    if (!can(WINDOW ? 'desktop.control' : 'desktop.view') || !stage.w || !stage.h) return;
     send(RESIZE, 8, dv => {
       dv.setUint16(1, Math.round(stage.w), true);
       dv.setUint16(3, Math.round(stage.h), true);
@@ -386,6 +375,13 @@ export function createViewer() {
     windowBytes += buf.byteLength;
     const dv = new DataView(buf);
     switch (dv.getUint8(0)) {
+      case PERMISSIONS: {
+        store.set({ permissions: JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 1))) });
+        if (mixerSubscribed && can('audio.listen')) sendText(MIXER_CLIENT, JSON.stringify({ op: 'subscribe', enabled: true }));
+        if (!WINDOW) sendResize();
+        else if (document.hasFocus()) sendControl({ id: +WINDOW, op: 'activate' });
+        break;
+      }
       case CONFIG: {
         const next = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 1)));
         if (next.attempt < state().streamState?.attempt || configuredSocket === ws && next.attempt < stream?.attempt) break;
@@ -837,7 +833,7 @@ export function createViewer() {
     clearTimeout(reconnectTimer); clearInterval(statsTimer);
     closeRtc(false);
     ws?.close();
-    store.set({ status: 'closed', sessionId: null, role: null, stream: null, windows: [] });
+    store.set({ status: 'closed', permissions: [], sessionId: null, role: null, stream: null, windows: [] });
     recovery('unavailable', 'Viewer closed');
   }
 

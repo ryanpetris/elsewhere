@@ -22,7 +22,6 @@ const server = createServer(async (req, res) => {
   const restricted = req.headers.authorization === 'Bearer viewer' && clipboard.mime === 'text/uri-list';
   const json = (value, code = 200) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)); };
   if (path === '/api/codecs') return json([{ codec: 'vp8', hardware: false }]);
-  if (path === '/api/me') return json({ permissions: req.headers.authorization === 'Bearer viewer' ? ['desktop.view', 'clipboard.read'] : ['desktop.view', 'desktop.control', 'clipboard.read', 'clipboard.write', 'files.upload', 'files.download'] });
   if (path === '/api/clipboard/state') return json(meta(restricted));
   if (path === '/api/clipboard' && req.method === 'PUT') {
     if (req.headers.authorization === 'Bearer viewer') return json({}, 403);
@@ -65,7 +64,14 @@ try {
     window.WebSocket = class {
       static OPEN = 1; readyState = 1;
       constructor() { window.socket = this; queueMicrotask(() => this.onopen?.({})); }
-      send(data) { sent.push([...new Uint8Array(data)]); }
+      send(data) {
+        const bytes = new Uint8Array(data); sent.push([...bytes]);
+        if (bytes[0] === 0x80) {
+          const token = new TextDecoder().decode(bytes.subarray(1));
+          const grants = token === 'viewer' ? ['desktop.view', 'clipboard.read'] : ['desktop.view', 'desktop.control', 'clipboard.read', 'clipboard.write', 'files.upload', 'files.download'];
+          queueMicrotask(() => this.onmessage({ data: new Uint8Array([0x15, ...new TextEncoder().encode(JSON.stringify(grants))]).buffer }));
+        }
+      }
       close() {}
     };
     window.packet = bytes => socket.onmessage({ data: new Uint8Array(bytes).buffer });
@@ -190,7 +196,7 @@ try {
   failWrite = false; await panel.getByRole('button', { name: 'Save', exact: true }).click(); await wait(() => queued.length === 1);
   await panel.getByRole('alert').filter({ hasText: /not confirmed|timed out/ }).waitFor({ timeout: 12000 }); queued = [];
   await panel.getByRole('button', { name: 'Save', exact: true }).click(); await wait(() => queued.length === 1);
-  await page.evaluate(() => { window.previousSocket = socket; socket.onclose({ code: 1006, reason: 'check' }); });
+  await page.evaluate(() => { window.previousSocket = socket; socket.readyState = 3; socket.onclose({ code: 1006, reason: 'check' }); });
   await toggle.waitFor({ state: 'hidden' });
   queued = [];
   await page.waitForFunction(() => window.socket !== window.previousSocket);

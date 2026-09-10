@@ -8,7 +8,7 @@ const server = createServer(async (req, res) => {
   const path = new URL(req.url, 'http://localhost').pathname;
   if (path.startsWith('/api/')) {
     res.setHeader('Content-Type', 'application/json');
-    return res.end(JSON.stringify(path === '/api/me' ? { permissions: ['desktop.view'] } : []));
+    return res.end(JSON.stringify([]));
   }
   try {
     res.setHeader('Content-Type', path.endsWith('.js') ? 'text/javascript' : path.endsWith('.css') ? 'text/css' : 'text/html');
@@ -29,7 +29,7 @@ try {
       VideoDecoder.isConfigSupported = async config => { probed.push(config.codec); return { supported: !config.codec.startsWith('vp09') }; };
       window.WebSocket = class {
         static OPEN = 1; readyState = 1;
-        constructor() { sockets.push(this); queueMicrotask(() => this.onopen?.()); }
+        constructor() { sockets.push(this); queueMicrotask(() => { this.onopen?.({}); this.onmessage?.({ data: new Uint8Array([0x15, ...new TextEncoder().encode(JSON.stringify(["desktop.view"]))]).buffer }); }); }
         send(data) { sent.push([...new Uint8Array(data)]); }
         close() { this.readyState = 3; this.onclose?.({ code: 1006, reason: '' }); }
       };

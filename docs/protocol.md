@@ -15,7 +15,9 @@ Routes below are relative to the public URL prefix, if configured. For example, 
   `sessionStorage` and stripped from the address bar; a page with no token shows a dialog asking for one.
 - **WebSocket** (`/ws`): the first message must be `AUTH` with a token. Until then the socket is
   nobody: nothing is processed. A wrong token, or five seconds of silence, closes it with code **4001**
-  `unauthorized`. Its grants determine feature access; its role tracks desktop input ownership.
+  `Invalid or expired token`. A live token without desktop.view closes with `4004`, preserving its identity.
+  The authenticated socket sends the full Permissions grant list before session replay; the viewer uses
+  it for feature access. Role tracks desktop input ownership.
 - **Window streams** (`/ws/window/{id}`): authenticated like `/ws`; see below.
 - **HTTP API** (`/api/...`): `Authorization: Bearer <token>`. Nothing else is accepted, so the token
   never appears in a URL the server or a proxy logs. Operations without their required grants return `403`.
@@ -51,6 +53,7 @@ Binary frames, little-endian, byte 0 is the type. Mirrored in `crates/elsewhere-
 | `0x11` | MixerError | UTF-8 error for the viewer's mixer command. |
 | `0x12` | Session | `u64 id`: this desktop connection, used for conditional presentation handoff. |
 | `0x14` | Display | JSON `{kiosk, resolution}`: shared display settings on connection and when changed. The latest snapshot is retained for slow readers. See [display settings](#display-settings). |
+| `0x15` | Permissions | JSON array of permission names from the authenticated token, sent before session initialization on desktop and window sockets. |
 
 Config and Video share the active transport's ordering. RTC queue replacement retains a Config
 before the recovery key. While RTC owns video, the viewer ignores delayed WebSocket Video messages.
@@ -97,8 +100,9 @@ Config on WebSocket before video if that stream has not been configured on the s
 |---|---|
 | 4001 | unauthorized: no or wrong token within five seconds, or its token was revoked or expired |
 | 4003 | a stream that can't run: no such window, the window closed, or no encoder could be made |
+| 4004 | authenticated token lacks desktop.view; the token remains valid for its other permissions |
 
-The page shows these (a token dialog for 4001, a card for 4003) and stops retrying; on any other close
+The page shows these (a token dialog for 4001 or 4004, a card for 4003) and stops retrying; on any other close
 it reconnects after a second.
 
 ### Viewers

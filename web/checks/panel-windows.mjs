@@ -32,7 +32,6 @@ try {
   const errors = [], commands = [];
   let connections = 0;
   context.on('page', page => page.on('pageerror', error => errors.push(error.message)));
-  await context.route('**/api/me', route => route.fulfill({ json: { permissions: ['desktop.view', 'desktop.control', 'audio.listen'] } }));
   await context.addInitScript(() => {
     try { sessionStorage.setItem('elsewhere:/nested.token', 'test'); } catch {}
     window.paints = 0;

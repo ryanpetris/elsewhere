@@ -14,7 +14,7 @@ pub const WINDOWS: u8 = 0x06;
 pub const CLIPBOARD: u8 = 0x07;
 /// `[ROLE][u8 role][u8 features]`: input ownership, with 0 unable to control, 1 eligible,
 /// and 2 controlling. Features reflect grants and server availability: bit 0 microphone,
-/// bit 1 camera, bit 2 desktop audio. Other feature permissions come from `/api/me`.
+/// bit 1 camera, bit 2 desktop audio. Full token grants arrive in `PERMISSIONS`.
 pub const ROLE: u8 = 0x08;
 /// `[NOTICE][utf-8 text]`: something the page should tell its user about what it just did.
 pub const NOTICE: u8 = 0x09;
@@ -44,6 +44,8 @@ pub const SESSION: u8 = 0x12;
 pub const FILE_RESULT: u8 = 0x13;
 /// JSON snapshot of the shared kiosk and resolution settings.
 pub const DISPLAY: u8 = 0x14;
+/// JSON array of the authenticated token grants, before session initialization.
+pub const PERMISSIONS: u8 = 0x15;
 // client -> server
 /// `[AUTH][token as UTF-8]`: must be the first message on a new socket; nothing else is processed before it.
 pub const AUTH: u8 = 0x80;
@@ -114,6 +116,11 @@ pub enum Role {
 /// `[ROLE][role][features]`: what the session may do, and what the desktop takes (`FEATURE_*` bits).
 pub fn role(role: Role, features: u8) -> Bytes {
     Bytes::from(vec![ROLE, role as u8, features])
+}
+pub fn permissions(grants: &std::collections::BTreeSet<crate::tokens::Permission>) -> Bytes {
+    let mut packet = vec![PERMISSIONS];
+    serde_json::to_writer(&mut packet, grants).expect("permissions serialize");
+    packet.into()
 }
 pub fn session(id: u64) -> Bytes {
     let mut b = vec![SESSION];

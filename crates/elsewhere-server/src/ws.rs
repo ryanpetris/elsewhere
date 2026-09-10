@@ -14,6 +14,8 @@ use crate::{apps, auth, tokens::Permission as P, App, Key, ViewerSession, Viewer
 
 /// Close codes the page understands.
 const UNAUTHORIZED: u16 = 4001;
+/// An authenticated token without the grant required to view the desktop.
+const FORBIDDEN: u16 = 4004;
 /// A stream that can't (re)start: no such window, the window closed, no encoder could be made.
 const GONE: u16 = 4003;
 
@@ -180,7 +182,7 @@ pub(super) async fn authenticate(socket: &mut WebSocket, app: &App) -> Option<Ke
     .ok()
     .flatten();
     if auth.is_none() {
-        let _ = socket.send(Message::Close(Some(CloseFrame { code: UNAUTHORIZED, reason: "unauthorized".into() }))).await;
+        let _ = socket.send(Message::Close(Some(CloseFrame { code: UNAUTHORIZED, reason: "Invalid or expired token".into() }))).await;
     }
     auth
 }
@@ -220,7 +222,9 @@ async fn send_message(socket: &mut WebSocket, key: &Key, msg: Message) -> bool {
 /// desktop scaled to their own window, and one with a token with desktop.control may take control.
 pub async fn session(mut socket: WebSocket, app: Arc<App>) {
     let Some(key) = authenticate(&mut socket, &app).await else { return };
-    if !key.has(P::DesktopView) { return close(&mut socket, UNAUTHORIZED, "desktop.view required").await; }
+    if !key.live() { return close(&mut socket, UNAUTHORIZED, "token revoked or expired").await; }
+    if !key.metadata.permissions.contains(&P::DesktopView) { return close(&mut socket, FORBIDDEN, "This token does not allow desktop viewing").await; }
+    if !send(&mut socket, &key, protocol::permissions(&key.metadata.permissions)).await { return; }
     let Some((preferences, preset, effort)) = hello(&mut socket, &key).await else { return };
     let (tx, mut rx) = mpsc::channel::<StreamMsg>(2);
     let (sink, control) = match (app.sinks)(tx) {
@@ -432,7 +436,9 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
 /// or the window goes away.
 pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
     let Some(key) = authenticate(&mut socket, &app).await else { return };
-    if !key.has(P::DesktopView) { return close(&mut socket, UNAUTHORIZED, "desktop.view required").await; }
+    if !key.live() { return close(&mut socket, UNAUTHORIZED, "token revoked or expired").await; }
+    if !key.metadata.permissions.contains(&P::DesktopView) { return close(&mut socket, FORBIDDEN, "This token does not allow desktop viewing").await; }
+    if !send(&mut socket, &key, protocol::permissions(&key.metadata.permissions)).await { return; }
     if !app.viewers.lock().unwrap().window_list.iter().any(|w| w.id == id) {
         return close(&mut socket, GONE, "no such window").await;
     }

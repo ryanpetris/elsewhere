@@ -15,3 +15,5 @@ export const BTN = [0x110, 0x112, 0x111, 0x113, 0x114];
 
 // Shared desktop kiosk and resolution settings.
 export const DISPLAY = 0x14;
+// Full grants from the authenticated socket, before session initialization.
+export const PERMISSIONS = 0x15;

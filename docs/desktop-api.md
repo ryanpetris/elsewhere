@@ -430,7 +430,9 @@ follow one ordered stream.
 `ws.rs`. `Viewers` holds every session (`ViewerSession`: which token, its event and audio senders, its
 last size, and the `StreamControl` of its own encoder) and the shared state they all see (cursor,
 pointer lock, window list, clipboard text, the output as the controller last sized it). A session
-authenticates, sends `Hello` (which picks its codec), gets an encoder from the server's `SinkFactory`
+authenticates and receives its token grants over the socket. The viewer uses these grants for feature
+access without an HTTP permission preflight. It sends `Hello` to pick its codec, gets an encoder from
+the server's `SinkFactory`
 and hands the sink to the compositor with `Command::ViewerStream`; the compositor submits every
 output frame to every viewer sink (each with its own dup of the dmabuf fd and a share of the swapchain
 lease, so the slot is free when the last encoder is done) and encodes nothing while there is none.

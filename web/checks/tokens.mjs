@@ -70,7 +70,7 @@ try {
   const hidden = await create([]);
   const hiddenExisting = await connect(hidden.token, false, heldWindow.id), hiddenMissing = await connect(hidden.token, false, 999999);
   await wait('window visibility denied', () => hiddenExisting.closed && hiddenMissing.closed);
-  assert.equal(hiddenExisting.code, 4001); assert.equal(hiddenMissing.code, 4001);
+  assert.equal(hiddenExisting.code, 4004); assert.equal(hiddenMissing.code, 4004);
   await revoke(a);
   await delay(100);
   assert.ok(!(await heldLog()).includes('state: 0 (released)'), 'controller revocation preserves another window token’s held key');

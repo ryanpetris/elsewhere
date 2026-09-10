@@ -55,6 +55,8 @@ try {
     ]
   });
   const context = await browser.newContext();
+  const permissionPreflights = [];
+  context.on('request', request => { if (new URL(request.url()).pathname === '/api/me') permissionPreflights.push(request.url()); });
   await context.addInitScript(() => {
     const media = window.matchMedia;
     window.testMediaQueries = [];
@@ -423,6 +425,7 @@ try {
   await wait(() => Promise.resolve(authPip.isClosed()));
   await page.waitForFunction(() => elsewhere.store.get().status === 'unauthorized');
   console.log('token revocation closes PiP');
+  assert.deepEqual(permissionPreflights, [], 'desktop/window/PiP initialization and reconnect never preflight permissions');
 
 
 
