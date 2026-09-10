@@ -734,7 +734,7 @@ impl State {
                         None
                     };
                     if let Some(r) = rect {
-                        let _ = x11.configure(r);
+                        crate::xwayland::configure(x11, r);
                     }
                     rect
                 }
@@ -746,7 +746,7 @@ impl State {
                 (None, Some(loc)) => {
                     let clamped = self.clamp_to_output(&window, loc); // keep a corner of every floating window reachable
                     if let (true, WindowSurface::X11(x11)) = (clamped != loc, window.underlying_surface()) {
-                        let _ = x11.configure(Rectangle::new(clamped, window.geometry().size));
+                        crate::xwayland::relocate(x11, clamped);
                     }
                     clamped
                 }

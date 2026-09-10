@@ -17,7 +17,7 @@ use smithay::{
         wayland_server::{Resource, protocol::wl_surface::WlSurface},
     },
     utils::{Logical, Point, Rectangle, Serial, Size},
-    wayland::{compositor::with_states, seat::WaylandFocus, shell::xdg::SurfaceCachedState},
+    wayland::{compositor::with_states, seat::WaylandFocus},
 };
 
 use crate::{State, focus::PointerFocus};
@@ -79,7 +79,7 @@ impl MoveGrab {
         let location = data.clamp_to_output(&self.window, (self.initial_location.to_f64() + delta).to_i32_round());
         data.space.map_element(self.window.clone(), location, true);
         if let Some(x11) = self.window.x11_surface() {
-            let _ = x11.configure(Rectangle::new(location, self.window.geometry().size));
+            crate::xwayland::relocate(x11, location);
         }
         data.dirty = true;
     }
@@ -135,16 +135,7 @@ impl ResizeGrab {
         } else if has_bottom(self.edges) {
             h += delta.y;
         }
-        let (min, max) = match self.window.underlying_surface() {
-            WindowSurface::Wayland(t) => with_states(t.wl_surface(), |states| {
-                let mut guard = states.cached_state.get::<SurfaceCachedState>();
-                let d = guard.current();
-                (d.min_size, d.max_size)
-            }),
-            WindowSurface::X11(x) => (x.min_size().unwrap_or_default(), x.max_size().unwrap_or_default()),
-        };
-        let clamp = |v: f64, lo: i32, hi: i32| (v as i32).clamp(lo.max(1), if hi == 0 { i32::MAX } else { hi });
-        self.last_size = (clamp(w, min.w, max.w), clamp(h, min.h, max.h)).into();
+        self.last_size = data.constrain_size(&self.window, (w as i32, h as i32).into());
         match self.window.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 toplevel.with_pending_state(|s| {
@@ -163,7 +154,7 @@ impl ResizeGrab {
                     rect.loc.y = self.initial_rect.loc.y + (self.initial_rect.size.h - self.last_size.h);
                 }
                 data.space.map_element(self.window.clone(), rect.loc, false);
-                let _ = x11.configure(rect);
+                crate::xwayland::configure(x11, rect);
                 data.dirty = true;
             }
         }
@@ -266,6 +257,7 @@ impl State {
 
     /// Resize `window` from `edges` with the pointer or finger from `start`; the client is told it is being resized.
     pub fn start_resize(&mut self, start: Start, window: &Window, edges: ResizeEdge, serial: Serial) {
+        // A drag starts at the geometry currently displayed to the user.
         let mut initial_rect = window.geometry();
         initial_rect.loc = self.space.element_location(window).unwrap();
         if let Some(toplevel) = window.toplevel() {

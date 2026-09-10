@@ -210,7 +210,7 @@ impl State {
             ControlOp::Move { x, y } if floating => {
                 self.space.map_element(window.clone(), (x, y), false);
                 if let WindowSurface::X11(x11) = window.underlying_surface() {
-                    let _ = x11.configure(Rectangle::new((x, y).into(), window.geometry().size));
+                    crate::xwayland::relocate(x11, (x, y).into());
                 }
             }
             ControlOp::Resize { w, h } if mapped && !self.kiosk => {
@@ -228,7 +228,7 @@ impl State {
                         t.send_pending_configure();
                     }
                     WindowSurface::X11(x11) => {
-                        let _ = x11.configure(Rectangle::new(loc, size));
+                        crate::xwayland::configure(x11, Rectangle::new(loc, size));
                     }
                 }
             }

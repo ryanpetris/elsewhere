@@ -33,7 +33,7 @@ impl State {
                     else { s.capabilities.set(WmCapabilities::Minimize); }
                     (s.states.contains(XdgState::Fullscreen), s.states.contains(XdgState::Maximized), s.size.unwrap_or(committed_size))
                 }),
-                WindowSurface::X11(x) => (x.is_fullscreen(), x.is_maximized(), x.geometry().size),
+                WindowSurface::X11(x) => (x.is_fullscreen(), x.is_maximized(), (x.last_configure() - x.frame_extents()).size),
             };
             window.user_data().insert_if_missing(BeforeKiosk::default);
             let before = window.user_data().get::<BeforeKiosk>().unwrap();
@@ -62,7 +62,7 @@ impl State {
                             t.with_pending_state(|s| s.size = Some(geometry.size));
                             t.send_pending_configure();
                         }
-                        WindowSurface::X11(x) => { let _ = x.configure(geometry); }
+                        WindowSurface::X11(x) => { crate::xwayland::configure(x, geometry); }
                     }
                 }
             }

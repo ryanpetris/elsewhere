@@ -1,6 +1,7 @@
 // X11 requests and root-coordinate observations for the Docker placement check.
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
+#include <X11/Xutil.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,10 +23,14 @@ int main(int argc, char **argv) {
         unsigned long frame[] = {9, 11, 13, 15};
         XChangeProperty(d, w, XInternAtom(d, "_GTK_FRAME_EXTENTS", False), XA_CARDINAL, 32, PropModeReplace, (unsigned char *)frame, 4);
     }
-    XSelectInput(d, w, StructureNotifyMask);
+    if (!popup) {
+        XSizeHints hints = {.flags = PMinSize | PMaxSize, .min_width = 300, .min_height = 180, .max_width = 500, .max_height = 400};
+        XSetWMNormalHints(d, w, &hints);
+    }
+    XSelectInput(d, w, StructureNotifyMask | ButtonPressMask);
     XMapWindow(d, w);
     XFlush(d);
-    int sequence = 0, events = 0;
+    int sequence = 0, events = 0, clicks = 0, click_x = 0, click_y = 0;
     char temporary[1024];
     snprintf(temporary, sizeof temporary, "%s.new", argv[4]);
     for (;;) {
@@ -39,9 +44,24 @@ int main(int argc, char **argv) {
                 if (!strcmp(op, "raise")) XRaiseWindow(d, w);
                 if (!strcmp(op, "size")) XResizeWindow(d, w, a, b);
                 if (!strcmp(op, "move")) XMoveWindow(d, w, a, b);
+                if (!strcmp(op, "extents")) {
+                    unsigned long frame[] = {a ? 9 : 0, a ? 11 : 0, a ? 13 : 0, a ? 15 : 0};
+                    XChangeProperty(d, w, XInternAtom(d, "_GTK_FRAME_EXTENTS", False), XA_CARDINAL, 32, PropModeReplace, (unsigned char *)frame, 4);
+                }
                 XWindowChanges changes = {.width = a, .height = a};
                 if (!strcmp(op, "width")) XConfigureWindow(d, w, CWWidth, &changes);
                 if (!strcmp(op, "height")) XConfigureWindow(d, w, CWHeight, &changes);
+                if (!strcmp(op, "beginmove") || !strcmp(op, "beginresize")) {
+                    XEvent e = {0};
+                    e.xclient.type = ClientMessage;
+                    e.xclient.window = w;
+                    e.xclient.message_type = XInternAtom(d, "_NET_WM_MOVERESIZE", False);
+                    e.xclient.format = 32;
+                    e.xclient.data.l[0] = a; e.xclient.data.l[1] = b;
+                    e.xclient.data.l[2] = !strcmp(op, "beginmove") ? 8 : 0;
+                    e.xclient.data.l[3] = 1; e.xclient.data.l[4] = 1;
+                    XSendEvent(d, root, False, SubstructureRedirectMask | SubstructureNotifyMask, &e);
+                }
                 XFlush(d);
             }
             fclose(command);
@@ -50,6 +70,7 @@ int main(int argc, char **argv) {
             XEvent event;
             XNextEvent(d, &event);
             if (event.type == ConfigureNotify) events++;
+            if (event.type == ButtonPress) { clicks++; click_x = event.xbutton.x; click_y = event.xbutton.y; }
         }
         XWindowAttributes attributes;
         int x, y;
@@ -58,7 +79,7 @@ int main(int argc, char **argv) {
         XTranslateCoordinates(d, w, root, 0, 0, &x, &y, &child);
         FILE *report = fopen(temporary, "w");
         if (!report) return 3;
-        fprintf(report, "{\"sequence\":%d,\"events\":%d,\"x\":%d,\"y\":%d,\"w\":%d,\"h\":%d}\n", sequence, events, x, y, attributes.width, attributes.height);
+        fprintf(report, "{\"sequence\":%d,\"events\":%d,\"x\":%d,\"y\":%d,\"w\":%d,\"h\":%d,\"clicks\":%d,\"click_x\":%d,\"click_y\":%d}\n", sequence, events, x, y, attributes.width, attributes.height, clicks, click_x, click_y);
         fclose(report);
         rename(temporary, argv[4]);
         usleep(20000);

@@ -5,7 +5,7 @@ use std::{os::fd::OwnedFd, process::Stdio};
 use smithay::{
     desktop::Window,
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
-    utils::{Logical, Rectangle},
+    utils::{Logical, Point, Rectangle},
     wayland::{
         selection::{
             SelectionTarget,
@@ -21,11 +21,24 @@ use smithay::{
     },
     xwayland::{
         X11Surface, X11Wm, XWayland, XWaylandEvent, XwmHandler,
-        xwm::{Reorder, ResizeEdge, XwmId},
+        xwm::{Reorder, ResizeEdge, WmWindowProperty, XwmId},
     },
 };
 
 use crate::{State, grabs, handlers::{KeyboardFocus, RestoreLocation}};
+
+/// Configure a visible window rectangle in X11's buffer coordinates.
+pub(crate) fn configure(surface: &X11Surface, rect: Rectangle<i32, Logical>) {
+    let _ = surface.configure(rect + surface.frame_extents());
+}
+
+/// Move the visible geometry without changing the last requested buffer size.
+pub(crate) fn relocate(surface: &X11Surface, location: Point<i32, Logical>) {
+    let extents = surface.frame_extents();
+    let mut rect = surface.last_configure();
+    rect.loc = location - Point::from((extents.left, extents.top));
+    let _ = surface.configure(rect);
+}
 
 impl State {
     /// Launch Xwayland; `x11_display` is set once it is ready and the window manager is attached.
@@ -71,7 +84,7 @@ impl State {
     /// Move/resize an X11 window and tell X about it (so its own coordinates stay right).
     fn place_x11(&mut self, window: &Window, surface: &X11Surface, rect: Rectangle<i32, Logical>) {
         self.space.map_element(window.clone(), rect.loc, false);
-        let _ = surface.configure(rect);
+        configure(surface, rect);
         self.dirty = true;
     }
 }
@@ -140,14 +153,28 @@ impl XwmHandler for State {
 
     fn configure_notify(&mut self, _xwm: XwmId, window: X11Surface, geometry: Rectangle<i32, Logical>, _above: Option<u32>) {
         if let Some(win) = self.window_for_x11(&window) {
-            // Space locations include the visible-geometry offset of override-redirect windows.
-            let loc = geometry.loc + if window.is_override_redirect() { window.geometry().loc } else { (0, 0).into() };
+            // Space stores the visible origin; X11 reports the buffer origin.
+            let loc = geometry.loc + window.geometry().loc;
             // map_element puts the window on top, so only remap when it actually moved
             if self.space.element_location(&win) != Some(loc) {
                 self.space.map_element(win, loc, false);
             }
             self.dirty = true;
         }
+    }
+
+    fn property_notify(&mut self, _xwm: XwmId, window: X11Surface, property: WmWindowProperty) {
+        if property != WmWindowProperty::FrameExtents { return; }
+        let Some(win) = self.window_for_x11(&window) else { return };
+        let loc = if window.is_maximized() || window.is_fullscreen() {
+            let rect = self.fill_rect(&win, window.is_fullscreen());
+            configure(&window, rect);
+            rect.loc
+        } else {
+            window.last_configure().loc + window.geometry().loc
+        };
+        self.space.relocate_element(&win, loc);
+        self.dirty = true;
     }
 
     /// Xwayland died after startup: its windows are gone, drop them from the space.
@@ -285,7 +312,7 @@ impl State {
         win.user_data().insert_if_missing(RestoreLocation::default);
         let restore = win.user_data().get::<RestoreLocation>().unwrap();
         if restore.borrow().is_none() {
-            let mut r = win.geometry();
+            let mut r = window.last_configure() - window.frame_extents();
             r.loc = self.space.element_location(&win).unwrap_or_default();
             *restore.borrow_mut() = Some(r);
         }

@@ -538,7 +538,14 @@ impl State {
                 let state = guard.current();
                 (state.min_size, state.max_size)
             }),
-            WindowSurface::X11(x) => (x.min_size().unwrap_or_default(), x.max_size().unwrap_or_default()),
+            WindowSurface::X11(x) => {
+                let frame = x.frame_extents();
+                let visible = |size: Size<i32, Logical>| (
+                    if size.w == 0 { 0 } else { (size.w - frame.left - frame.right).max(1) },
+                    if size.h == 0 { 0 } else { (size.h - frame.top - frame.bottom).max(1) },
+                ).into();
+                (visible(x.min_size().unwrap_or_default()), visible(x.max_size().unwrap_or_default()))
+            },
         };
         let clamp = |value: i32, min: i32, max: i32| {
             let min = min.max(1);
