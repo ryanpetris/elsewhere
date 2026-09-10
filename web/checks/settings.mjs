@@ -60,6 +60,93 @@ try {
   await page.goto(url.replace('/#', '/?token=ignored#')); await ready();
   assert.equal(await page.evaluate(() => sessionStorage.getItem('elsewhere.token')), 'test');
   assert.equal(new URL(page.url()).search + new URL(page.url()).hash, '');
+  const keyPackets = () => page.evaluate(() => sent.filter(p => p[0] === 0x87));
+  const resetPackets = () => page.evaluate(() => { window.sent = []; });
+  const chromeKeys = [];
+  for (const key of ['Enter', 'NumpadEnter', 'Space']) {
+    const toggle = page.getByRole('button', { name: 'Windows and Statistics', exact: true });
+    for (const name of ['Windows and Statistics', 'Statistics', 'Windows']) {
+      if (name !== 'Windows and Statistics' && await toggle.getAttribute('aria-pressed') !== 'true') await toggle.click();
+      const button = page.getByRole('button', { name, exact: true });
+      await button.focus(); await resetPackets();
+      await page.keyboard.press(key);
+      chromeKeys.push({ name, key, packets: await keyPackets() });
+      assert.equal(await button.evaluate(el => el === document.activeElement), false, `${name} activation blurs`);
+      await resetPackets();
+      await page.keyboard.press('a');
+      assert.deepEqual(await keyPackets(), [[0x87, 30, 0, 1], [0x87, 30, 0, 0]], 'typing after activation remains paired');
+    }
+  }
+  assert(chromeKeys.every(result => result.packets.length === 0), 'chrome Enter, NumpadEnter and Space stay local: ' + JSON.stringify(chromeKeys));
+  const sidebarToggle = page.getByRole('button', { name: 'Windows and Statistics', exact: true });
+  await sidebarToggle.click();
+  assert.equal(await sidebarToggle.evaluate(el => el === document.activeElement), false, 'mouse activation blurs');
+  await resetPackets(); await page.keyboard.press('a');
+  assert.deepEqual(await keyPackets(), [[0x87, 30, 0, 1], [0x87, 30, 0, 0]]);
+  for (const focusOnly of [false, true]) {
+    await page.locator('canvas.stage').focus(); await resetPackets();
+    await page.keyboard.down('Shift');
+    if (focusOnly) await sidebarToggle.focus(); else await sidebarToggle.click();
+    await page.keyboard.up('Shift');
+    assert.deepEqual(await keyPackets(), [[0x87, 42, 0, 1], [0x87, 42, 0, 0]], 'desktop modifier release survives toolbar focus or click');
+  }
+  await page.locator('canvas.stage').focus(); await resetPackets();
+  await page.keyboard.down('Shift');
+  await page.evaluate(() => elsewhere.releaseInput());
+  await page.keyboard.up('Shift');
+  assert.deepEqual(await page.evaluate(() => sent.filter(p => [0x87, 0x89].includes(p[0]))), [[0x87, 42, 0, 1], [0x89]], 'BLUR releases remembered keys without a later unmatched release');
+  await resetPackets(); await page.keyboard.down('Shift');
+  await page.evaluate(() => elsewhere.setTouchMouse(true));
+  await page.keyboard.up('Shift');
+  assert.deepEqual(await page.evaluate(() => sent.filter(p => [0x87, 0x89].includes(p[0]))), [[0x87, 42, 0, 1], [0x89]], 'touch-mode BLUR clears remembered keys');
+  await page.evaluate(() => elsewhere.setTouchMouse(false));
+  await resetPackets();
+  await page.evaluate(() => { socket.readyState = 0; });
+  await page.keyboard.down('Shift');
+  await page.evaluate(() => { socket.readyState = 1; });
+  await page.keyboard.up('Shift');
+  assert.deepEqual(await keyPackets(), [], 'a press without an open socket cannot produce a later release');
+  await page.keyboard.down('Shift');
+  await page.evaluate(() => { window.savedPermissions = elsewhere.store.get().permissions; socket.readyState = 3; socket.onclose({ code: 4003, reason: 'fixture closed' }); });
+  await page.evaluate(() => { socket.readyState = 1; elsewhere.store.set({ status: 'connected', role: 'controller', permissions: savedPermissions }); });
+  await resetPackets(); await page.keyboard.up('Shift');
+  assert.deepEqual(await keyPackets(), [], 'a new connection cannot release an old connection key');
+  await page.keyboard.down('Shift');
+  await page.evaluate(() => {
+    socket.onmessage({ data: new Uint8Array([8, 0, 4]).buffer });
+    socket.onmessage({ data: new Uint8Array([8, 2, 4]).buffer });
+  });
+  assert.equal(await page.evaluate(() => elsewhere.store.get().role), 'controller');
+  await resetPackets(); await page.keyboard.up('Shift');
+  assert.deepEqual(await keyPackets(), [], 'control handoff clears remembered keys before control returns');
+  for (const paste of ['text', 'timeout', 'modifier-first']) {
+    await page.locator('canvas.stage').focus(); await resetPackets();
+    await page.keyboard.down('Control');
+    await page.locator('canvas.stage').dispatchEvent('keydown', { code: 'KeyV', key: 'v', ctrlKey: true });
+    if (paste === 'text') await page.evaluate(() => {
+      const data = new DataTransfer(); data.setData('text/plain', 'paired paste');
+      document.querySelector('canvas.stage').dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    });
+    if (paste === 'timeout') await page.waitForTimeout(200);
+    if (paste === 'modifier-first') await page.keyboard.up('Control');
+    await page.locator('canvas.stage').dispatchEvent('keyup', { code: 'KeyV', key: 'v', ctrlKey: paste !== 'modifier-first' });
+    if (paste !== 'modifier-first') await page.keyboard.up('Control');
+    assert.deepEqual(await keyPackets(), [[0x87, 29, 0, 1], [0x87, 47, 0, 1], [0x87, 47, 0, 0], [0x87, 29, 0, 0]], `${paste} paste sends exactly one key pair`);
+  }
+  await resetPackets();
+  await page.keyboard.press('Control+Alt+Shift+h');
+  assert.deepEqual(await page.evaluate(() => sent.filter(p => [0x87, 0x89].includes(p[0]))), [[0x87, 29, 0, 1], [0x87, 56, 0, 1], [0x87, 42, 0, 1], [0x89]], 'hide shortcut releases modifiers through BLUR');
+  await page.keyboard.press('Control+Alt+Shift+h');
+  for (const name of ['Settings', 'About Elsewhere', 'Applications']) {
+    const button = page.getByRole('button', { name, exact: true });
+    await button.focus(); await resetPackets();
+    await page.keyboard.press('Enter');
+    await (name === 'Applications' ? page.getByPlaceholder('Search Applications…') : page.getByRole('dialog')).waitFor();
+    await page.keyboard.press('Escape');
+    assert(await button.evaluate(el => el === document.activeElement), `${name} keyboard close restores trigger focus`);
+    assert.deepEqual(await keyPackets(), [], `${name} keyboard open and close stay local`);
+  }
+  await resetPackets();
   const trigger = page.getByRole('button', { name: 'Settings', exact: true });
   const panel = page.getByRole('dialog', { name: 'Settings', exact: true });
   const borders = panel.getByRole('checkbox', { name: 'Window Borders', exact: true });

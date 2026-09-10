@@ -207,6 +207,7 @@ export function createViewer() {
     ws.onmessage = e => { if (!disposed && ws === socket) onMessage(e.data); };
     ws.onclose = e => {
       if (disposed || ws !== socket) return;
+      forwardedKeys.clear();
       wantLock = false;
       if (document.pointerLockElement === canvas) document.exitPointerLock();
       closes.push(`${e.code}:${e.reason}`);
@@ -515,6 +516,7 @@ export function createViewer() {
         const role = ROLES[dv.getUint8(1)] ?? 'viewer';
         const features = dv.getUint8(2);
         store.set({ role, audioAvailable: !!(features & 4), micAvailable: !!(features & 1), camAvailable: !!(features & 2) });
+        if (!driving()) forwardedKeys.clear();
         if (!(features & 4)) stopPlayback();
         if (!(features & 1)) micStop();
         if (role !== 'controller') {
@@ -1182,8 +1184,9 @@ export function createViewer() {
   };
   window.addEventListener('keydown', controlsShortcut, true);
   window.addEventListener('keyup', controlsShortcut, true);
+  const forwardedKeys = new Set();
   function onKey(e) {
-    if (isFormField(e.target)) return;
+    if (e.type === 'keydown' && isFormField(e.target)) return;
     if (e.type === 'keydown' && !e.repeat && isPasteKey(e) && e.target === canvas
         && can('clipboard.write')) {
       // Firefox needs an editable target for Ctrl+Shift+V. Paste never inserts into the canvas.
@@ -1204,6 +1207,9 @@ export function createViewer() {
     }
     if (e.type === 'keyup' && (pendingPaste === code || swallowKeyup === code)) { swallowKeyup = null; return; } // the deferred pair (or the API chord) covers it
     if (e.type === 'keyup') flushPaste(); // a modifier going up first would turn the deferred chord into a plain key
+    if (e.type === 'keyup' && !forwardedKeys.delete(code)) return;
+    if (ws?.readyState !== WebSocket.OPEN) return;
+    if (e.type === 'keydown') forwardedKeys.add(code);
     e.preventDefault();
     resumeAudio();
     lastInput = performance.now();
@@ -1214,7 +1220,7 @@ export function createViewer() {
   window.addEventListener('keyup', onKey);
   // a deferred paste chord must not fire after its modifier was released; no key is held during a native
   // drag, and the release would let go of the drag while its files are still uploading
-  const releaseInput = () => { pendingPaste = null; clearTimeout(pasteTimer); clearPasteTarget(); send(BLUR, 0); };
+  const releaseInput = () => { forwardedKeys.clear(); pendingPaste = null; clearTimeout(pasteTimer); clearPasteTarget(); send(BLUR, 0); };
   const blur = () => { controlsKey = false; if (keyboardPending) releaseKeyboard(); pendingPaste = null; if (!dragging) releaseInput(); };
   window.addEventListener('blur', blur);
   document.addEventListener('visibilitychange', () => { if (document.hidden) blur(); });
@@ -1357,7 +1363,7 @@ export function createViewer() {
     cam: { start: camStart, stop: camStop },
     setTouchMouse(on) {
       // fingers down now end here, on both sides: the desktop lets go of everything, the page forgets them
-      send(BLUR, 0);
+      releaseInput();
       slots.clear(); touches.clear(); pinch = null;
       if (touch) { clearTimeout(touch.timer); touch = null; }
       pref.set('touchmouse', on); store.set({ touchMouse: on });
