@@ -1,6 +1,6 @@
 // The status bar: live viewer statistics, the transport path, media controls, and this viewer's codec,
 // quality, effort and transport choices. Its height is fixed, so nothing here ever resizes the stage.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Activity, AudioLines, Camera, CameraOff, ChevronDown, Mic, MicOff, PanelTopOpen, Settings2, SlidersHorizontal, Terminal, Volume2, VolumeX, X } from 'lucide-react';
 import { useStore } from '../store.js';
@@ -165,6 +165,21 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
   const transportButton = useRef(null), transportPanel = useRef(null);
   const withTransport = rtcAvailable || transport === 'webrtc';
   const closeTransport = () => { setTransportOpen(false); transportButton.current?.focus(); };
+  // Recheck after each render: adjacent controls can move the button without resizing it.
+  useLayoutEffect(() => {
+    if (!transportOpen || !withTransport) return;
+    const button = transportButton.current, panel = transportPanel.current, bar = button.closest('footer');
+    const place = () => {
+      const left = Math.max(8, Math.min(button.getBoundingClientRect().left, innerWidth - panel.offsetWidth - 8));
+      const bottom = innerHeight - bar.getBoundingClientRect().top + 8;
+      Object.assign(panel.style, { left: `${left}px`, bottom: `${bottom}px`, maxHeight: `${Math.max(0, innerHeight - bottom - 8)}px` });
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    for (const element of [bar, ...bar.children, panel]) observer.observe(element);
+    window.addEventListener('resize', place);
+    return () => { observer.disconnect(); window.removeEventListener('resize', place); };
+  });
   useEffect(() => {
     if (!withTransport) { setTransportOpen(false); return; }
     if (!transportOpen) return;
@@ -172,12 +187,14 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
     if (document.pointerLockElement) document.exitPointerLock();
     (transportPanel.current?.querySelector('input:checked:not(:disabled)') ?? transportPanel.current?.querySelector('input:not(:disabled)'))?.focus();
   }, [transportOpen, withTransport, viewer]);
-  const transportHint = status !== 'connected' ? 'WebSocket disconnected'
+  const recoveryHint = recovery.state === 'unavailable' ? 'WebRTC unavailable'
+    : recovery.state === 'connecting' ? 'Connecting WebRTC'
+    : recovery.state === 'waiting' ? 'Waiting to retry WebRTC'
+    : recovery.state === 'retrying' ? 'Retrying WebRTC' : 'WebRTC inactive';
+  const transportHint = status !== 'connected' ? 'Disconnected'
     : videoVia === 'webrtc' ? 'WebRTC'
     : transport !== 'webrtc' ? 'WebSocket'
-    : recovery.state === 'unavailable' ? 'WebSocket · WebRTC unavailable'
-    : recovery.state === 'connecting' ? 'WebSocket · connecting WebRTC'
-    : 'WebSocket · retrying WebRTC';
+    : `WebSocket · ${recoveryHint}`;
   const transportDot = <span data-transport-dot className={cx('size-1.5 shrink-0 rounded-full', status !== 'connected' ? 'bg-ink-4' : videoVia === 'webrtc' ? 'bg-info' : transport === 'webrtc' ? 'bg-warn' : 'bg-ok')} />;
   const bad = s.lost + s.dropped + s.decodeErrors;
   const listens = permissions.includes('audio.listen');
@@ -209,7 +226,7 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
       </span>
       {transportOpen && withTransport && createPortal(
         <Popover floating ref={transportPanel} id="transport-settings" role="dialog" aria-label="Transport" onClose={closeTransport}
-          style={{ left: 8, bottom: STATUS_BAR_HEIGHT + 8, width: 'min(20rem, calc(100vw - 1rem))' }} className="font-sans">
+          style={{ width: 'min(20rem, calc(100vw - 1rem))' }} className="overflow-y-auto font-sans">
           <div className="flex items-center justify-between border-b border-line px-3 py-2">
             <h2 className="text-sm font-medium text-ink">Preferred Transport</h2>
             <IconButton icon={X} label="Close Transport" size="sm" onClick={closeTransport} />
@@ -222,7 +239,11 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
               {TRANSPORT_LABEL[t]}
             </label>)}
           </fieldset>
-          <p className="border-t border-line px-3 py-2 text-xs text-ink-3">{transportHint}{transport === 'webrtc' && videoVia !== 'webrtc' && recovery.reason ? `. ${recovery.reason}` : ''}</p>
+          <div className="border-t border-line px-3 py-2 text-xs text-ink-3">
+            <p>{status === 'connected' ? `Current video transport: ${videoVia === 'webrtc' ? 'WebRTC' : 'WebSocket'}` : 'Disconnected'}</p>
+            {status === 'connected' && transport === 'webrtc' && videoVia !== 'webrtc' &&
+              <p className="mt-1">{recoveryHint}{recovery.reason ? `. ${recovery.reason}` : ''}</p>}
+          </div>
         </Popover>, document.querySelector('[data-viewer]') ?? document.body)}
       <span className="ml-auto flex min-w-8 items-center gap-1 overflow-x-auto [scrollbar-width:none] sm:gap-1.5">
         <ClipboardControl viewer={viewer} />

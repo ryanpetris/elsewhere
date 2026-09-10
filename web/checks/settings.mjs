@@ -392,12 +392,76 @@ try {
   await transportButton.click();
   assert(await transportPanel.getByRole('radio', { name: 'WebRTC', exact: true }).evaluate(el => el === document.activeElement));
   await page.keyboard.press('Escape');
+  await transportButton.click();
+  const anchored = async () => {
+    await page.waitForFunction(() => {
+      const button = document.querySelector('[aria-controls="transport-settings"]'), panel = document.querySelector('#transport-settings');
+      const b = button.getBoundingClientRect(), p = panel.getBoundingClientRect(), bar = button.closest('footer').getBoundingClientRect();
+      const aligned = Math.abs(p.left - b.left) < 1 || (p.right >= innerWidth - 9 && p.left <= b.left) || (p.left <= 9 && b.left < 8);
+      return aligned && p.left >= 7 && p.right <= innerWidth - 7 && p.top >= 7 && Math.abs(p.bottom - (bar.top - 8)) < 1;
+    });
+  };
+  for (const width of [1440, 1280, 920, 900, 640, 390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    await anchored();
+  }
+  await page.setViewportSize({ width: 1280, height: 844 });
+  await page.evaluate(() => elsewhere.store.set({ controlsHidden: true }));
+  await anchored();
+  await page.evaluate(() => elsewhere.store.set({ controlsHidden: false }));
+  await anchored();
+  await page.evaluate(() => document.documentElement.style.fontSize = '32px');
+  await anchored();
+  await page.setViewportSize({ width: 1280, height: 180 });
+  await anchored();
+  assert(await transportPanel.evaluate(panel => getComputedStyle(panel).overflowY === 'auto' && panel.scrollHeight > panel.clientHeight));
+  await transportPanel.locator('p').last().scrollIntoViewIfNeeded();
+  assert(await transportPanel.evaluate(panel => {
+    const bounds = panel.getBoundingClientRect(), text = panel.querySelector('p:last-child').getBoundingClientRect();
+    return text.top >= bounds.top && text.bottom <= bounds.bottom;
+  }), 'transport details remain reachable in a short viewport with enlarged text');
+  await page.setViewportSize({ width: 1280, height: 844 });
+  await page.evaluate(() => document.documentElement.style.fontSize = '');
+  await transportPanel.getByRole('heading', { name: 'Preferred Transport' }).click();
+  await page.evaluate(() => document.querySelector('[data-viewer]').requestFullscreen());
+  await anchored();
+  assert(await page.evaluate(() => document.fullscreenElement.contains(document.querySelector('#transport-settings'))));
+  await page.evaluate(() => document.exitFullscreen());
+  await anchored();
+  await page.keyboard.press('Escape');
+  assert(await transportButton.evaluate(el => el === document.activeElement));
+  await transportButton.click();
+  await page.mouse.click(1200, 100);
+  await transportPanel.waitFor({ state: 'detached' });
+  await page.evaluate(() => elsewhere.setTransport('websocket'));
+  for (const state of [
+    { status: 'connected', transport: 'websocket', videoVia: 'websocket', recovery: 'idle', current: 'WebSocket' },
+    { status: 'connected', transport: 'webrtc', videoVia: 'webrtc', recovery: 'active', current: 'WebRTC' },
+    ...['connecting', 'retrying', 'waiting', 'unavailable', 'idle'].map(recovery => ({ status: 'connected', transport: 'webrtc', videoVia: 'websocket', recovery, current: 'WebSocket' })),
+    { status: 'retrying', transport: 'webrtc', videoVia: 'websocket', recovery: 'waiting' },
+    { status: 'closed', transport: 'websocket', videoVia: 'webrtc', recovery: 'unavailable' },
+  ]) {
+    await page.evaluate(state => elsewhere.store.set({ rtcAvailable: true, status: state.status, transport: state.transport, videoVia: state.videoVia,
+      rtcRecovery: { state: state.recovery, reason: 'Fixture connection reason', nextAt: 0 } }), state);
+    await transportButton.click();
+    assert(await transportPanel.getByRole('heading', { name: 'Preferred Transport' }).isVisible());
+    assert(await transportPanel.getByRole('radio', { name: state.transport === 'webrtc' ? 'WebRTC' : 'WebSocket', exact: true }).isChecked());
+    const paragraphs = await transportPanel.locator('p').allTextContents();
+    assert.equal(paragraphs[0], state.current ? `Current video transport: ${state.current}` : 'Disconnected');
+    if (state.current === 'WebSocket' && state.transport === 'webrtc') {
+      assert.match(paragraphs[1], /Fixture connection reason/);
+      assert.match(paragraphs[1], { connecting: /Connecting WebRTC/, waiting: /Waiting to retry WebRTC/, unavailable: /WebRTC unavailable/, retrying: /Retrying WebRTC/, idle: /WebRTC inactive/ }[state.recovery]);
+    } else assert.equal(paragraphs.length, 1, 'only an active fallback shows recovery details');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.evaluate(() => elsewhere.store.get().transport), state.transport, 'status does not alter preference');
+  }
+  await page.evaluate(() => elsewhere.store.set({ status: 'connected', transport: 'webrtc' }));
   for (const width of [1280, 390, 320]) {
     await page.setViewportSize({ width, height: 844 });
     await page.evaluate(() => elsewhere.store.set({ rtcRecovery: { state: 'waiting', reason: 'Fixture fallback', nextAt: Date.now() + 60000 }, videoVia: 'websocket' }));
     const footer = page.locator('footer');
     assert.equal(await footer.locator('[data-transport-status]').count(), 1);
-    assert.match(await footer.locator('[data-transport-status]').textContent(), /WebSocket.*retrying WebRTC/);
+    assert.match(await footer.locator('[data-transport-status]').textContent(), /WebSocket.*Waiting to retry WebRTC/);
     assert(await footer.locator('[data-transport-dot]').evaluate(el => el.classList.contains('bg-warn')));
     assert.equal(await page.locator('select[title="Transport"]').count(), 0);
     for (const button of [transportButton, footer.getByRole('button', { name: 'Retry Now', exact: true })]) {
