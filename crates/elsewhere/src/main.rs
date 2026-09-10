@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, path::PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use elsewhere_core::{Codec, FrameSink, StreamControl};
 use clap::Parser;
 use tokio::sync::mpsc;

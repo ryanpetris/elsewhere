@@ -21,14 +21,14 @@ pub fn cuda_device(pci: &str) -> Result<i32> {
         let count = library.get::<unsafe extern "C" fn(*mut i32) -> i32>(b"cuDeviceGetCount\0")?;
         let get = library.get::<unsafe extern "C" fn(*mut i32, i32) -> i32>(b"cuDeviceGet\0")?;
         let bus = library.get::<unsafe extern "C" fn(*mut libc::c_char, i32, i32) -> i32>(b"cuDeviceGetPCIBusId\0")?;
-        let checked = |code| -> Result<()> { ensure!(code == 0, "CUDA device discovery failed ({code})"); Ok(()) };
+        let checked = |code| -> Result<()> { ensure!(code == 0, "CUDA device discovery failed ({code}); check NVIDIA driver access and CUDA_VISIBLE_DEVICES"); Ok(()) };
         checked(init(0))?;
         let mut devices = 0;
         checked(count(&mut devices))?;
         for ordinal in 0..devices {
             let mut device = 0;
             checked(get(&mut device, ordinal))?;
-            let mut address = [0i8; 32];
+            let mut address = [0 as libc::c_char; 32];
             checked(bus(address.as_mut_ptr(), address.len() as i32, device))?;
             let address = CStr::from_ptr(address.as_ptr()).to_str()?;
             if address.eq_ignore_ascii_case(pci) {
