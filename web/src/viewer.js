@@ -8,6 +8,7 @@ import { createClipboard } from './clipboard.js';
 import { KEYCODES } from './keycodes.js';
 import { TOKEN, WINDOW, PIP, api, elementsOf, snapshot, control, uploadFile, pref } from './api.js';
 import { createStore } from './store.js';
+import { visibleVideoFrame } from './video-frame.js';
 import { startMic, stopMic } from './mic.js';
 import { startCam, stopCam } from './cam.js';
 import { openRtc, rtcEndpoint, RTC_TIMING } from './rtc.js';
@@ -117,7 +118,7 @@ export function createViewer() {
     lastPaint = t;
   }
 
-  // WebGPU imports the decoded frame as an external texture (zero-copy); opt-in via ?renderer=webgpu
+  // WebGPU imports video as an external texture; opt-in via ?renderer=webgpu
   // because Chromium on Linux presents a blank frame now and then with it.
   async function initWebGPU() {
     const adapter = await navigator.gpu?.requestAdapter();
@@ -141,19 +142,32 @@ export function createViewer() {
       @fragment fn fs(v: V) -> @location(0) vec4f { return textureSampleBaseClampToEdge(t, s, v.uv); }` });
     const pipeline = device.createRenderPipeline({ layout: 'auto', vertex: { module }, fragment: { module, targets: [{ format }] } });
     const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+    let cropCanvas;
     return frame => {
-      const bindGroup = device.createBindGroup({
-        layout: pipeline.getBindGroupLayout(0),
-        entries: [{ binding: 0, resource: sampler }, { binding: 1, resource: device.importExternalTexture({ source: frame }) }],
-      });
-      const encoder = device.createCommandEncoder();
-      const pass = encoder.beginRenderPass({ colorAttachments: [{ view: context.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store' }] });
-      pass.setPipeline(pipeline);
-      pass.setBindGroup(0, bindGroup);
-      pass.draw(3);
-      pass.end();
-      device.queue.submit([encoder.finish()]);
-      device.queue.onSubmittedWorkDone().then(() => frame.close(), () => frame.close());
+      try {
+        // External YUV textures can filter chroma from outside visibleRect. Convert the visible
+        // image through Canvas 2D before import, without reading its pixels back into JavaScript.
+        if (frame.visibleRect.x || frame.visibleRect.y || frame.visibleRect.width !== frame.codedWidth || frame.visibleRect.height !== frame.codedHeight) {
+          cropCanvas ??= new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
+          if (cropCanvas.width !== frame.displayWidth) cropCanvas.width = frame.displayWidth;
+          if (cropCanvas.height !== frame.displayHeight) cropCanvas.height = frame.displayHeight;
+          cropCanvas.getContext('2d', { alpha: false }).drawImage(frame, 0, 0);
+          const rgb = new VideoFrame(cropCanvas, { timestamp: frame.timestamp, duration: frame.duration ?? undefined });
+          frame.close(); frame = rgb;
+        }
+        const bindGroup = device.createBindGroup({
+          layout: pipeline.getBindGroupLayout(0),
+          entries: [{ binding: 0, resource: sampler }, { binding: 1, resource: device.importExternalTexture({ source: frame }) }],
+        });
+        const encoder = device.createCommandEncoder();
+        const pass = encoder.beginRenderPass({ colorAttachments: [{ view: context.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store' }] });
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, bindGroup);
+        pass.draw(3);
+        pass.end();
+        device.queue.submit([encoder.finish()]);
+        device.queue.onSubmittedWorkDone().then(() => frame.close(), () => frame.close());
+      } catch (e) { frame.close(); throw e; }
     };
   }
   async function initRenderer() {
@@ -356,14 +370,24 @@ export function createViewer() {
   // A decode error closes the decoder for good, so recovery means a fresh one plus a keyframe.
   function newDecoder() {
     if (decoder && decoder.state !== 'closed') decoder.close();
+    const config = stream;
     const d = new VideoDecoder({
       output: f => {
         if (disposed || d !== decoder || stream?.attempt < state().streamState?.attempt) { f.close(); return; }
+        const pts = f.timestamp;
+        try { f = visibleVideoFrame(f, config); }
+        catch (e) {
+          inflight.delete(pts); console.error(e); decodeErrors++;
+          // A keyframe cannot repair incompatible image geometry. A new CONFIG can retry.
+          d.close(); decoder = null;
+          store.set({ status: 'error', reason: e.message });
+          return;
+        }
         const rec = inflight.get(f.timestamp); if (rec) rec.output = performance.now(); (ctx ? paintNow : schedule)(f);
       },
       error: e => { if (!disposed && d === decoder && !(stream?.attempt < state().streamState?.attempt)) { console.error(e); decodeErrors++; resync(); } },
     });
-    d.configure({ codec: stream.codec, optimizeForLatency: true });
+    d.configure({ codec: config.codec, optimizeForLatency: true });
     decoder = d;
     awaitingKey = true;
   }
@@ -398,7 +422,7 @@ export function createViewer() {
         fitCanvas();
         // Before any RTC attempt, the first WebSocket CONFIG accompanies a recovery keyframe.
         if (initialSocketConfig) newDecoder(); else resync();
-        store.set({ stream, status: 'connected' });
+        store.set({ stream, status: 'connected', reason: '' });
         if (state().transport === 'webrtc') maybeRtc();
         fetchElements(); // the scale may have changed
         break;

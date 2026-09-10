@@ -26,9 +26,13 @@ try {
   for (const renderer of ['2d', 'webgpu']) {
     const page = await browser.newPage();
     await page.addInitScript(({ renderer, CONFIG, VIDEO, ROLE, key }) => {
-      const probe = window.probe = { outputs: 0, draws: 0, hold: false, held: new Map(), delivered: [], decoders: [], errors: [] };
+      const probe = window.probe = { outputs: 0, draws: 0, hold: false, held: new Map(), delivered: [], decoders: [], views: [], created: [], errors: [] };
       addEventListener('error', event => probe.errors.push(event.message));
       addEventListener('unhandledrejection', event => probe.errors.push(String(event.reason)));
+      const Frame = VideoFrame;
+      window.VideoFrame = new Proxy(Frame, { construct(Target, args) {
+        const frame = new Target(...args); probe.created.push(frame); return frame;
+      } });
       const Decoder = VideoDecoder;
       window.VideoDecoder = class extends Decoder {
         constructor(init) {
@@ -38,7 +42,7 @@ try {
       };
       const draw = CanvasRenderingContext2D.prototype.drawImage;
       CanvasRenderingContext2D.prototype.drawImage = function (...args) {
-        if (this.canvas.matches('canvas.stage')) probe.draws++;
+        if (this.canvas.matches('canvas.stage')) { probe.draws++; probe.views.push(args[0]); probe.size = [args[0].displayWidth, args[0].displayHeight]; }
         return draw.apply(this, args);
       };
       let heldId = 1000000;
@@ -52,7 +56,7 @@ try {
         const pass = { setPipeline() {}, setBindGroup() {}, draw() {}, end() {} };
         const device = {
           lost: new Promise(() => {}), createShaderModule() {}, createRenderPipeline: () => ({ getBindGroupLayout() {} }), createSampler() {},
-          createBindGroup() {}, importExternalTexture() {}, createCommandEncoder: () => ({ beginRenderPass: () => pass, finish() {} }),
+          createBindGroup() {}, importExternalTexture({ source }) { probe.views.push(source); probe.size = [source.displayWidth, source.displayHeight]; }, createCommandEncoder: () => ({ beginRenderPass: () => pass, finish() {} }),
           queue: { submit() { probe.draws++; }, onSubmittedWorkDone: () => Promise.resolve() },
         };
         Object.defineProperty(navigator, 'gpu', { value: { requestAdapter: async () => ({ requestDevice: async () => device }), getPreferredCanvasFormat: () => 'bgra8unorm' } });
@@ -69,7 +73,7 @@ try {
       let seq = 0;
       probe.configure = () => {
         socket.onmessage({ data: new Uint8Array([ROLE, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]).buffer });
-        socket.onmessage({ data: new Uint8Array([CONFIG, ...new TextEncoder().encode(JSON.stringify({ streamId: 1, codec: 'vp8', width: 64, height: 64, scale: 1 }))]).buffer });
+        socket.onmessage({ data: new Uint8Array([CONFIG, ...new TextEncoder().encode(JSON.stringify({ streamId: 1, codec: 'vp8', width: 62, height: 60, scale: 1.25 }))]).buffer });
       };
       probe.feed = () => {
         const bytes = new Uint8Array(12 + key.length), view = new DataView(bytes.buffer);
@@ -81,12 +85,13 @@ try {
     await page.waitForFunction(() => window.socket && window.elsewhere?.store);
     await page.evaluate(() => { probe.configure(); probe.feed(); });
     await page.waitForFunction(() => probe.draws > 0);
+    assert.deepEqual(await page.evaluate(() => probe.size), [62, 60], 'each renderer receives the configured crop');
     if (renderer === 'webgpu') {
       await page.evaluate(() => { probe.hold = true; probe.feed(); });
       await page.waitForFunction(() => probe.held.size === 1);
     }
     const result = await page.evaluate(async () => {
-      const decoder = probe.decoders.at(-1), pending = probe.delivered.at(-1), callbacks = [...probe.held.values()], outputsBefore = probe.outputs;
+      const decoder = probe.decoders.at(-1), pending = probe.created.at(-1), callbacks = [...probe.held.values()], outputsBefore = probe.outputs;
       for (let i = 0; i < 12; i++) probe.feed();
       const queued = decoder.decodeQueueSize, before = probe.draws, pendingBefore = pending.codedWidth;
       elsewhere.dispose(); elsewhere.dispose();
@@ -98,7 +103,7 @@ try {
       for (const callback of callbacks) callback(performance.now());
       return { renderer: elsewhere.store.get().renderer, queued, state, status: elsewhere.store.get().status,
         decoderRetained: elsewhere().decoder !== undefined, pendingBefore, pendingAfter,
-        held, nativeOutputsAfterDispose: probe.outputs - outputsBefore, lateClosed: late.codedWidth === 0, extraDraws: probe.draws - before, decoders: probe.decoders.length, errors: probe.errors };
+        held, nativeOutputsAfterDispose: probe.outputs - outputsBefore, lateClosed: late.codedWidth === 0, extraDraws: probe.draws - before, decoders: probe.decoders.length, nativeReleased: probe.delivered.every(f => f.codedWidth === 0), viewsClosed: probe.views.every(f => f.codedWidth === 0), errors: probe.errors };
     });
     results.push(result);
     await page.close();
@@ -109,7 +114,9 @@ try {
     assert.equal(result.state, 'closed'); assert.equal(result.status, 'closed'); assert.equal(result.decoderRetained, false);
     assert.equal(result.extraDraws, 0); assert.equal(result.lateClosed, true); assert.equal(result.decoders, 1);
     assert.equal(result.pendingAfter, 0); assert.equal(result.held, 0); assert.deepEqual(result.errors, []);
-    if (result.renderer === 'webgpu') assert.ok(result.pendingBefore > 0, 'a real decoded frame was pending for WebGPU');
+    assert.equal(result.nativeReleased, true, 'decoder originals released');
+    assert.equal(result.viewsClosed, true, 'rendered crop views released');
+    if (result.renderer === 'webgpu') assert.ok(result.pendingBefore > 0, 'cropped view pending before disposal');
   }
   console.log('viewer disposal: native queued decode, late callbacks, pending frame/animation cleanup and repeated disposal passed');
 } finally {

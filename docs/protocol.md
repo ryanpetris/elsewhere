@@ -32,6 +32,10 @@ Binary frames, little-endian, byte 0 is the type. Mirrored in `crates/elsewhere-
 
 ### Server → client
 
+Config `width` and `height` describe the intended physical video image. Decoded storage may include
+alignment padding beyond its right/bottom edges; the viewer crops to the configured extent while
+respecting the decoder's existing visible origin. `scale` converts those dimensions to logical pixels.
+
 | Type | Name | Payload |
 |---|---|---|
 | `0x01` | Config | JSON `{streamId, attempt, codec, width, height, scale}`. Sent on the video transport before its first frame of a stream and before RTC recovery keys. The viewer resets its decoder on a new `streamId` and ignores repeated configurations for the same stream on that connection. `codec` is a WebCodecs string (`avc1…`, `hev1…`, `vp09…`). |

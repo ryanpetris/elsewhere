@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "check:video-frame": "node checks/video-frame.mjs",
+    "check:video-crop": "node checks/video-crop.mjs",
     "check:codec-recovery": "node checks/codec-recovery.mjs",
     "check:codec-negotiation": "node checks/codec-negotiation.mjs",
     "check:visualiser": "node checks/visualiser.mjs",
