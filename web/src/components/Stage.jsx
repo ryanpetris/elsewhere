@@ -85,7 +85,7 @@ function Notice({ viewer }) {
   return (
     <div className={`pointer-events-none absolute bottom-3 left-1/2 flex max-w-[90%] -translate-x-1/2 animate-rise items-center gap-2.5 rounded-lg border bg-surface/95 px-3 py-2 text-xs shadow-pop backdrop-blur ${good ? 'border-ok/30 text-ink' : 'border-warn/30 text-ink'}`}>
       {good ? <CheckCircle2 className="size-4 shrink-0 text-ok" /> : <TriangleAlert className="size-4 shrink-0 text-warn" />} {notice.text}
-      {notice.path && <button className="btn btn-outline btn-xs pointer-events-auto shrink-0" onClick={() => viewer.openFiles(notice.path)}><FolderOpen className="size-3" /> Open folder</button>}
+      {notice.path && <button className="btn btn-outline btn-xs pointer-events-auto shrink-0" onClick={() => viewer.openFiles(notice.path)}><FolderOpen className="size-3" /> Open Folder</button>}
     </div>
   );
 }
@@ -100,8 +100,8 @@ function Banner({ viewer }) {
     return (
       <div role="status" className="absolute top-3 rounded-xl border border-line-2 bg-surface/95 px-4 py-3 text-sm text-ink shadow-pop">
         {encoding.status === 'failed' ? <>
-          Video encoding failed for all shared codecs.
-          <button type="button" className="ml-3 underline" onClick={() => viewer.setChoice({ codec: viewer.store.get().choice.codec })}>Retry video</button>
+          Video encoding failed.
+          <button type="button" className="ml-3 underline" onClick={() => viewer.setChoice({ codec: viewer.store.get().choice.codec })}>Retry Video</button>
         </> : `${encoding.status === 'retrying' ? 'Retrying' : 'Switching to'} ${codecName(encoding.codec)}…`}
       </div>
     );
@@ -119,7 +119,7 @@ function Banner({ viewer }) {
     return (
       <div className={card}>
         <span className="flex size-12 items-center justify-center rounded-xl bg-surface-3 text-ink-3"><MonitorX className="size-6" strokeWidth={1.5} /></span>
-        <div className="text-sm font-medium text-ink">Elsewhere was shut down</div>
+        <div className="text-sm font-medium text-ink">Elsewhere Shut Down</div>
         <div className="text-xs text-ink-3">Start it again and reload this page.</div>
       </div>
     );
@@ -135,8 +135,8 @@ function Banner({ viewer }) {
   return (
     <div className={card}>
       <span className="flex size-12 items-center justify-center rounded-xl bg-surface-3 text-ink-3"><MonitorX className="size-6" strokeWidth={1.5} /></span>
-      <div className="text-sm font-medium text-ink">{status === 'closed' ? 'Viewer closed' : reason || 'Window closed'}</div>
-      <div className="text-xs text-ink-3">{status === 'closed' || status === 'error' ? 'Reload this page to reconnect.' : 'This tab showed one window; it is gone.'}</div>
+      <div className="text-sm font-medium text-ink">{status === 'closed' ? 'Viewer Closed' : reason || 'Window Closed'}</div>
+      {(status === 'closed' || status === 'error') && <div className="text-xs text-ink-3">Reload this page to reconnect.</div>}
     </div>
   );
 }

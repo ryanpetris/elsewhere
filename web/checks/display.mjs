@@ -101,30 +101,30 @@ try {
       await page.goto(origin + '/#token=' + token);
       await page.waitForFunction(() => elsewhere.store.get().stream?.width === 1024 && elsewhere.store.get().display);
       await page.locator('#hide-controls').click();
-      await page.getByRole('button', { name: 'Show controls', exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Show Controls', exact: true }).waitFor();
       await page.waitForTimeout(300);
       assert.equal(await page.evaluate(() => elsewhere.store.get().stream.width), 1024, 'fixed resolution survives chrome changes');
-      await page.getByRole('button', { name: 'Show controls', exact: true }).click();
+      await page.getByRole('button', { name: 'Show Controls', exact: true }).click();
       await page.getByRole('button', { name: 'Terminal', exact: true }).click();
       const terminal = page.getByRole('region', { name: 'Terminal', exact: true });
       await terminal.getByRole('status').filter({ hasText: 'Connected' }).waitFor();
       await terminal.locator('textarea').focus();
       await page.keyboard.type('DISPLAY_CHECK=kept'); await page.keyboard.press('Enter');
       await page.keyboard.press('Control+Alt+Shift+h');
-      await page.getByRole('button', { name: 'Show controls', exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Show Controls', exact: true }).waitFor();
       assert.equal(await terminal.isVisible(), false);
-      await page.getByRole('button', { name: 'Show controls', exact: true }).click();
+      await page.getByRole('button', { name: 'Show Controls', exact: true }).click();
       await terminal.locator('textarea').focus();
       await page.keyboard.type('printf "$DISPLAY_CHECK" > terminal-state'); await page.keyboard.press('Enter');
       await wait('hidden terminal keeps shell', async () => (await readFile(root + '/terminal-state', 'utf8').catch(() => '')) === 'kept');
-      await terminal.getByRole('button', { name: 'Close terminal', exact: true }).click();
+      await terminal.getByRole('button', { name: 'Close Terminal', exact: true }).click();
       await page.getByRole('button', { name: 'Settings', exact: true }).click();
-      await page.getByRole('checkbox', { name: 'Kiosk mode' }).click();
+      await page.getByRole('checkbox', { name: 'Kiosk Mode' }).click();
       await page.waitForFunction(() => elsewhere.store.get().display.kiosk);
-      await page.getByRole('checkbox', { name: 'Kiosk mode' }).click();
+      await page.getByRole('checkbox', { name: 'Kiosk Mode' }).click();
       await page.waitForFunction(() => !elsewhere.store.get().display.kiosk);
-      await page.getByLabel('Desktop resolution').selectOption('1280x720');
-      await page.getByRole('button', { name: 'Apply resolution' }).click();
+      await page.getByLabel('Desktop Resolution').selectOption('1280x720');
+      await page.getByRole('button', { name: 'Apply Resolution' }).click();
       await page.waitForFunction(() => elsewhere.store.get().stream?.width === 1280 && elsewhere.store.get().stream?.height === 720 && elsewhere.store.get().stream?.scale === 1);
       await page.keyboard.press('Escape');
 
@@ -132,7 +132,7 @@ try {
       await other.setViewportSize({ width: 800, height: 650 });
       await other.goto(origin + '/#token=' + token);
       await other.waitForFunction(() => elsewhere.store.get().display?.resolution.width === 1280 && elsewhere.store.get().role === 'participant');
-      await other.getByRole('button', { name: 'Take control', exact: true }).click();
+      await other.getByRole('button', { name: 'Take Control', exact: true }).click();
       await other.waitForFunction(() => elsewhere.store.get().role === 'controller' && elsewhere.store.get().stream?.width === 1280);
       await settings({ resolution: { mode: 'auto' } });
       await other.waitForFunction(() => {
@@ -142,7 +142,7 @@ try {
       await page.waitForFunction(() => elsewhere.store.get().display?.resolution.mode === 'auto');
       await settings({ resolution: { mode: 'fixed', width: 1024, height: 768 } });
       await other.waitForFunction(() => elsewhere.store.get().stream?.width === 1024);
-      await page.getByRole('button', { name: 'Take control', exact: true }).click();
+      await page.getByRole('button', { name: 'Take Control', exact: true }).click();
       await page.waitForFunction(() => elsewhere.store.get().role === 'controller' && elsewhere.store.get().stream?.width === 1024);
       await Promise.all(Array.from({ length: 96 }, () => settings({ kiosk: false })));
       await settings({ resolution: { mode: 'fixed', width: 1024, height: 770 } });

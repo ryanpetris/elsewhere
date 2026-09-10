@@ -61,16 +61,15 @@ export function BroadcastsPanel({ viewer, open }) {
   };
   const field = 'flex flex-col gap-1 text-[11px] text-ink-3';
   return <div className="flex flex-col gap-4 p-3" data-broadcasts>
-    <p className="text-[11px] leading-relaxed text-ink-4">Presets are saved in this browser and shared with desktops on the same origin. Running streams belong to this desktop.</p>
     {error && <p role="alert" className="callout callout-bad">{error}</p>}
     {pollError && <p role="alert" className="callout callout-bad">{pollError}</p>}
     {caps && !caps.available && <p className="callout callout-warn">{caps.error}</p>}
     {!acts && <p className="callout callout-info">Broadcast management permission is required.</p>}
     <div className="flex items-center justify-between">
-      <Eyebrow>Saved presets</Eyebrow>
-      <button className="btn btn-outline btn-xs" onClick={() => setEdit(defaults())}><Plus className="size-3" /> Add preset</button>
+      <Eyebrow>Saved Presets</Eyebrow>
+      <button className="btn btn-outline btn-xs" onClick={() => setEdit(defaults())}><Plus className="size-3" /> Add Preset</button>
     </div>
-    {presets.length === 0 && !edit && <p className="rounded-lg border border-dashed border-line-2 px-3 py-4 text-center text-xs text-ink-4">No presets yet.</p>}
+    {presets.length === 0 && !edit && <p className="rounded-lg border border-dashed border-line-2 px-3 py-4 text-center text-xs text-ink-4">No Presets</p>}
     {presets.map(p => <div key={p.preset_id} className="card p-3">
       <div className="flex items-start gap-2">
         <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-surface-3 text-ink-3"><Radio className="size-3.5" /></span>
@@ -79,27 +78,27 @@ export function BroadcastsPanel({ viewer, open }) {
           <div className="font-mono text-[11px] text-ink-3">{p.width}×{p.height} · {p.fps} fps · {p.bitrate_kbps} kbps{p.audio === 'desktop' ? ' · desktop audio' : ''}</div>
         </div>
       </div>
-      {p.audio === 'desktop' && caps && !caps.desktop_audio && <p className="callout callout-warn mt-2">Desktop audio is unavailable on this host.</p>}
+      {p.audio === 'desktop' && caps && !caps.desktop_audio && <p className="callout callout-warn mt-2">Desktop audio unavailable.</p>}
       <div className="mt-2.5 flex gap-1.5">
         <button className="btn btn-primary btn-xs" disabled={!acts || !permissions.includes('desktop.view') || (p.audio === 'desktop' && !permissions.includes('audio.listen')) || busy || !caps?.available || (p.audio === 'desktop' && !caps.desktop_audio)} onClick={() => start(p)}><Play className="size-3" /> Start</button>
         <button className="btn btn-outline btn-xs" onClick={() => setEdit({ ...p })}><Pencil className="size-3" /> Edit</button>
         <button className="btn btn-ghost btn-xs ml-auto hover:bg-bad/10 hover:text-bad" onClick={() => { try { removePreset(p.preset_id); refreshPresets(); } catch { setError('Could not remove the preset.'); } }}><Trash2 className="size-3" /> Remove</button>
       </div>
     </div>)}
-    {edit && <form onSubmit={save} className="card flex flex-col gap-3 border-accent/40 p-3" aria-label="Broadcast preset">
-      <Eyebrow>{presets.some(p => p.preset_id === edit.preset_id) ? 'Edit preset' : 'New preset'}</Eyebrow>
-      {[['label', 'Name'], ['url', 'Ingest URL'], ['stream_key', 'Stream key']].map(([key, label]) => <label key={key} className={field}>{label}<input className="input input-sm" value={edit[key]} required={key !== 'stream_key'} maxLength={key === 'label' ? 120 : 4096} autoComplete="off" onChange={e => setEdit({ ...edit, [key]: e.target.value })} /></label>)}
+    {edit && <form onSubmit={save} className="card flex flex-col gap-3 border-accent/40 p-3" aria-label="Broadcast Preset">
+      <Eyebrow>{presets.some(p => p.preset_id === edit.preset_id) ? 'Edit Preset' : 'New Preset'}</Eyebrow>
+      {[['label', 'Name'], ['url', 'Ingest URL'], ['stream_key', 'Stream Key']].map(([key, label]) => <label key={key} className={field}>{label}<input className="input input-sm" value={edit[key]} required={key !== 'stream_key'} maxLength={key === 'label' ? 120 : 4096} autoComplete="off" onChange={e => setEdit({ ...edit, [key]: e.target.value })} /></label>)}
       <div className="grid grid-cols-2 gap-2">
         {[['width', 'Width', 64, caps?.max_width || 3840, 2], ['height', 'Height', 64, caps?.max_height || 2160, 2]].map(([key, label, min, max, step]) => <label key={key} className={field}>{label}<input className="input input-sm" type="number" required min={min} max={max} step={step} value={edit[key]} onChange={e => setEdit({ ...edit, [key]: +e.target.value })} /></label>)}
-        <label className={field}>Video bitrate, kbps<input className="input input-sm" type="number" required min={100} max={50000} step={1} value={edit.bitrate_kbps} onChange={e => setEdit({ ...edit, bitrate_kbps: +e.target.value })} /></label>
-        <label className={field}>Frame rate<select className="select select-md w-full" value={edit.fps} onChange={e => setEdit({ ...edit, fps: +e.target.value })}>{[24, 25, 30, 50, 60].map(fps => <option key={fps}>{fps}</option>)}</select></label>
+        <label className={field}>Video Bitrate (kbps)<input className="input input-sm" type="number" required min={100} max={50000} step={1} value={edit.bitrate_kbps} onChange={e => setEdit({ ...edit, bitrate_kbps: +e.target.value })} /></label>
+        <label className={field}>Frame Rate<select className="select select-md w-full" value={edit.fps} onChange={e => setEdit({ ...edit, fps: +e.target.value })}>{[24, 25, 30, 50, 60].map(fps => <option key={fps}>{fps}</option>)}</select></label>
       </div>
-      <label className={field}>Audio<select className="select select-md w-full" value={edit.audio} onChange={e => setEdit({ ...edit, audio: e.target.value })}><option value="silence">Silence</option><option value="desktop">Desktop sound</option></select></label>
-      <label className="flex items-center gap-2 text-xs text-ink-2"><input type="checkbox" className="check" checked={edit.cursor} onChange={e => setEdit({ ...edit, cursor: e.target.checked })} />Include mouse pointer</label>
-      <div className="flex justify-end gap-1.5"><button className="btn btn-outline btn-xs" type="button" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary btn-xs" type="submit">Save preset</button></div>
+      <label className={field}>Audio<select className="select select-md w-full" value={edit.audio} onChange={e => setEdit({ ...edit, audio: e.target.value })}><option value="silence">Silence</option><option value="desktop">Desktop Audio</option></select></label>
+      <label className="flex items-center gap-2 text-xs text-ink-2"><input type="checkbox" className="check" checked={edit.cursor} onChange={e => setEdit({ ...edit, cursor: e.target.checked })} />Include Pointer</label>
+      <div className="flex justify-end gap-1.5"><button className="btn btn-outline btn-xs" type="button" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary btn-xs" type="submit">Save Preset</button></div>
     </form>}
-    <Eyebrow>Streams on this desktop</Eyebrow>
-    {streams.length === 0 && <p className="rounded-lg border border-dashed border-line-2 px-3 py-4 text-center text-xs text-ink-4">No streams.</p>}
+    <Eyebrow>Desktop Streams</Eyebrow>
+    {streams.length === 0 && <p className="rounded-lg border border-dashed border-line-2 px-3 py-4 text-center text-xs text-ink-4">No Streams</p>}
     {streams.map(s => {
       const [tone, pulse] = STATE[s.state] ?? ['neutral', false];
       return <div key={s.id} className={cx('card p-3', s.state === 'running' && 'border-ok/30')} data-broadcast-id={s.id}>

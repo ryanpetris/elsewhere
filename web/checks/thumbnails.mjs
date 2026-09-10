@@ -104,7 +104,7 @@ server = spawn((process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere')
     await show(); await fresh();
     console.log('visibility:', label);
   };
-  await hidden(() => page.getByRole('button', { name: 'Windows and statistics', exact: true }).click(), () => page.getByRole('button', { name: 'Windows and statistics', exact: true }).click(), 'closed sidebar');
+  await hidden(() => page.getByRole('button', { name: 'Windows and Statistics', exact: true }).click(), () => page.getByRole('button', { name: 'Windows and Statistics', exact: true }).click(), 'closed sidebar');
   await hidden(() => page.getByRole('button', { name: 'Statistics', exact: true }).click(), () => page.getByRole('button', { name: 'Windows', exact: true }).click(), 'other tab');
   await hidden(() => page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); }), () => page.evaluate(() => { delete document.hidden; document.dispatchEvent(new Event('visibilitychange')); }), 'hidden document');
   await hidden(() => page.evaluate(() => document.querySelector('[data-viewer]').requestFullscreen()), () => page.evaluate(() => document.exitFullscreen()), 'fullscreen');

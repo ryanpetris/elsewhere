@@ -94,7 +94,7 @@ try {
   console.log(
       'Firefox normal clipboard', await js('return elsewhere.clipboard.read()'),
       await js('return window.pasteSeen??null'));
-  await click('button[title="Picture-in-picture"]');
+  await click('button[title="Picture-in-Picture"]');
   await wait(
       () => js(
           'return !!documentPictureInPicture.window?.document.querySelector("iframe")?.contentWindow.elsewhere?.store.get().stream'));
@@ -150,7 +150,7 @@ try {
     await new Promise(r => setTimeout(r, 500));
     console.log('Firefox clipboard received', await js('return elsewhere.clipboard.read()'));
     console.log('Firefox paste event', await js('return window.pasteSeen??null'));
-    await click('button[title="On-screen keyboard"]');
+    await click('button[title="On-Screen Keyboard"]');
     await js(
         'document.querySelector("[data-keyboard]").dispatchEvent(new CompositionEvent("compositionend",{data:"firefox composition",bubbles:true}));elsewhere.key("Return")');
     await wait(async () => {
@@ -161,7 +161,7 @@ try {
       }
     });
     console.log('Firefox composition commit');
-    await click('button[aria-label="Hide the keyboard row"]');
+    await click('button[aria-label="Hide Keyboard"]');
     await click('canvas');
     await wd(
         route + '/execute/sync',
@@ -251,7 +251,7 @@ try {
     }
   });
   console.log('Firefox window PiP real keyboard');
-  await click('button[title="Return to main viewer"]');
+  await click('button[title="Return to Viewer"]');
   await wd(route + '/window', {handle: main});
 
 } finally {

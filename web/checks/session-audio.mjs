@@ -128,8 +128,8 @@ try {
     return { peak, taskMsPerSecond: 1000 * (after.TaskDuration - before.TaskDuration) / 3, ...(await page.evaluate(start => ({ frames: elsewhere.store.get().stats.frames - start, audio: elsewhere.store.get().stats.audio, underruns: elsewhere.store.get().stats.underruns }), start)) };
   };
   const closed = await measure();
-  await page.getByRole('button', { name: 'Audio visualiser', exact: true }).click();
-  const panel = page.getByRole('region', { name: 'Session audio' });
+  await page.getByRole('button', { name: 'Audio Visualizer', exact: true }).click();
+  const panel = page.getByRole('region', { name: 'Audio Visualizer' });
   await panel.locator('canvas').waitFor();
   const image1 = await panel.locator('canvas').evaluate(c => c.toDataURL());
   await page.waitForTimeout(300);
@@ -139,14 +139,14 @@ try {
   console.log(JSON.stringify({ closed, open }));
   assert(open.frames > 30 && open.audio.level > 0);
   assert(Math.abs(open.peak - closed.peak) < .002, 'analysis does not alter playback level');
-  await panel.getByRole('button', { name: 'Close visualiser', exact: true }).click();
+  await panel.getByRole('button', { name: 'Close Visualizer', exact: true }).click();
   const closedAgain = await measure();
   console.log(JSON.stringify({ closed, open, closedAgain }));
   // Stop the rig's finite test signal early, then observe the real playback analyser.
   await page.evaluate(pattern => elsewhere.spawn("pkill -f '" + pattern + "'"), tonePattern);
   await page.waitForFunction(() => elsewhere.store.get().stats.audio?.signalPeak < 0.0001);
-  await page.getByRole('button', { name: 'Audio visualiser', exact: true }).click();
-  await panel.getByText('Connected, but silent.', { exact: false }).waitFor();
+  await page.getByRole('button', { name: 'Audio Visualizer', exact: true }).click();
+  await panel.getByText('Silent', { exact: false }).waitFor();
   console.log('actual decoded session playback, animated spectrum, stable volume, video decoding and silence passed');
   assert.equal(await page.evaluate(() => elsewhere.store.get().mic), false, 'visualisation does not start capture');
   await page.context().grantPermissions(['microphone']);

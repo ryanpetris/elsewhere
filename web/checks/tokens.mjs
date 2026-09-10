@@ -133,11 +133,11 @@ try {
   await writer.goto(origin + '/#token=' + writable.token);
   await writer.waitForFunction(() => elsewhere.store.get().status === 'connected');
   await writer.locator('#clipboard-toggle').click();
-  await writer.getByRole('button', { name: 'New text', exact: true }).click();
-  await writer.getByRole('textbox', { name: 'Clipboard text' }).fill('write without read');
+  await writer.getByRole('button', { name: 'New Text', exact: true }).click();
+  await writer.getByRole('textbox', { name: 'Clipboard Text' }).fill('write without read');
   await writer.getByRole('button', { name: 'Save', exact: true }).click();
-  await writer.getByRole('button', { name: 'New text', exact: true }).waitFor();
-  await writer.getByRole('button', { name: 'Close clipboard', exact: true }).click();
+  await writer.getByRole('button', { name: 'New Text', exact: true }).waitFor();
+  await writer.getByRole('button', { name: 'Close Clipboard', exact: true }).click();
   await writer.locator('canvas.stage').evaluate(canvas => {
     const data = new DataTransfer(); data.items.add(new File(['pasted without browsing'], 'paste-only.txt'));
     canvas.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));

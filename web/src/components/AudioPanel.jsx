@@ -57,7 +57,7 @@ export function AudioPanel({ viewer, hidden, onClose }) {
       instance?.dispose();
       if (renderer.current === instance) renderer.current = null;
       instance = null;
-      if (!cancelled) { setError('Visualiser unavailable. Desktop playback is unchanged.'); setReady(false); }
+      if (!cancelled) { setError('Visualizer unavailable.'); setReady(false); }
     }
     return () => {
       cancelled = true;
@@ -72,46 +72,46 @@ export function AudioPanel({ viewer, hidden, onClose }) {
       renderer.current?.pause(paused);
     } catch {
       renderer.current?.dispose(); renderer.current = null;
-      setError('Visualiser unavailable. Desktop playback is unchanged.');
+      setError('Visualizer unavailable.');
     }
   }, [style, gradient, paused]);
 
-  const message = status !== 'connected' ? 'Waiting for the desktop connection.'
-    : !playback ? available ? 'Waiting for session audio.' : 'Session audio unavailable.'
-    : audio?.state === 'suspended' ? 'Playback is waiting for a user gesture.'
-    : audio?.signalPeak > 0.0001 ? 'Session signal received.' : 'Connected, but silent.';
+  const message = status !== 'connected' ? 'Connecting…'
+    : !playback ? available ? 'Waiting for audio…' : 'Audio unavailable.'
+    : audio?.state === 'suspended' ? 'Playback paused.'
+    : audio?.signalPeak > 0.0001 ? 'Playing' : 'Silent';
   const live = status === 'connected' && playback && audio?.state !== 'suspended';
   return (
-    <section ref={panel} hidden={hidden} aria-label="Session audio" className={cx('flex shrink-0 flex-col border-t border-line bg-surface text-xs', fullscreen && 'bg-canvas')}>
+    <section ref={panel} hidden={hidden} aria-label="Audio Visualizer" className={cx('flex shrink-0 flex-col border-t border-line bg-surface text-xs', fullscreen && 'bg-canvas')}>
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-line px-3">
         <AudioLines className="size-3.5 text-ink-3" />
-        <strong className="font-medium text-ink">Session audio</strong>
+        <strong className="font-medium text-ink">Audio Visualizer</strong>
         <span className="ml-auto flex items-center gap-1">
           <button type="button" className="btn btn-ghost btn-xs" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>{expanded ? <><ChevronsDownUp className="size-3" /> Collapse</> : <><ChevronsUpDown className="size-3" /> Expand</>}</button>
           {document.fullscreenEnabled && <button type="button" className="btn btn-ghost btn-xs" onClick={() => {
             const action = fullscreen ? document.exitFullscreen() : panel.current.requestFullscreen();
-            action.catch(() => setError('Fullscreen unavailable. You can still expand the panel.'));
-          }}>{fullscreen ? <><Minimize className="size-3" /> Exit fullscreen</> : <><Maximize className="size-3" /> Fullscreen visualiser</>}</button>}
-          <IconButton icon={X} label="Close visualiser" size="sm" onClick={onClose} />
+            action.catch(() => setError('Fullscreen unavailable.'));
+          }}>{fullscreen ? <><Minimize className="size-3" /> Exit Fullscreen</> : <><Maximize className="size-3" /> Fullscreen Visualizer</>}</button>}
+          <IconButton icon={X} label="Close Visualizer" size="sm" onClick={onClose} />
         </span>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2">
         <label className="inline-flex items-center gap-1.5 text-ink-3">Style <select className="select" value={style} onChange={e => { setStyle(e.target.value); pref.setStr('visualiser.style', e.target.value); }}>
-          <option value="bars">Spectrum bars</option><option value="line">Line / area spectrum</option>
-          <option value="radial">Radial spectrum</option><option value="stereo">Stereo spectrum</option>
+          <option value="bars">Spectrum Bars</option><option value="line">Line Spectrum</option>
+          <option value="radial">Radial Spectrum</option><option value="stereo">Stereo Spectrum</option>
         </select></label>
         <label className="inline-flex items-center gap-1.5 text-ink-3">Colours <select className="select" value={gradient} onChange={e => { setGradient(e.target.value); pref.setStr('visualiser.gradient', e.target.value); }}>
-          <option value="classic">Classic</option><option value="rainbow">Rainbow</option><option value="steelblue">Steel blue</option>
+          <option value="classic">Classic</option><option value="rainbow">Rainbow</option><option value="steelblue">Steel Blue</option>
         </select></label>
         <label className="inline-flex items-center gap-1.5 text-ink-2"><input type="checkbox" className="check" checked={animate} onChange={e => { setAnimate(e.target.checked); pref.set('visualiser.animate', e.target.checked); }} /> Animate</label>
         <p role="status" className="flex min-w-0 items-center gap-2 text-ink-3 sm:ml-auto">
           <span className={cx('size-1.5 shrink-0 rounded-full', live ? 'bg-ok' : 'bg-ink-4')} />
-          <span className="truncate">{message} {reduced ? 'Animation paused for reduced motion.' : !animate ? 'Animation off.' : ''}</span>
-          {audio?.state === 'suspended' && <button type="button" onClick={viewer.resumeAudio} className="btn btn-link btn-xs">Start playback</button>}
+          <span className="truncate">{message} {reduced ? 'Reduced motion.' : !animate ? 'Paused' : ''}</span>
+          {audio?.state === 'suspended' && <button type="button" onClick={viewer.resumeAudio} className="btn btn-link btn-xs">Start Playback</button>}
         </p>
       </div>
       {error && <p role="alert" className="callout callout-warn mx-3 mb-2">{error}</p>}
-      {playback && !ready && !error && <p className="px-3 pb-1.5 text-ink-4">Loading visualiser…</p>}
+      {playback && !ready && !error && <p className="px-3 pb-1.5 text-ink-4">Loading…</p>}
       <div ref={canvas} className="mx-3 mb-3 overflow-hidden rounded-lg bg-canvas ring-1 ring-line" style={{ height: fullscreen ? 'calc(100vh - 160px)' : expanded ? '35vh' : '130px' }} aria-hidden="true" />
     </section>
   );

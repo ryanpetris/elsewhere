@@ -158,7 +158,7 @@ try {
     await page.evaluate(() => rtcInject({ close: true, g: rtcTest.offers.at(-1) }));
     await waiting(page); await selected(page);
     assert.equal(await page.evaluate(() => elsewhere.store.get().rtcRecovery.reason), 'Server queue stalled');
-    await page.getByRole('button', { name: 'Retry now', exact: true }).click();
+    await page.getByRole('button', { name: 'Retry Now', exact: true }).click();
     await active(page);
     const count = await page.evaluate(() => rtcTest.peers.length);
     await page.evaluate(g => { rtcInject({ close: true, g }); rtcInject({ answer: 'late invalid answer', g }); }, previous);

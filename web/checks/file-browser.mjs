@@ -315,13 +315,13 @@ try {
   for (const page of [p, q])
     await page.getByRole('button', {name : 'Files', exact : true}).click();
   const navigate = async (page, path) => {
-    await page.getByRole('textbox', {name : 'Directory path'}).fill(path);
+    await page.getByRole('textbox', {name : 'Directory Path'}).fill(path);
     await page.getByRole('button', {name : 'Go', exact : true}).click();
     await page.waitForFunction(
         path => elsewhere.store.get().filesPath === path &&
                 !Array
                      .from(document.querySelectorAll(
-                         '[aria-label="File browser"] [role="status"]'))
+                         '[aria-label="File Browser"] [role="status"]'))
                      .some(e => e.textContent.includes('Loading directory')),
         path);
   };
@@ -383,7 +383,7 @@ try {
     }
     await route.continue().catch(() => {});
   });
-  await p.getByRole('textbox', {name : 'Directory path'}).fill(root + '/a');
+  await p.getByRole('textbox', {name : 'Directory Path'}).fill(root + '/a');
   await p.getByRole('button', {name : 'Go', exact : true}).click();
   await navigate(p, root + '/b');
   releaseList();
@@ -407,7 +407,7 @@ try {
   await p.locator('[data-file-name="rescued.txt"]').waitFor();
   assert.equal(await readFile(root + '/Downloads/rescued.txt', 'utf8'),
                'desktop drop');
-  await p.getByRole('button', {name : 'Open folder', exact : true}).waitFor();
+  await p.getByRole('button', {name : 'Open Folder', exact : true}).waitFor();
   // A late rescue offers navigation without moving the current directory.
   await navigate(p, root + '/b');
   await p.locator('canvas.stage').evaluate(el => {
@@ -425,7 +425,7 @@ try {
   await p.waitForFunction(
       () => elsewhere.store.get().notice?.text.includes('rescued (2).txt'));
   assert.equal(await p.evaluate(() => elsewhere.store.get().filesPath), root + '/b');
-  await p.getByRole('button', {name : 'Open folder', exact : true}).click();
+  await p.getByRole('button', {name : 'Open Folder', exact : true}).click();
   await p.locator('[data-file-name="rescued (2).txt"]').waitFor();
   await p.route('**/api/drop/*/fail.txt', route => route.abort());
   await p.locator('canvas.stage').evaluate(el => {
@@ -463,12 +463,12 @@ try {
   assert.equal(await ro.evaluate(() => elsewhere.store.get().clipboardState.files.length),
                0);
   await ro.locator('#clipboard-toggle').click();
-  const clipboardPanel = ro.getByRole('dialog', {name : 'Desktop clipboard', exact : true});
+  const clipboardPanel = ro.getByRole('dialog', {name : 'Desktop Clipboard', exact : true});
   await clipboardPanel.getByText('Preview unavailable', {exact : true}).waitFor();
   assert.equal(
       await clipboardPanel.getByRole('button', {name : /^Download /}).count(),
       0);
-  await clipboardPanel.getByRole('button', {name : 'Close clipboard'}).click();
+  await clipboardPanel.getByRole('button', {name : 'Close Clipboard'}).click();
   await p.locator('canvas.stage').evaluate(el => {
     const data = new DataTransfer();
     data.items.add(new File([ 'hidden' ], '.rejected'));
@@ -525,7 +525,7 @@ try {
     state : 'detached'
   });
   q.once('dialog', dialog => dialog.accept('created folder'));
-  await q.getByRole('button', {name : 'New folder', exact : true}).click();
+  await q.getByRole('button', {name : 'New Folder', exact : true}).click();
   await q.locator('[data-file-name="created folder"]').waitFor();
   assert.equal(requests.length, otherRequests);
   console.log(

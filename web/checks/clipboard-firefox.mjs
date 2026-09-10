@@ -69,7 +69,7 @@ try {
     for (const pip of [false, true]) {
       if (pip) {
         const before = await wd(route + '/window/handles');
-        await click('button[title="Picture-in-picture"]');
+        await click('button[title="Picture-in-Picture"]');
         await wait(async () => (await wd(route + '/window/handles')).length > before.length);
         const handle = (await wd(route + '/window/handles')).find(handle => !before.includes(handle));
         await wd(route + '/window', { handle });

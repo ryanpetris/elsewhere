@@ -2,7 +2,7 @@
 // quality, effort and transport choices. Its height is fixed, so nothing here ever resizes the stage.
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Activity, AudioLines, Camera, CameraOff, Mic, MicOff, Settings2, SlidersHorizontal, Volume2, VolumeX, X } from 'lucide-react';
+import { Activity, AudioLines, Camera, CameraOff, Mic, MicOff, Settings2, SlidersHorizontal, Terminal, Volume2, VolumeX, X } from 'lucide-react';
 import { useStore } from '../store.js';
 import { EFFORTS, PRESETS, TRANSPORTS } from '../protocol.js';
 import { IconButton, codecName, cx } from './ui.jsx';
@@ -12,7 +12,7 @@ import { Popover } from './Launcher.jsx';
 const PRESET_LABEL = { 'very-low': 'Very Low', low: 'Low', medium: 'Medium', high: 'High', max: 'Max' };
 const EFFORT_LABEL = { fast: 'Fast', balanced: 'Balanced', high: 'High' };
 const TRANSPORT_LABEL = { webrtc: 'WebRTC', websocket: 'WebSocket' };
-const mbit = (kbps, digits = 3) => `${Number((kbps / 1000).toFixed(digits))} Mbit/s`;
+const mbit = (kbps, digits = 3) => `${Number((kbps / 1000).toFixed(digits))} Mbit`;
 
 // Whether a media query matches, kept current.
 function useMedia(query) {
@@ -42,32 +42,31 @@ function StreamControls({ viewer, stacked = false }) {
   const withTransport = rtcAvailable || transport === 'webrtc';
   const select = cx('select', stacked ? 'select-md w-full' : 'shrink-0');
   const codec = (
-    <select value={choice.codec} onChange={e => viewer.setChoice({ codec: e.target.value })} className={select} title="Video codec">
+    <select value={choice.codec} onChange={e => viewer.setChoice({ codec: e.target.value })} className={select} title="Video Codec">
       <option value="auto">Auto{choice.codec === 'auto' && st?.codec ? ` (${codecName(st.codec)})` : ''}</option>
-      {both.map(c => <option key={c.codec} value={c.codec}>{codecName(c.codec)}{choice.codec === c.codec && st?.codec && st.codec !== c.codec ? ` (using ${codecName(st.codec)})` : ''}{c.hardware ? '' : ' (software)'}</option>)}
+      {both.map(c => <option key={c.codec} value={c.codec}>{codecName(c.codec)}{choice.codec === c.codec && st?.codec && st.codec !== c.codec ? ` (Using ${codecName(st.codec)})` : ''}{c.hardware ? '' : ' (Software)'}</option>)}
     </select>
   );
   const quality = (
     <select value={choice.quality} onChange={e => viewer.setChoice({ quality: e.target.value })} className={select} title="Quality">
-      {PRESETS.map(p => <option key={p} value={p}>{PRESET_LABEL[p]} ({ceilings[p] === undefined ? 'server ceiling' : `up to ${mbit(ceilings[p])}`})</option>)}
+      {PRESETS.map(p => <option key={p} value={p}>{PRESET_LABEL[p]} ({ceilings[p] === undefined ? 'Server Limit' : mbit(ceilings[p])})</option>)}
     </select>
   );
   const effortSelect = (
-    <select value={choice.effort} onChange={event => viewer.setChoice({ effort: event.target.value })} className={select} title="Encoding effort">
+    <select value={choice.effort} onChange={event => viewer.setChoice({ effort: event.target.value })} className={select} aria-label="Encoding Effort" title="Encoding Effort">
       {EFFORTS.map(e => <option key={e} value={e}>{EFFORT_LABEL[e]}</option>)}
     </select>
   );
   const transportSelect = withTransport && (
-    <select value={transport} onChange={e => viewer.setTransport(e.target.value)} className={select} title="Transport: how the video travels (the socket unless the data channel is picked and opens)">
+    <select value={transport} onChange={e => viewer.setTransport(e.target.value)} className={select} title="Transport">
       {TRANSPORTS.map(t => <option key={t} value={t}>{TRANSPORT_LABEL[t]}</option>)}
     </select>
   );
-  const effortHint = 'Higher effort can improve the picture at the same bitrate, but uses more encoding time and can reduce responsiveness. Changes restart this stream immediately.';
   if (stacked) return (
     <div className="flex flex-col gap-3 p-3 text-xs">
       <Field label="Codec">{codec}</Field>
       <Field label="Quality">{quality}</Field>
-      <Field label="Effort" title={effortHint}>{effortSelect}</Field>
+      {effortSelect}
       {withTransport && <Field label="Transport">{transportSelect}</Field>}
     </div>
   );
@@ -75,15 +74,15 @@ function StreamControls({ viewer, stacked = false }) {
     <>
       {codec}
       {quality}
-      <span className="inline-flex shrink-0 items-center gap-1.5" title={effortHint}><span className="text-ink-4 max-xl:hidden">Effort</span>{effortSelect}</span>
+      {effortSelect}
       {transportSelect}
     </>
   );
 }
 
-function Field({ label, title, children }) {
+function Field({ label, children }) {
   return (
-    <label className="flex flex-col gap-1" title={title}>
+    <label className="flex flex-col gap-1">
       <span className="eyebrow">{label}</span>
       {children}
     </label>
@@ -106,17 +105,17 @@ function StreamChip({ viewer }) {
   const summary = st?.codec ? `${codecName(st.codec)} · ${PRESET_LABEL[choice.quality]}` : 'Stream';
   return (
     <>
-      <button ref={button} type="button" aria-label="Stream settings" title="Stream settings: codec, quality, effort and transport" aria-expanded={open} aria-haspopup="dialog" aria-controls="stream-settings"
+      <button ref={button} type="button" aria-label="Stream Settings" title="Stream Settings" aria-expanded={open} aria-haspopup="dialog" aria-controls="stream-settings"
         onClick={() => setOpen(!open)} className={cx('inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md px-1.5 font-sans text-[11px] font-medium transition-colors', open ? 'bg-accent/15 text-accent-2' : 'text-ink-2 hover:bg-surface-3 hover:text-ink')}>
         <Settings2 className="size-3.5" />
         <span className="hidden whitespace-nowrap sm:inline">{summary}</span>
       </button>
       {open && createPortal(
-        <Popover floating ref={panel} id="stream-settings" role="dialog" aria-label="Stream settings" onClose={close}
+        <Popover floating ref={panel} id="stream-settings" role="dialog" aria-label="Stream Settings" onClose={close}
           onKeyDown={event => event.stopPropagation()} style={{ right: 8, bottom: 40, width: 'min(20rem, calc(100vw - 1rem))' }} className="font-sans">
           <div className="flex items-center justify-between border-b border-line px-3 py-2">
-            <h2 className="text-sm font-medium text-ink">Stream settings</h2>
-            <IconButton icon={X} label="Close stream settings" size="sm" onClick={close} />
+            <h2 className="text-sm font-medium text-ink">Stream Settings</h2>
+            <IconButton icon={X} label="Close Stream Settings" size="sm" onClick={close} />
           </div>
           <StreamControls viewer={viewer} stacked />
         </Popover>, document.querySelector('[data-viewer]') ?? document.body)}
@@ -136,7 +135,7 @@ function Metric({ icon: Icon, value, width, title, warn = false, className = '' 
 
 const control = 'inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md px-1.5 font-sans text-[11px] font-medium text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent aria-expanded:bg-accent/15 aria-expanded:text-accent-2';
 
-export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixer, controlsHidden, onShowControls }) {
+export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixer, terminal, onTerminal, controlsHidden, onShowControls }) {
   const s = useStore(viewer.store, st => st.stats);
   const renderer = useStore(viewer.store, st => st.renderer);
   const mic = useStore(viewer.store, st => st.mic);
@@ -159,43 +158,47 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
     : 'WebSocket · retrying WebRTC';
   const bad = s.lost + s.dropped + s.decodeErrors;
   const listens = permissions.includes('audio.listen');
-  // The four readouts follow the optional Show controls button. The bar never wraps: each width hides what
-  // does not fit, and the controls clip rather than overflow during the switch between the inline
-  // controls and the chip.
+  // The four readouts follow the optional Show Controls button. The bar never wraps: each width hides what
+  // does not fit, and the controls scroll horizontally when space is limited.
   return (
     <footer className="flex h-8 shrink-0 items-center gap-x-2 border-t border-line bg-surface px-2 font-mono text-[11px] text-ink-3 sm:gap-x-3 sm:px-3">
-      {controlsHidden && <button type="button" className="btn btn-outline btn-xs shrink-0" onFocus={viewer.releaseInput} onClick={onShowControls} title="Show controls (Ctrl+Alt+Shift+H)">Show controls</button>}
+      {controlsHidden && <button type="button" className="btn btn-outline btn-xs shrink-0" onFocus={viewer.releaseInput} onClick={onShowControls} title="Show Controls (Ctrl+Alt+Shift+H)">Show Controls</button>}
       <Metric icon={Activity} value={`${s.fps} fps`} width="w-[9ch]" title={`${s.fps} frames per second painted`} />
-      <Metric value={`${s.mbps.toFixed(1)} Mbit/s`} width="w-[13ch]" title={`Measured video throughput: ${s.mbps.toFixed(1)} Mbit/s`} className="max-[26rem]:hidden" />
+      <Metric value={`${s.mbps.toFixed(1)} Mbit`} width="w-[11ch]" title={`Measured video throughput: ${s.mbps.toFixed(1)} Mbit`} className="max-[26rem]:hidden" />
       <Metric value={`${s.latencyMs.toFixed(0)} ms`} width="w-[8ch]" title={`Input to the next painted frame: ${s.latencyMs.toFixed(0)} ms`} className="max-lg:hidden" />
       <Metric value={`${s.lost} · ${s.dropped} · ${s.decodeErrors}`} width="w-[19ch]" title={`lost ${s.lost} · dropped ${s.dropped} · decode errors ${s.decodeErrors}`} warn={bad > 0} className="max-xl:hidden" />
       <span className="hidden min-w-0 flex-1 items-center gap-2 sm:flex" title={recovery.reason || transportHint}>
         <span className={cx('size-1.5 shrink-0 rounded-full', status !== 'connected' ? 'bg-ink-4' : videoVia === 'webrtc' ? 'bg-info' : 'bg-ok')} />
         <span className="min-w-0 truncate" data-transport-status>{transportHint}</span>
-        {recovery.state === 'waiting' && <button type="button" onClick={() => viewer.retryRtc()} className="btn btn-link btn-xs shrink-0 font-sans">Retry now</button>}
+        {recovery.state === 'waiting' && <button type="button" onClick={() => viewer.retryRtc()} className="btn btn-link btn-xs shrink-0 font-sans">Retry Now</button>}
       </span>
-      <span className="ml-auto flex min-w-0 items-center gap-1 overflow-x-clip sm:gap-1.5">
+      <span className="ml-auto flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] sm:gap-1.5">
         <ClipboardControl viewer={viewer} />
+        {onTerminal && status === 'connected' && permissions.includes('commands.execute') && (
+          <button id="terminal-toggle" type="button" aria-label="Terminal" title="Terminal" aria-expanded={terminal && !controlsHidden} onClick={onTerminal} className={control}>
+            <Terminal className="size-3.5" />
+          </button>
+        )}
         {listens && onMixer && (
-          <button id="session-mixer-toggle" type="button" aria-label="Session audio mixer" title="Session audio mixer" aria-expanded={mixerPanel && !controlsHidden} onClick={onMixer} className={control}>
-            <SlidersHorizontal className="size-3.5" /><span className="hidden 2xl:inline">Mixer</span>
+          <button id="session-mixer-toggle" type="button" aria-label="Audio Mixer" title="Audio Mixer" aria-expanded={mixerPanel && !controlsHidden} onClick={onMixer} className={control}>
+            <SlidersHorizontal className="size-3.5" />
           </button>
         )}
         {listens && onAudioPanel && (
-          <button type="button" aria-label="Audio visualiser" title="Audio visualiser" aria-expanded={audioPanel && !controlsHidden} onClick={onAudioPanel} className={control}>
-            <AudioLines className="size-3.5" /><span className="hidden 2xl:inline">Visualiser</span>
+          <button type="button" aria-label="Audio Visualizer" title="Audio Visualizer" aria-expanded={audioPanel && !controlsHidden} onClick={onAudioPanel} className={control}>
+            <AudioLines className="size-3.5" />
           </button>
         )}
         <span className="inline-flex size-6 shrink-0 items-center justify-center max-lg:hidden" title={s.audio ? `audio ${s.audio.state}` : 'no audio yet'}>
           {s.audio?.state === 'running' ? <Volume2 className="size-3.5 text-ok" /> : <VolumeX className="size-3.5 text-ink-4" />}
         </span>
         {role === 'controller' && micAvailable && navigator.mediaDevices && 'AudioEncoder' in window && (
-          <button type="button" aria-label="Microphone" aria-pressed={mic} onClick={e => { (mic ? viewer.mic.stop : viewer.mic.start)(); e.currentTarget.blur(); }} title={mic ? 'Microphone on: the desktop hears you' : 'Microphone: let the desktop hear you'} className={cx(control, 'w-6 px-0', mic && 'bg-ok/15 text-ok hover:text-ok')}>
+          <button type="button" aria-label="Microphone" aria-pressed={mic} onClick={e => { (mic ? viewer.mic.stop : viewer.mic.start)(); e.currentTarget.blur(); }} title={mic ? 'Mute Microphone' : 'Enable Microphone'} className={cx(control, 'w-6 px-0', mic && 'bg-ok/15 text-ok hover:text-ok')}>
             {mic ? <Mic className="size-3.5" /> : <MicOff className="size-3.5" />}
           </button>
         )}
         {role === 'controller' && camAvailable && navigator.mediaDevices && 'VideoEncoder' in window && 'MediaStreamTrackProcessor' in window && (
-          <button type="button" aria-label="Webcam" aria-pressed={cam} onClick={e => { (cam ? viewer.cam.stop : viewer.cam.start)(); e.currentTarget.blur(); }} title={cam ? 'Webcam on: the desktop sees you' : 'Webcam: let the desktop see you'} className={cx(control, 'w-6 px-0', cam && 'bg-ok/15 text-ok hover:text-ok')}>
+          <button type="button" aria-label="Webcam" aria-pressed={cam} onClick={e => { (cam ? viewer.cam.stop : viewer.cam.start)(); e.currentTarget.blur(); }} title={cam ? 'Disable Webcam' : 'Enable Webcam'} className={cx(control, 'w-6 px-0', cam && 'bg-ok/15 text-ok hover:text-ok')}>
             {cam ? <Camera className="size-3.5" /> : <CameraOff className="size-3.5" />}
           </button>
         )}

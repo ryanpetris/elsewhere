@@ -152,13 +152,13 @@ try {
     await page.evaluate(name => elsewhere.spawn('foot --app-id=prefix-' + name), name);
     await page.waitForFunction(name => elsewhere.store.get().windows.some(w => w.app_id === 'prefix-' + name), name);
     const popupPromise = page.waitForEvent('popup');
-    await page.getByRole('button', { name: 'Open in its own window', exact: true }).first().click({ force: true });
+    await page.getByRole('button', { name: 'Open in New Window', exact: true }).first().click({ force: true });
     const popup = instance.popup = await popupPromise;
     await popup.waitForFunction(() => window.elsewhere?.store.get().stats.frames > 0);
     assert.equal(new URL(popup.url()).pathname, prefix + '/');
     assert.equal(await popup.evaluate(key => sessionStorage.getItem(key), key), token);
     assert.equal(await page.evaluate(() => elsewhere.pip.supported), true, 'rig supports document PiP');
-    await page.getByRole('button', { name: 'Picture-in-picture', exact: true }).first().click();
+    await page.getByRole('button', { name: 'Picture-in-Picture', exact: true }).first().click();
     await page.waitForFunction(() => documentPictureInPicture.window?.document.querySelector('iframe')?.contentWindow.elsewhere?.store.get().stats.frames > 0);
     assert.equal(await page.evaluate(() => new URL(documentPictureInPicture.window.document.querySelector('iframe').src).pathname), prefix + '/');
     await page.evaluate(() => elsewhere.pip.close());
@@ -178,12 +178,12 @@ try {
   for (const instance of [alice, bob]) {
     await instance.page.getByRole('button', { name: 'Broadcasts', exact: true }).click();
   }
-  await alice.page.getByRole('button', { name: 'Add preset', exact: true }).click();
-  const preset = alice.page.getByRole('form', { name: 'Broadcast preset' });
+  await alice.page.getByRole('button', { name: 'Add Preset', exact: true }).click();
+  const preset = alice.page.getByRole('form', { name: 'Broadcast Preset' });
   await preset.getByLabel('Name', { exact: true }).fill('Shared broadcast check');
   await preset.getByLabel('Ingest URL').fill('rtmp://127.0.0.1:19399/live');
-  await preset.getByLabel('Stream key').fill('browser-secret-sentinel');
-  await preset.getByRole('button', { name: 'Save preset' }).click();
+  await preset.getByLabel('Stream Key').fill('browser-secret-sentinel');
+  await preset.getByRole('button', { name: 'Save Preset' }).click();
   await bob.page.getByText('Shared broadcast check', { exact: true }).waitFor();
   assert.equal(await bob.page.evaluate(() => Object.keys(localStorage).filter(k => k.startsWith('elsewhere.broadcastPreset.')).length), 1);
   const participant = await context.newPage();
@@ -211,13 +211,13 @@ try {
   await wait('participant stops broadcast', async () => (await (await context.request.get(origin + alice.prefix + '/api/broadcasts', { headers: authAlice })).json())[0].state === 'stopped');
   await participant.close();
   await bob.page.getByRole('button', { name: 'Edit', exact: true }).click();
-  assert.equal(await bob.page.getByRole('form', { name: 'Broadcast preset' }).getByLabel('Stream key').inputValue(), 'browser-secret-sentinel');
-  await bob.page.getByRole('form', { name: 'Broadcast preset' }).getByLabel('Name', { exact: true }).fill('Shared edited preset');
-  await bob.page.getByRole('button', { name: 'Save preset', exact: true }).click();
+  assert.equal(await bob.page.getByRole('form', { name: 'Broadcast Preset' }).getByLabel('Stream Key').inputValue(), 'browser-secret-sentinel');
+  await bob.page.getByRole('form', { name: 'Broadcast Preset' }).getByLabel('Name', { exact: true }).fill('Shared edited preset');
+  await bob.page.getByRole('button', { name: 'Save Preset', exact: true }).click();
   await alice.page.getByText('Shared edited preset', { exact: true }).waitFor();
   await alice.page.getByRole('button', { name: 'Remove', exact: true }).click();
   await wait('preset removed in other instance', async () => await bob.page.getByText('Shared edited preset', { exact: true }).count() === 0);
-  console.log('Broadcast presets share across instance paths; participant broadcast start/stop and host-specific status passed');
+  console.log('Broadcast Presets share across instance paths; participant broadcast start/stop and host-specific status passed');
 
   assert.notEqual(await alice.popup.evaluate(() => window.name), await bob.popup.evaluate(() => window.name));
   assert.ok(!alice.popup.isClosed() && !bob.popup.isClosed(), 'both instance popups remain open');

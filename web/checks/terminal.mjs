@@ -28,10 +28,12 @@ try {
   await page.addInitScript(() => {
     const Original = window.WebSocket;
     window.terminalBytes = 0;
+    window.terminalSockets = 0;
     window.desktopKeys = 0;
     window.WebSocket = class extends Original {
       constructor(...args) {
         super(...args);
+        if (String(args[0]).endsWith('/ws/terminal')) terminalSockets++;
         if (String(args[0]).endsWith('/ws/terminal')) this.addEventListener('message', event => {
           if (event.data instanceof ArrayBuffer) terminalBytes += event.data.byteLength;
         });
@@ -49,6 +51,14 @@ try {
   await page.getByRole('button', { name: 'Terminal', exact: true }).click();
   const terminal = page.getByRole('region', { name: 'Terminal', exact: true });
   await terminal.getByRole('status').filter({ hasText: 'Connected' }).waitFor();
+  assert.equal(await page.locator('footer #terminal-toggle').count(), 1);
+  assert.equal(await page.locator('#terminal-toggle').textContent(), '');
+  await page.keyboard.press('Control+Alt+Shift+h');
+  await page.locator('footer #terminal-toggle').click();
+  await terminal.getByRole('status').filter({ hasText: 'Connected' }).waitFor();
+  assert.equal(await page.locator('#terminal-toggle').getAttribute('aria-expanded'), 'true');
+  assert.equal(await page.evaluate(() => terminalSockets), 1, 'revealing the terminal preserves its shell');
+  await page.evaluate(() => { desktopKeys = 0; });
   const input = terminal.locator('textarea');
   const command = async text => { await input.focus(); await page.keyboard.type(text); await page.keyboard.press('Enter'); };
   await command('env > shellenv');
@@ -93,7 +103,7 @@ try {
   await wait('shell PID', () => contents(root + '/shellpid'));
   const shellpid = (await contents(root + '/shellpid')).trim();
   assert.equal(await page.evaluate(() => desktopKeys), 0, 'terminal typing never sends desktop key events');
-  await terminal.getByRole('button', { name: 'Close terminal' }).click();
+  await terminal.getByRole('button', { name: 'Close Terminal' }).click();
   await wait('shell cleanup', async () => await contents('/proc/' + shellpid + '/status') === null);
   console.log('terminal: session environment, graphical launch, interactive commands, signals, job control, resize, flow control and cleanup passed');
 
@@ -103,7 +113,7 @@ try {
   await failedLoad.waitForFunction(() => ['controller', 'participant'].includes(elsewhere.store.get().role));
   await failedLoad.getByRole('button', { name: 'Terminal', exact: true }).click();
   await failedLoad.getByRole('status').filter({ hasText: 'Terminal could not load' }).waitFor();
-  await failedLoad.getByRole('button', { name: 'Close terminal', exact: true }).click();
+  await failedLoad.getByRole('button', { name: 'Close Terminal', exact: true }).click();
   await failedLoad.locator('canvas').waitFor();
   await failedLoad.evaluate(() => elsewhere.spawn('touch after-load-failure'));
   await wait('desktop after terminal download failure', () => contents(root + '/after-load-failure').then(text => text === ''));

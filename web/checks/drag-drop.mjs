@@ -175,9 +175,9 @@ try {
   touch(0, ...point('x-target')); await sleep(100); touch(2, ...point('x-target'));
   await wait(async () => !(await api('windows')).find(w => w.id === windows['w-target'].id).popups.length, 'outside touch dismisses popup');
   console.log('Wayland popup dismissed by touch on X11');
-  await writeFile(root + '/lock.html', '<title>Pointer lock check</title><button style="width:100%;height:200px" onclick="document.body.requestPointerLock()">Lock pointer</button>');
+  await writeFile(root + '/lock.html', '<title>Pointer Lock check</title><button style="width:100%;height:200px" onclick="document.body.requestPointerLock()">Lock pointer</button>');
   await api('control', {op: 'spawn', cmd: ['chromium', '--no-sandbox', '--ozone-platform=wayland', '--no-first-run', '--user-data-dir=' + root + '/chromium', '--app=file://' + root + '/lock.html'].map(quote).join(' ')});
-  const lockWindow = await wait(async () => (await api('windows')).find(w => w.title === 'Pointer lock check'), 'pointer-lock client');
+  const lockWindow = await wait(async () => (await api('windows')).find(w => w.title === 'Pointer Lock check'), 'pointer-lock client');
   await sleep(500); // Chromium maps its window before the page is ready for input.
   const start = packets.length;
   await input({type: 'click', x: 80, y: 100, window: lockWindow.id});

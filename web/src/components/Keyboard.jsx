@@ -59,9 +59,9 @@ export function Keyboard({ viewer, onClose }) {
         </button>
       ))}
       <input ref={field} data-keyboard="" onKeyDown={onKeyDown} onFocus={viewer.releaseInput}
-        aria-label="Type into the desktop" autoCapitalize="off" autoCorrect="off" autoComplete="off" spellCheck={false}
+        aria-label="Type Into Desktop" autoCapitalize="off" autoCorrect="off" autoComplete="off" spellCheck={false}
         className="h-7 w-0 min-w-0 flex-1 rounded-md border border-dashed border-line-2 bg-transparent px-1 text-transparent caret-transparent outline-none focus:border-accent" />
-      <IconButton icon={X} label="Hide the keyboard row" size="sm" onClick={onClose} />
+      <IconButton icon={X} label="Hide Keyboard" size="sm" onClick={onClose} />
     </div>
   );
 }

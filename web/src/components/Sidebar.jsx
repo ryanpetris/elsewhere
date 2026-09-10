@@ -72,8 +72,7 @@ function WindowList({ viewer, active }) {
       {order.length === 0 ? (
         <div className="flex flex-col items-center gap-2 px-6 py-12 text-center">
           <span className="flex size-10 items-center justify-center rounded-xl border border-line bg-surface-2 text-ink-4"><AppWindow className="size-5" strokeWidth={1.5} /></span>
-          <span className="text-sm text-ink-2">No windows</span>
-          <span className="text-xs text-ink-4">{spawn ? 'Run a command above or open an application.' : 'Nothing is open on the desktop.'}</span>
+          <span className="text-sm text-ink-2">No Windows</span>
         </div>
       ) : (
         <div className="flex items-center justify-between px-3 pt-3 pb-1.5">
@@ -99,7 +98,7 @@ function Spawn({ viewer }) {
           onChange={e => setCmd(e.target.value)}
           onFocus={viewer.releaseInput}
           onKeyDown={e => { if (e.key === 'Enter') run(); if (e.key === 'Escape') e.currentTarget.blur(); }}
-          placeholder="Run a command…"
+          placeholder="Run a Command…"
           spellCheck={false}
           autoComplete="off"
           className="input font-mono text-xs pl-7"
@@ -150,12 +149,12 @@ function WindowRow({ viewer, w, acts, eligible, dpr }) {
       </div>
       {/* the actions float over the row's end on hover, so titles keep the width */}
       <div className="absolute top-1/2 right-2 flex -translate-y-1/2 items-center gap-px rounded-md border border-line-2 bg-surface-3 p-0.5 opacity-0 shadow-pop transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-        <Action icon={ExternalLink} label="Open in its own window" onClick={e => {
+        <Action icon={ExternalLink} label="Open in New Window" onClick={e => {
           e.stopPropagation(); e.currentTarget.blur();
           // the window's size plus the popup's own bars (TopBar h-12 + StatusBar h-8), so it shows 1:1
           window.open(url(`/?window=${w.id}`), storageKey(`window-${w.id}`), `popup,width=${w.w},height=${w.h + 80}`);
         }} />
-        {viewer.pip.supported && <Action icon={PictureInPicture2} label="Picture-in-picture" onClick={e => { e.stopPropagation(); viewer.pip.open(w.id); }} />}
+        {viewer.pip.supported && <Action icon={PictureInPicture2} label="Picture-in-Picture" onClick={e => { e.stopPropagation(); viewer.pip.open(w.id); }} />}
         <Action icon={Camera} label="Snapshot (PNG)" onClick={e => {
           e.stopPropagation(); e.currentTarget.blur();
           const tab = window.open('', '_blank'); // opened now, inside the click, so popup blockers allow it
@@ -242,34 +241,34 @@ function StatsPanel({ viewer }) {
   return (
     <div className="flex flex-col gap-3 p-3 text-xs">
       <div className="grid grid-cols-3 gap-2">
-        <Tile label="Frame rate" value={s.fps} unit="fps" />
-        <Tile label="Throughput" value={s.mbps.toFixed(1)} unit="Mbit/s" />
+        <Tile label="Frame Rate" value={s.fps} unit="fps" />
+        <Tile label="Throughput" value={s.mbps.toFixed(1)} unit="Mbit" />
         <Tile label="Latency" value={s.latencyMs.toFixed(0)} unit="ms" />
       </div>
       <Section title="Stream">
         <Row label="Codec" value={stream ? `${codecName(stream.codec)} · ${stream.codec}` : '–'} />
         <Row label="Size" value={stream ? `${stream.width}×${stream.height} @${stream.scale.toFixed(2)}` : '–'} />
         <Row label="Renderer" value={renderer} />
-        <Row label="Frame rate" value={`${s.fps} fps`} />
-        <Row label="Bandwidth" value={`${s.mbps.toFixed(1)} Mbit/s`} />
-        <Row label="Input → paint" value={`${s.latencyMs.toFixed(0)} ms`} />
+        <Row label="Frame Rate" value={`${s.fps} fps`} />
+        <Row label="Bandwidth" value={`${s.mbps.toFixed(1)} Mbit`} />
+        <Row label="Input → Paint" value={`${s.latencyMs.toFixed(0)} ms`} />
       </Section>
-      <Section title="Timings, last second" hint="p50 / p95">
-        <Row label="Received → decoded" value={t ? `${ms(t.decode[0])} / ${ms(t.decode[1])} ms` : '–'} />
-        <Row label="Decoded → painted" value={t ? `${ms(t.paint[0])} / ${ms(t.paint[1])} ms` : '–'} />
-        <Row label="Paint interval" value={t ? `${ms(t.interval[0])} / ${ms(t.interval[1])} ms` : '–'} />
-        <Row label="Decode queue" value={s.queue} />
+      <Section title="Timings, Last Second" hint="p50 / p95">
+        <Row label="Received → Decoded" value={t ? `${ms(t.decode[0])} / ${ms(t.decode[1])} ms` : '–'} />
+        <Row label="Decoded → Painted" value={t ? `${ms(t.paint[0])} / ${ms(t.paint[1])} ms` : '–'} />
+        <Row label="Paint Interval" value={t ? `${ms(t.interval[0])} / ${ms(t.interval[1])} ms` : '–'} />
+        <Row label="Decode Queue" value={s.queue} />
       </Section>
       <Section title="Frames" badge={bad > 0 ? <Badge tone="warn">{bad} issues</Badge> : <Badge tone="ok">clean</Badge>}>
-        <Row label="Painted / received" value={`${s.frames} / ${s.received}`} />
+        <Row label="Painted / Received" value={`${s.frames} / ${s.received}`} />
         <Row label="Keyframes" value={`${s.keyframes} (${s.sinceKey} since last)`} />
-        <Row label="Lost / dropped / errors" value={`${s.lost} / ${s.dropped} / ${s.decodeErrors}`} warn={bad > 0} />
+        <Row label="Lost / Dropped / Errors" value={`${s.lost} / ${s.dropped} / ${s.decodeErrors}`} warn={bad > 0} />
       </Section>
       <Section title="Audio" badge={s.audio ? <Badge tone={s.audio.state === 'running' ? 'ok' : 'neutral'}>{s.audio.state}</Badge> : <Badge>off</Badge>}>
         {s.audio ? (
           <>
             <Row label="State" value={s.audio.state} />
-            <Row label="Packets / decoded" value={`${s.audio.packets} / ${s.audio.decoded}`} />
+            <Row label="Packets / Decoded" value={`${s.audio.packets} / ${s.audio.decoded}`} />
             <Row label="Lead" value={`${s.audio.lead.toFixed(0)} ms`} />
             <Row label="Underruns" value={s.underruns} warn={s.underruns > 0} />
             <div className="mt-1.5 flex items-center gap-2">
@@ -280,28 +279,28 @@ function StatsPanel({ viewer }) {
         ) : <Row label="State" value="off" />}
       </Section>
       <Section title="Connection">
-        <Row label="Selected transport" value={transport === 'webrtc' ? 'WebRTC' : 'WebSocket'} />
+        <Row label="Selected Transport" value={transport === 'webrtc' ? 'WebRTC' : 'WebSocket'} />
         <Row label="WebSocket" value={status === 'connected' ? 'connected' : status} />
-        <Row label="WebRTC recovery" value={transport === 'webrtc' ? recovery.state : 'off'} />
+        <Row label="WebRTC Recovery" value={transport === 'webrtc' ? recovery.state : 'off'} />
         {transport === 'webrtc' && <>
           {recovery.reason && <Row label="Reason" value={recovery.reason} />}
-          <Row label="Retries this viewer" value={recovery.retries} />
+          <Row label="Retries" value={recovery.retries} />
           {recovery.state === 'waiting' && <>
-            <Row label="Next attempt" value={`in ${Math.max(0, Math.ceil((recovery.nextAt - Date.now()) / 1000))} s`} />
-            <button type="button" onClick={() => viewer.retryRtc()} className="btn btn-outline btn-xs mt-1 self-start">Retry now</button>
+            <Row label="Next Attempt" value={`in ${Math.max(0, Math.ceil((recovery.nextAt - Date.now()) / 1000))} s`} />
+            <button type="button" onClick={() => viewer.retryRtc()} className="btn btn-outline btn-xs mt-1 self-start">Retry Now</button>
           </>}
         </>}
-        <Row label="Video via" value={videoVia === 'webrtc' ? 'WebRTC data channel' : 'WebSocket'} />
+        <Row label="Video Via" value={videoVia === 'webrtc' ? 'WebRTC data channel' : 'WebSocket'} />
         {s.rtc && (
           <>
-            <Row label="Round trip" value={s.rtc.rttMs === null ? '–' : `${s.rtc.rttMs.toFixed(0)} ms`} />
-            <Row label="Channel received" value={`${s.rtc.messages} messages, ${(s.rtc.bytes / 1e6).toFixed(1)} MB`} />
-            <Row label="Frames incomplete" value={s.rtc.incomplete} warn={s.rtc.incomplete > 0} />
+            <Row label="Round Trip" value={s.rtc.rttMs === null ? '–' : `${s.rtc.rttMs.toFixed(0)} ms`} />
+            <Row label="Channel Received" value={`${s.rtc.messages} messages, ${(s.rtc.bytes / 1e6).toFixed(1)} MB`} />
+            <Row label="Incomplete Frames" value={s.rtc.incomplete} warn={s.rtc.incomplete > 0} />
           </>
         )}
-        <Row label="Connects / closes" value={`${s.connects} / ${s.closes.length}`} />
-        {s.closes.length > 0 && <Row label="Last close" value={s.closes[s.closes.length - 1]} />}
-        <Row label="Pointer lock" value={`${locked ? 'locked' : 'free'} (${s.lockRequests} requests${s.lockError ? ', ' + s.lockError : ''})`} />
+        <Row label="Connects / Closes" value={`${s.connects} / ${s.closes.length}`} />
+        {s.closes.length > 0 && <Row label="Last Close" value={s.closes[s.closes.length - 1]} />}
+        <Row label="Pointer Lock" value={`${locked ? 'locked' : 'free'} (${s.lockRequests} requests${s.lockError ? ', ' + s.lockError : ''})`} />
       </Section>
     </div>
   );

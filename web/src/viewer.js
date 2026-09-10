@@ -1154,7 +1154,7 @@ export function createViewer() {
     store.set({ controlsHidden: hidden });
     if (!hidden && ownFullscreen()) document.exitFullscreen().catch(() => {});
     canvas?.focus({ preventScroll: true });
-    if (hidden) notice('Show controls in the status bar, or press Ctrl+Alt+Shift+H.', 'success');
+    if (hidden) notice('Ctrl+Alt+Shift+H to show controls.', 'success');
   }
   let controlsKey = false;
   const controlsShortcut = e => {

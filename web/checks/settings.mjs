@@ -62,11 +62,10 @@ try {
   assert.equal(new URL(page.url()).search + new URL(page.url()).hash, '');
   const trigger = page.getByRole('button', { name: 'Settings', exact: true });
   const panel = page.getByRole('dialog', { name: 'Settings', exact: true });
-  const borders = panel.getByRole('checkbox', { name: 'Window borders', exact: true });
-  const elements = panel.getByRole('checkbox', { name: 'UI elements', exact: true });
-  const capture = panel.getByRole('checkbox', { name: 'Capture mouse on click', exact: true });
-  assert.equal(await page.getByRole('button', { name: 'Window borders', exact: true }).count(), 0);
-  assert.equal(await page.getByRole('button', { name: 'UI elements of the focused window', exact: true }).count(), 0);
+  const borders = panel.getByRole('checkbox', { name: 'Window Borders', exact: true });
+  const elements = panel.getByRole('checkbox', { name: 'UI Elements', exact: true });
+  const capture = panel.getByRole('checkbox', { name: 'Capture Mouse on Click', exact: true });
+  assert.equal(await page.getByRole('button', { name: 'Window Borders', exact: true }).count(), 0);
   await trigger.click();
   assert(await borders.evaluate(el => el === document.activeElement));
   assert.equal(await borders.isChecked(), false); assert.equal(await elements.isChecked(), false);
@@ -102,9 +101,9 @@ try {
   await trigger.click(); assert(await borders.isChecked() && await elements.isChecked());
   await page.getByRole('button', { name: 'Applications', exact: true }).click();
   assert.equal(await panel.count(), 0);
-  await page.getByPlaceholder('Search applications…').waitFor();
+  await page.getByPlaceholder('Search Applications…').waitFor();
   await trigger.click(); await panel.waitFor();
-  assert.equal(await page.getByPlaceholder('Search applications…').count(), 0);
+  assert.equal(await page.getByPlaceholder('Search Applications…').count(), 0);
   await page.locator('header').click({ position: { x: 3, y: 3 } });
   assert.equal(await panel.count(), 0, 'header outside click dismisses settings');
   await trigger.click();
@@ -115,9 +114,9 @@ try {
   await page.keyboard.press('a');
   await page.keyboard.press('Escape');
   assert(await apps.evaluate(el => el === document.activeElement));
-  assert.equal(await page.getByPlaceholder('Search applications…').count(), 0);
+  assert.equal(await page.getByPlaceholder('Search Applications…').count(), 0);
   await apps.click();
-  const search = page.getByPlaceholder('Search applications…');
+  const search = page.getByPlaceholder('Search Applications…');
   await search.fill('Local Test');
   await search.press('Enter');
   await search.waitFor({ state: 'detached' });
@@ -125,7 +124,7 @@ try {
   assert(await page.evaluate(() => controlRequests.some(p => p.op === 'launch' && p.app === 'local-test.desktop')), 'search Enter launches the selected application');
   await page.getByRole('button', { name: 'Quit Elsewhere', exact: true }).click();
   await page.getByRole('button', { name: 'Quit Elsewhere', exact: true }).last().click();
-  await page.getByText('Quit Elsewhere? Every window closes with it, and the desktop is gone until it is started again.', { exact: true }).click();
+  await page.getByText('Quit Elsewhere and close all windows?', { exact: true }).click();
   await page.keyboard.press('a');
   assert.equal(await page.evaluate(() => sent.filter(p => [0x83, 0x84, 0x85, 0x86, 0x87, 0x91, 0x92].includes(p[0])).length), 0, 'application and power menu keys stay local');
   await trigger.click(); await panel.waitFor();
@@ -221,7 +220,7 @@ try {
   await phone.waitForFunction(() => !!window.socket && !!window.elsewhere?.store);
   await phone.evaluate(() => elsewhere.store.set({ status: 'connected', role: 'controller' }));
   await phone.getByRole('button', { name: 'Settings', exact: true }).tap();
-  const phoneBorders = phone.getByRole('checkbox', { name: 'Window borders', exact: true });
+  const phoneBorders = phone.getByRole('checkbox', { name: 'Window Borders', exact: true });
   await phoneBorders.tap(); assert(await phoneBorders.isChecked());
   assert.equal(await borders.isChecked(), false, 'another viewer keeps its own overlays');
   assert.equal(await phone.evaluate(() => sent.filter(p => [0x83, 0x84, 0x85, 0x86, 0x87, 0x91, 0x92].includes(p[0])).length), 0);
@@ -233,7 +232,7 @@ try {
   assert.equal(await popup.evaluate(() => elsewhere.store.get().elementsOn), false);
   await page.keyboard.press('Escape');
   await page.evaluate(() => elsewhere.store.set({ permissions: ['desktop.view', 'audio.listen'] }));
-  for (const name of ['Session audio mixer', 'Audio visualiser']) {
+  for (const name of ['Audio Mixer', 'Audio Visualizer']) {
     const toggle = page.getByRole('button', { name, exact: true });
     await toggle.click();
     assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
@@ -246,7 +245,7 @@ try {
     const stage = current.locator('canvas.stage');
     await current.evaluate(() => { window.originalCanvas = document.querySelector('canvas.stage'); window.originalSocket = socket; });
     await current.locator('#hide-controls').click();
-    const show = current.getByRole('button', { name: 'Show controls', exact: true });
+    const show = current.getByRole('button', { name: 'Show Controls', exact: true });
     await show.waitFor();
     assert(await current.locator('footer').getByText('0 fps', { exact: true }).isVisible());
     assert.equal(await current.locator('#hide-controls').isVisible(), false);
@@ -261,6 +260,12 @@ try {
     await current.keyboard.press('Control+Alt+Shift+h');
     await current.locator('#hide-controls').waitFor();
   }
+  await phone.locator('#hide-controls').click();
+  await phone.evaluate(() => elsewhere.store.set({ status: 'connected', permissions: ['desktop.view', 'commands.execute', 'audio.listen', 'clipboard.read', 'clipboard.write'] }));
+  await phone.getByRole('button', { name: 'Stream Settings', exact: true }).click();
+  await phone.getByRole('dialog', { name: 'Stream Settings', exact: true }).waitFor();
+  await phone.getByRole('button', { name: 'Close Stream Settings', exact: true }).click();
+  await phone.getByRole('button', { name: 'Show Controls', exact: true }).click();
   await page.keyboard.down('Control'); await page.keyboard.down('Alt'); await page.keyboard.down('Shift'); await page.keyboard.down('h');
   await page.evaluate(() => window.dispatchEvent(new Event('blur')));
   await page.keyboard.up('Shift'); await page.keyboard.up('Alt'); await page.keyboard.up('Control');
@@ -271,13 +276,13 @@ try {
   await page.bringToFront();
   await page.evaluate(() => elsewhere.store.set({ status: 'connected', role: 'controller' }));
   await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
-  await page.getByRole('button', { name: 'Show controls', exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Stream settings', exact: true }).click();
-  const streamPanel = page.getByRole('dialog', { name: 'Stream settings', exact: true });
+  await page.getByRole('button', { name: 'Show Controls', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Stream Settings', exact: true }).click();
+  const streamPanel = page.getByRole('dialog', { name: 'Stream Settings', exact: true });
   await streamPanel.waitFor();
   assert(await page.evaluate(() => document.fullscreenElement.contains(document.querySelector('#stream-settings'))));
-  await page.getByRole('button', { name: 'Close stream settings', exact: true }).click();
-  await page.getByRole('button', { name: 'Show controls', exact: true }).click();
+  await page.getByRole('button', { name: 'Close Stream Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Show Controls', exact: true }).click();
   await page.waitForFunction(() => !document.fullscreenElement);
   assert.deepEqual(errors, []);
   console.log('settings defaults/persistence, overlays, local keyboard, menus, late responses, unavailable support, read-only, fullscreen, narrow layout and window popup checks passed');

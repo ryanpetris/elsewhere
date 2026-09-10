@@ -44,8 +44,8 @@ export default function TerminalPanel({ viewer, onClose, hidden = false }) {
       const data = new Uint8Array(event.data);
       term.write(data, () => control({ ack: data.byteLength }));
     };
-    socket.onclose = () => { setStatus(value => ['Connected', 'Connecting…'].includes(value) ? 'Session ended' : value); term.options.disableStdin = true; };
-    socket.onerror = () => setStatus('Connection failed');
+    socket.onclose = () => { setStatus(value => ['Connected', 'Connecting…'].includes(value) ? 'Session Ended' : value); term.options.disableStdin = true; };
+    socket.onerror = () => setStatus('Connection Failed');
     const input = data => {
       if (socket.bufferedAmount + data.byteLength > 256 * 1024) {
         socket.close();
@@ -79,8 +79,8 @@ export default function TerminalPanel({ viewer, onClose, hidden = false }) {
           <span className={cx('size-1.5 rounded-full', status === 'Connected' ? 'bg-ok' : live ? 'bg-ink-3 animate-glow' : 'bg-warn')} />{status}
         </span>
         <span className="ml-auto hidden text-ink-4 sm:inline">Closing ends this shell</span>
-        {!live && <button type="button" className="btn btn-outline btn-xs" onClick={() => setSession(value => value + 1)}><RotateCw className="size-3" /> New shell</button>}
-        <IconButton icon={X} label="Close terminal" size="sm" onClick={onClose} />
+        {!live && <button type="button" className="btn btn-outline btn-xs" onClick={() => setSession(value => value + 1)}><RotateCw className="size-3" /> New Shell</button>}
+        <IconButton icon={X} label="Close Terminal" size="sm" onClick={onClose} />
       </header>
       <div className="min-h-0 flex-1 px-3 pt-2 pb-1">
         <div ref={host} className="h-full select-text" />

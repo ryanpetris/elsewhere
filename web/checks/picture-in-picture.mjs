@@ -94,7 +94,7 @@ try {
   await page.waitForFunction(() => elsewhere.store.get().windows.some(w => w.app_id === 'pip-probe'));
   const id = await page.evaluate(() => elsewhere.store.get().windows.find(w => w.app_id === 'pip-probe').id);
   const nextPage = context.waitForEvent('page');
-  await page.getByRole('button', {name: 'Picture-in-picture', exact: true}).first().click();
+  await page.getByRole('button', {name: 'Picture-in-Picture', exact: true}).first().click();
   const pipPage = await nextPage;
   await pipPage.waitForTimeout(300);
   let frame = pipPage.frames().find(f => f.parentFrame());
@@ -137,32 +137,32 @@ try {
                                                              })));
   await other.evaluate(() => elsewhere.takeControl());
   await other.waitForFunction(() => window.elsewhere?.store.get().role === 'controller');
-  await frame.getByRole('button', {name: 'Return to main viewer'}).click();
+  await frame.getByRole('button', {name: 'Return to Viewer'}).click();
   await wait(() => Promise.resolve(pipPage.isClosed()));
   assert.equal(await other.evaluate(() => window.elsewhere?.store.get().role), 'controller');
   assert.equal(await page.evaluate(() => window.elsewhere?.store.get().role), 'participant');
   console.log('return preserves third-party controller');
   await page.bringToFront();
   const mainClaimNext = context.waitForEvent('page');
-  await page.getByRole('button', {name: 'Picture-in-picture', exact: true}).first().click();
+  await page.getByRole('button', {name: 'Picture-in-Picture', exact: true}).first().click();
   const claimPip = await mainClaimNext;
   await claimPip.waitForTimeout(300);
   await page.bringToFront();
-  await page.getByRole('button', {name: 'Take control', exact: true}).click();
+  await page.getByRole('button', {name: 'Take Control', exact: true}).click();
   await wait(() => Promise.resolve(claimPip.isClosed()));
   await page.waitForFunction(() => window.elsewhere?.store.get().role === 'controller');
-  console.log('opener Take control returns desktop presentation');
+  console.log('opener Take Control returns desktop presentation');
 
   await page.bringToFront();
   await page.evaluate(() => elsewhere.takeControl());
   await page.waitForFunction(() => window.elsewhere?.store.get().role === 'controller');
   const next = context.waitForEvent('page');
-  await page.getByRole('button', {name: 'Picture-in-picture', exact: true}).first().click();
+  await page.getByRole('button', {name: 'Picture-in-Picture', exact: true}).first().click();
   const pip2 = await next;
   await pip2.waitForTimeout(300);
   frame = pip2.frames().find(f => f.parentFrame());
   await frame.waitForFunction(() => window.elsewhere?.store.get().role === 'controller');
-  await frame.getByRole('button', {name: 'Return to main viewer'}).click();
+  await frame.getByRole('button', {name: 'Return to Viewer'}).click();
   await page.waitForFunction(() => window.elsewhere?.store.get().role === 'controller');
   await page.waitForFunction(() => !!elsewhere.store.get().playback);
   assert.equal(await page.evaluate(() => elsewhere.store.get().mic), false);
@@ -193,7 +193,7 @@ try {
   });
   console.log('window PiP input');
   await page.bringToFront();
-  await page.getByRole('button', {name: 'Picture-in-picture', exact: true}).first().click();
+  await page.getByRole('button', {name: 'Picture-in-Picture', exact: true}).first().click();
   await pip3.waitForTimeout(300);
   assert.equal(pip3.isClosed(), false);
   frame = pip3.frames().find(f => f.parentFrame());
@@ -210,7 +210,7 @@ try {
   });
   await frame.waitForFunction(async () => await elsewhere.clipboard.read() === 'pip clipboard');
   console.log('PiP clipboard event reaches remote clipboard');
-  await frame.getByRole('button', {name: 'On-screen keyboard', exact: true}).click();
+  await frame.getByRole('button', {name: 'On-Screen Keyboard', exact: true}).click();
   await frame.locator('[data-keyboard]')
       .evaluate(
           el => el.dispatchEvent(
@@ -223,7 +223,7 @@ try {
       return false
     }
   });
-  await frame.getByRole('button', {name: 'Hide the keyboard row'}).click();
+  await frame.getByRole('button', {name: 'Hide Keyboard'}).click();
   console.log('PiP composition commit reaches terminal through keyboard row');
   await frame.locator('canvas').evaluate(async el => {
     try {
@@ -273,7 +273,7 @@ try {
   await frame.waitForFunction(() => elsewhere.store.get().notice?.path?.endsWith('/Downloads') && elsewhere.store.get().notice.text.includes('pip-drop.txt'));
   console.log('PiP unclaimed drop saved to transfer folder');
 
-  await frame.getByRole('button', { name: 'Open folder', exact: true }).click();
+  await frame.getByRole('button', { name: 'Open Folder', exact: true }).click();
   await page.waitForFunction(() => window.elsewhere?.store.get().role === 'controller');
   await page.locator('[data-file-name="pip-drop.txt"]').waitFor();
   const viewerToken = await createToken(root, ['desktop.view', 'audio.listen', 'clipboard.read']);
@@ -286,7 +286,7 @@ try {
   await page.waitForTimeout(200);
   assert.equal(await page.evaluate(() => window.elsewhere?.store.get().role), 'controller');
   const roNext = context.waitForEvent('page');
-  await readOnly.getByRole('button', {name: 'Picture-in-picture', exact: true}).first().click();
+  await readOnly.getByRole('button', {name: 'Picture-in-Picture', exact: true}).first().click();
   const roPip = await roNext;
   await roPip.waitForTimeout(300);
   const roFrame = roPip.frames().find(f => f.parentFrame());
@@ -298,7 +298,7 @@ try {
   await page.waitForTimeout(300);
   assert.equal(await roFrame.evaluate(() => window.elsewhere?.store.get().role), 'viewer');
   assert.equal(await page.evaluate(() => window.elsewhere?.store.get().role), 'controller');
-  assert.equal(await roFrame.getByRole('button', {name: 'Take control', exact: true}).count(), 0);
+  assert.equal(await roFrame.getByRole('button', {name: 'Take Control', exact: true}).count(), 0);
   await readOnly.evaluate(() => elsewhere.pip.close());
   console.log('read-only PiP stays read-only');
   await page.evaluate(() => {
@@ -307,7 +307,7 @@ try {
         Promise.reject(new DOMException('Denied', 'NotAllowedError'))
   });
   await page.bringToFront();
-  await page.getByRole('button', {name: 'Picture-in-picture', exact: true}).first().click();
+  await page.getByRole('button', {name: 'Picture-in-Picture', exact: true}).first().click();
   await page.waitForFunction(() => elsewhere.store.get().notice?.text.includes('could not open'));
   assert.equal(await page.evaluate(() => window.elsewhere?.store.get().role), 'controller');
   await page.evaluate(() => documentPictureInPicture.requestWindow = window.originalPipRequest);
@@ -317,10 +317,10 @@ try {
       () => Object.defineProperty(window, 'documentPictureInPicture', {value: undefined}));
   await unsupported.goto(origin + '/#token=' + token);
   await unsupported.waitForFunction(() => !!window.elsewhere?.store.get().stream);
-  assert.equal(await unsupported.getByRole('button', {name: 'Picture-in-picture', exact: true}).count(), 0);
+  assert.equal(await unsupported.getByRole('button', {name: 'Picture-in-Picture', exact: true}).count(), 0);
   assert.equal(
       await unsupported
-          .getByRole('button', {name: 'Fullscreen (browser shortcuts go to the desktop)', exact: true})
+          .getByRole('button', {name: 'Fullscreen', exact: true})
           .count(),
       1);
   await unsupported.close();
@@ -331,12 +331,12 @@ try {
   await normal.close();
   console.log('unsupported API and ordinary popup');
   await page.bringToFront();
-  await page.getByRole('button', {name: 'Fullscreen (browser shortcuts go to the desktop)', exact: true})
+  await page.getByRole('button', {name: 'Fullscreen', exact: true})
       .click();
   await page.waitForFunction(() => !!document.fullscreenElement);
   await page.evaluate(() => document.exitFullscreen());
   const reopen = context.waitForEvent('page');
-  await page.getByRole('button', {name: 'Picture-in-picture', exact: true}).first().click();
+  await page.getByRole('button', {name: 'Picture-in-Picture', exact: true}).first().click();
   const lifePip = await reopen;
   await lifePip.waitForTimeout(300);
   let lifeFrame = lifePip.frames().find(f => f.parentFrame());
@@ -395,7 +395,7 @@ try {
   await wait(() => Promise.resolve(gonePip.isClosed()));
   console.log('remote window closure closes PiP');
   const navNext = context.waitForEvent('page');
-  await page.getByRole('button', {name: 'Picture-in-picture', exact: true}).first().click();
+  await page.getByRole('button', {name: 'Picture-in-Picture', exact: true}).first().click();
   const navPip = await navNext;
   await navPip.waitForTimeout(300);
   await page.goto(origin + '/?navigation-check=1#token=' + token);
@@ -407,7 +407,7 @@ try {
     window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}))
   });
   const authNext = context.waitForEvent('page');
-  await page.getByRole('button', {name: 'Picture-in-picture', exact: true}).first().click();
+  await page.getByRole('button', {name: 'Picture-in-Picture', exact: true}).first().click();
   const authPip = await authNext;
   await authPip.waitForTimeout(300);
   const revoked = await revokeToken(origin, token);

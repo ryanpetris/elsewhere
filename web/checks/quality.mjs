@@ -76,7 +76,7 @@ try {
     assert.equal(await select.inputValue(), 'medium');
     assert.deepEqual(await select.locator('option').evaluateAll(options => options.map(o => o.value)), levels.map(([name]) => name));
     assert.deepEqual(await page.evaluate(() => [qualityStates[0].preset, qualityStates[0].bitrate_kbps, hellos[0].quality]), ['medium', medium, 'medium']);
-    assert((await select.locator('option[value="medium"]').textContent()).includes(`${medium / 1000} Mbit/s`));
+    assert((await select.locator('option[value="medium"]').textContent()).includes(`${medium / 1000} Mbit`));
     for (const [name, , ceiling] of levels) {
       await page.evaluate(() => { window.qualityStates = []; });
       await select.selectOption(name);
@@ -99,9 +99,9 @@ try {
     await page.waitForFunction(() => elsewhere.store.get().streamState.bitrate_kbps < 25000);
     await page.evaluate(() => clearInterval(window.pressureTimer));
     assert.equal(await select.inputValue(), 'max');
-    assert((await select.locator('option:checked').textContent()).includes('up to 25 Mbit/s'));
+    assert((await select.locator('option:checked').textContent()).includes('25 Mbit'));
     await page.getByTitle(/^Measured video throughput:/).waitFor();
-    await page.getByTitle('Video codec', { exact: true }).selectOption('auto');
+    await page.getByTitle('Video Codec', { exact: true }).selectOption('auto');
     await page.waitForFunction(() => elsewhere.store.get().choice.codec === 'auto' && elsewhere.store.get().streamState.codec);
     await page.evaluate(() => elsewhere.setChoice({ quality: 'low' }));
     await page.waitForFunction(() => elsewhere.store.get().streamState.preset === 'low');
@@ -154,7 +154,7 @@ try {
       for (let width = 640; width <= 1280; width += 8) {
         footer.style.width = `${width}px`;
         let height;
-        for (const values of [['9 fps', '9.9 Mbit/s', '9 ms', '0 · 0 · 0'], ['30 fps', '10.0 Mbit/s', '200 ms', '100 · 100 · 0'], ['60 fps', '100.0 Mbit/s', '2000 ms', '10000 · 10000 · 10']]) {
+        for (const values of [['9 fps', '9.9 Mbit', '9 ms', '0 · 0 · 0'], ['30 fps', '10.0 Mbit', '200 ms', '100 · 100 · 0'], ['60 fps', '100.0 Mbit', '2000 ms', '10000 · 10000 · 10']]) {
           metrics.forEach((el, i) => el.replaceChildren(...(i === 0 ? [icon.cloneNode(true)] : []), document.createTextNode(values[i])));
           height ??= footer.getBoundingClientRect().height;
           stable &&= footer.getBoundingClientRect().height === height;

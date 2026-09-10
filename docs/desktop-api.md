@@ -492,7 +492,7 @@ size, and `sessionStorage` (the token) is copied into it by the browser.
 The top-bar Picture-in-picture action presents the desktop, or the current window in a window viewer.
 Each window row also has a Picture-in-picture action alongside its ordinary popup action. One PiP
 window belongs to an opener: choosing its current content focuses it, and choosing another target
-replaces the iframe and disposes the previous viewer. Return to main viewer closes the presentation,
+replaces the iframe and disposes the previous viewer. Return to Viewer closes the presentation,
 not the remote application. Closing the remote application closes its window PiP.
 
 The PiP document hosts a same-origin iframe with the existing viewer. Its keyboard, pointer, clipboard,
@@ -555,7 +555,7 @@ browser shortcuts. The checks live in `web/checks/picture-in-picture.mjs` and
 
 ## Browser terminal
 
-The desktop toolbar's Terminal button opens an interactive shell for `commands.execute` holders, including
+The status bar's Terminal button opens an interactive shell for `commands.execute` holders, including
 participants. It has its own PTY, so shell typing does not require taking control of the desktop.
 Commands inherit the same current Wayland, Xwayland, toolkit, session-bus and private audio environment
 as programs launched from the desktop. `SHELL` selects the executable, with `/bin/sh` as the fallback;
@@ -563,7 +563,7 @@ it runs with `-i` and `TERM=xterm-256color`. A graphical command opens on the ac
 
 The terminal supports interactive programs, job control, scrollback and resizing. Closing the panel,
 leaving the page or losing its socket closes the PTY and reaps the shell. Detached applications follow
-normal terminal hangup behavior. A disconnected session offers New shell; it does not replay input or
+normal terminal hangup behavior. A disconnected session offers New Shell; it does not replay input or
 resume the old process. `commands.execute` is required to start a terminal. Revocation and expiry close its PTY, including idle connections.
 
 `/ws/terminal` uses the same first binary AUTH frame as the viewer. Subsequent binary frames carry raw
@@ -695,7 +695,7 @@ stream costs an encoder and a swapchain.
 
 ## Display controls
 
-The viewer can hide its top bar and panels while retaining the status bar and a Show controls button.
+The viewer can hide its top bar and panels while retaining the status bar and a Show Controls button.
 Ctrl+Alt+Shift+H toggles this view and releases captured input. The setting is local to the viewer and
 resets on reload. Hidden panels retain their state, including running terminal sessions.
 

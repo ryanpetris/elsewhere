@@ -27,13 +27,13 @@ export function About({ viewer, onClose }) {
         <Logo className="size-10" />
         <div className="min-w-0 flex-1">
           <h2 className="text-base leading-tight font-semibold text-ink">Elsewhere</h2>
-          <p className="mt-0.5 text-xs text-ink-3">A Wayland desktop whose screen is a browser tab.</p>
+          <p className="mt-0.5 text-xs text-ink-3">A desktop in your browser.</p>
         </div>
         <IconButton ref={close} icon={X} label="Close About" size="sm" onClick={onClose} />
       </div>
       <div className="flex flex-col gap-0.5 p-2">
         <a className={link} href="https://github.com/ryanpetris/elsewhere" target="_blank" rel="noreferrer">
-          <GitBranch className="size-4 text-ink-3" /> GitHub repository <ExternalLink className="ml-auto size-3.5 text-ink-4" />
+          <GitBranch className="size-4 text-ink-3" /> GitHub Repository <ExternalLink className="ml-auto size-3.5 text-ink-4" />
         </a>
         <a className={link} href="https://github.com/ryanpetris/elsewhere/blob/master/ACKNOWLEDGEMENTS.md" target="_blank" rel="noreferrer">
           <ScrollText className="size-4 text-ink-3" /> Acknowledgements <ExternalLink className="ml-auto size-3.5 text-ink-4" />

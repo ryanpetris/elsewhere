@@ -43,19 +43,19 @@ try {
     assert.deepEqual(await page.evaluate(() => payload(0x81)), { codecs: ['h264', 'hevc', 'av1', 'vp8'], quality: 'medium', effort: 'fast' });
     assert.equal(await page.evaluate(() => probed.length), 5);
     await page.evaluate(() => streamState('starting', 'h264'));
-    await page.getByTitle('Video codec', { exact: true }).waitFor();
-    assert.deepEqual(await page.getByTitle('Video codec', { exact: true }).locator('option').evaluateAll(options => options.map(o => o.value)), ['auto', 'h264', 'hevc']);
-    await page.getByTitle('Video codec', { exact: true }).selectOption('hevc');
+    await page.getByTitle('Video Codec', { exact: true }).waitFor();
+    assert.deepEqual(await page.getByTitle('Video Codec', { exact: true }).locator('option').evaluateAll(options => options.map(o => o.value)), ['auto', 'h264', 'hevc']);
+    await page.getByTitle('Video Codec', { exact: true }).selectOption('hevc');
     assert.deepEqual(await page.evaluate(() => payload(0x8f)), { codecs: ['hevc', 'h264', 'av1', 'vp8'] });
     await page.evaluate(() => streamState('retrying', 'hevc', 2));
     await page.getByRole('status').filter({ hasText: 'Retrying HEVC' }).waitFor();
     await page.evaluate(() => streamState('switching', 'h264', 3));
     await page.getByRole('status').filter({ hasText: 'Switching to H.264' }).waitFor();
     assert(await page.evaluate(() => { const first = elsewhere.store.get().notice; streamState('switching', 'h264', 3); return elsewhere.store.get().notice === first; }), 'repeat state does not repeat the switch notice');
-    assert.match(await page.getByTitle('Video codec', { exact: true }).locator('option:checked').textContent(), /using H\.264/);
+    assert.match(await page.getByTitle('Video Codec', { exact: true }).locator('option:checked').textContent(), /Using H\.264/);
     await page.evaluate(() => { streamState('failed', null, 4); streamState('starting', 'h264', 1); });
     assert.equal(await page.evaluate(() => elsewhere.store.get().streamState.status), 'failed');
-    await page.getByRole('button', { name: 'Retry video', exact: true }).click();
+    await page.getByRole('button', { name: 'Retry Video', exact: true }).click();
     assert.deepEqual(await page.evaluate(() => payload(0x8f)), { codecs: ['hevc', 'h264', 'av1', 'vp8'] });
     assert.equal(await page.evaluate(() => sockets.length), 1);
     // An old RTC configuration cannot revive exhausted video.
@@ -67,7 +67,7 @@ try {
       message(1, { attempt: 5, streamId: 5, codec: 'avc1.640028', width: 640, height: 480, scale: 1 });
     });
     assert.equal(await page.evaluate(() => elsewhere.store.get().stream.attempt), 6);
-    await page.getByTitle('Video codec', { exact: true }).selectOption('auto');
+    await page.getByTitle('Video Codec', { exact: true }).selectOption('auto');
     assert.deepEqual(await page.evaluate(() => payload(0x8f)), { codecs: ['h264', 'hevc', 'av1', 'vp8'] });
     await page.evaluate(() => { elsewhere.setChoice({ codec: 'hevc', quality: 'high' }); sockets[0].close(); });
     await page.waitForFunction(() => sockets.length === 2 && sent.filter(p => p[0] === 0x81).length === 2);

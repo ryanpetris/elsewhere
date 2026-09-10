@@ -77,7 +77,7 @@ The desktop takes the size of the controlling viewer's display area. Fullscreen 
 status bar on screen, with keyboard lock so shortcuts like Ctrl+W reach the desktop.
 
 **Hide controls** hides the top bar and open panels while keeping the status bar, statistics and stream
-controls. Use **Show controls** in the status bar or **Ctrl+Alt+Shift+H** to return. The shortcut also
+controls. Use **Show Controls** in the status bar or **Ctrl+Alt+Shift+H** to return. The shortcut also
 releases mouse capture and exits viewer fullscreen. The mode belongs to this viewer and resets on reload;
 hidden terminal sessions stay open. Browser tabs and the address bar stay visible in windowed mode.
 
@@ -131,7 +131,7 @@ Applications play into the session output, which is encoded as 48 kHz stereo Opu
 The viewer's microphone button sends the controlling browser's microphone into the session microphone.
 Stopping capture stops the browser's recording indicator and leaves silence for recording applications.
 
-Open **Mixer** in the status bar for session devices and individual application streams, with actual
+Open **Audio Mixer** in the status bar for session devices and individual application streams, with actual
 peak meters, volume and mute. Read-only viewers can inspect; the controlling viewer changes the shared
 session. Muting the session microphone does not stop browser capture. With multiple session endpoints,
 the mixer also offers routing and default selection through WirePlumber.
@@ -175,7 +175,7 @@ with GTK 4.22's Vulkan renderer, including the nested shell's GTK viewer.
 For Docker, pass `-e GSK_RENDERER=ngl -e 'QT_QPA_PLATFORM=wayland;xcb'` before the image name.
 Without these settings, applications choose their toolkit defaults.
 
-**Kiosk mode** in Settings applies to existing and newly opened application windows. Turning it off
+**Kiosk Mode** in Settings applies to existing and newly opened application windows. Turning it off
 restores their previous window state and geometry. Windows opened in kiosk become maximized within
 the work area, accounting for panels and compositor title bars. Kiosk does not prevent applications
 from changing their own fullscreen state. Kiosk and resolution are shared desktop settings requiring
@@ -216,7 +216,7 @@ in the Dockerfile's header.
 
 The page says when the server closed its socket with a token dialog ("wrong token" or "token revoked or expired").
 
-In Settings, enable **Capture mouse on click** for games that use edge scrolling. The first click
+In Settings, enable **Capture Mouse on Click** for games that use edge scrolling. The first click
 captures the mouse; movement, clicks, and the mouse wheel reach the desktop only while captured.
 Use the application's fullscreen button to send normal Escape presses to the remote application
 while keeping the mouse captured in supported browsers. Hold Escape to use the browser's release
@@ -328,7 +328,7 @@ resizes the window, and the popup reports when the window closes. Each such popu
 
 Picture-in-picture is also available in supporting browsers on a secure origin. The top-bar action
 opens the whole desktop; a window row's action opens that application. One PiP window belongs to each
-opener, with a compact title/status bar and Return to main viewer. Choosing another target replaces its
+opener, with a compact title/status bar and Return to Viewer. Choosing another target replaces its
 content. Ordinary popups remain available.
 
 When you control the desktop, control and its dimensions follow the PiP viewport. Returning, or taking
@@ -419,7 +419,7 @@ and open-in-popup, snapshot, maximize, minimize and close buttons (click a row t
 forward, type in the box at the top to run a command), its Statistics tab shows the stream's numbers
 (per-stage timings, drops, audio lead) once a second. **Settings → Overlays** in the top bar controls
 local coloured window outlines and the focused window's accessibility-element outlines. Both apply
-immediately and are remembered. UI elements requires server accessibility support (`--elements`).
+immediately and are remembered. **UI Elements** requires server accessibility support (`--elements`).
 The power menu quits Elsewhere. Desktop notifications appear as toasts with their actions;
 Elsewhere is the session's notification daemon when no other runs. A panel is optional. In the browser console,
 `elsewhere.windows()`, `elsewhere.activate(id)`, `elsewhere.control({...})`, `elsewhere.spawn(cmd)`, `elsewhere.snapshot(id)` and

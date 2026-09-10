@@ -46,12 +46,12 @@ export function Settings({ viewer, borders, onBorders, elements, onElements, onC
       </div>
       <div className="flex flex-col gap-1 p-2">
         <h2 className="eyebrow px-2 pt-2 pb-1">Overlays</h2>
-        <Toggle inputRef={first} icon={SquareDashed} id="borders-description" label="Window borders" checked={borders} onChange={onBorders}
-          description="Coloured viewer outlines around remote windows. Application title bars and decorations stay unchanged." />
-        <Toggle icon={ScanSearch} id="elements-description" label="UI elements" checked={elements} onChange={onElements}
-          description="Accessibility outlines for the focused window. Requires server accessibility support and an application tree; this switch cannot enable server support." />
+        <Toggle inputRef={first} icon={SquareDashed} id="borders-description" label="Window Borders" checked={borders} onChange={onBorders}
+          description="Highlight window edges." />
+        <Toggle icon={ScanSearch} id="elements-description" label="UI Elements" checked={elements} onChange={onElements}
+          description="Highlight accessible controls." />
         <h2 className="eyebrow px-2 pt-3 pb-1">Mouse</h2>
-        <Toggle icon={MousePointer2} id="capture-description" label="Capture mouse on click" checked={captureOnClick} onChange={on => viewer.setCaptureOnClick(on)}
+        <Toggle icon={MousePointer2} id="capture-description" label="Capture Mouse on Click" checked={captureOnClick} onChange={on => viewer.setCaptureOnClick(on)}
           description="Keep the mouse inside the desktop." />
         <DisplaySettings viewer={viewer} />
       </div>
@@ -91,24 +91,22 @@ function DisplaySettings({ viewer }) {
     apply({ resolution: choice === 'auto' ? { mode: 'auto' } : { mode: 'fixed', width: w, height: h } });
   };
   return <>
-    <h2 className="eyebrow px-2 pt-3 pb-1">Shared desktop</h2>
-    <p className="px-2 text-xs text-ink-3">These settings affect everyone viewing this desktop.</p>
-    <Toggle icon={Maximize} id="kiosk-description" label="Kiosk mode" checked={display?.kiosk ?? false} disabled={disabled}
-      onChange={kiosk => apply({ kiosk })} description="Fullscreen application windows. Turning this off restores their layout; windows opened in kiosk become maximized." />
+    <h2 className="eyebrow px-2 pt-3 pb-1">Shared Desktop</h2>
+    <Toggle icon={Maximize} id="kiosk-description" label="Kiosk Mode" checked={display?.kiosk ?? false} disabled={disabled}
+      onChange={kiosk => apply({ kiosk })} description="Make application windows fullscreen." />
     <form onSubmit={submit} className="flex flex-col gap-2 px-2 pb-2">
       <label className="flex flex-col gap-1 text-sm">Resolution
-        <select aria-label="Desktop resolution" className="select select-md" value={choice} disabled={disabled} onChange={event => setChoice(event.target.value)}>
-          <option value="auto">Auto: fit controlling viewer</option>
+        <select aria-label="Desktop Resolution" className="select select-md" value={choice} disabled={disabled} onChange={event => setChoice(event.target.value)}>
+          <option value="auto">Auto</option>
           {RESOLUTIONS.map(value => <option key={value} value={value}>{value.replace('x', ' × ')}</option>)}
           <option value="custom">Custom</option>
         </select>
       </label>
       {choice === 'custom' && <div className="flex gap-2">
-        <label className="min-w-0 flex-1 text-xs">Width<input aria-label="Desktop width" className="input w-full" type="number" min="2" max="8192" step="2" required value={width} disabled={disabled} onChange={event => setWidth(event.target.value)} /></label>
-        <label className="min-w-0 flex-1 text-xs">Height<input aria-label="Desktop height" className="input w-full" type="number" min="2" max="8192" step="2" required value={height} disabled={disabled} onChange={event => setHeight(event.target.value)} /></label>
+        <label className="min-w-0 flex-1 text-xs">Width<input aria-label="Desktop Width" className="input w-full" type="number" min="2" max="8192" step="2" required value={width} disabled={disabled} onChange={event => setWidth(event.target.value)} /></label>
+        <label className="min-w-0 flex-1 text-xs">Height<input aria-label="Desktop Height" className="input w-full" type="number" min="2" max="8192" step="2" required value={height} disabled={disabled} onChange={event => setHeight(event.target.value)} /></label>
       </div>}
-      <button type="submit" className="btn btn-outline btn-sm self-start" disabled={disabled}>Apply resolution</button>
-      <p className="text-xs text-ink-3">Fixed resolutions use pixels and scale to fit each viewer. Changes last until the server restarts.</p>
+      <button type="submit" className="btn btn-outline btn-sm self-start" disabled={disabled}>Apply Resolution</button>
       {error && <p role="alert" className="text-xs text-bad">{error}</p>}
     </form>
   </>;

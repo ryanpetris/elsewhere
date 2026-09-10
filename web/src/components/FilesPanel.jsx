@@ -68,24 +68,24 @@ export function FilesPanel({ viewer, open }) {
   const errorText = error?.code === 'permission_denied' ? 'Permission denied.' : error?.code === 'missing' ? 'Directory not found.' : 'Could not read this directory.';
   const manages = permissions.includes('files.manage'), downloads = permissions.includes('files.download');
   return (
-    <section aria-label="File browser" className="flex flex-col text-xs" onFocus={viewer.releaseInput}>
+    <section aria-label="File Browser" className="flex flex-col text-xs" onFocus={viewer.releaseInput}>
       <div className="flex flex-col gap-2 border-b border-line p-2">
         <div className="flex flex-wrap items-center gap-1">
           <button className={tool} onClick={() => navigate('@home')}><Home className="size-3" /> Home</button>
-          <button className={tool} onClick={() => navigate('@transfer')}><FolderInput className="size-3" /> Transfer folder</button>
+          <button className={tool} onClick={() => navigate('@transfer')}><FolderInput className="size-3" /> Transfer Folder</button>
           <button className={tool} onClick={refresh}><RefreshCw className="size-3" /> Refresh</button>
           {listing && (
             <span className="ml-auto flex items-center gap-1">
-              {permissions.includes('files.upload') && <label className={cx(tool, 'cursor-pointer')}><Upload className="size-3" /> Upload<input aria-label="Upload files" type="file" multiple className="hidden" onChange={e => { viewer.uploadFiles(e.target.files); e.target.value = ''; }} /></label>}
-              {manages && <button className={tool} onClick={() => { const name = prompt('New directory name'); if (name) mutate(path => manageFile({ op: 'mkdir', path, name })); }}><FolderPlus className="size-3" /> New folder</button>}
+              {permissions.includes('files.upload') && <label className={cx(tool, 'cursor-pointer')}><Upload className="size-3" /> Upload<input aria-label="Upload Files" type="file" multiple className="hidden" onChange={e => { viewer.uploadFiles(e.target.files); e.target.value = ''; }} /></label>}
+              {manages && <button className={tool} onClick={() => { const name = prompt('Folder Name'); if (name) mutate(path => manageFile({ op: 'mkdir', path, name })); }}><FolderPlus className="size-3" /> New Folder</button>}
             </span>
           )}
         </div>
         <form className="flex gap-1" onSubmit={e => { e.preventDefault(); navigate(draft); }}>
-          <input aria-label="Directory path" className="input input-sm flex-1 font-mono" value={draft} onChange={e => setDraft(e.target.value)} spellCheck={false} />
+          <input aria-label="Directory Path" className="input input-sm flex-1 font-mono" value={draft} onChange={e => setDraft(e.target.value)} spellCheck={false} />
           <button className="btn btn-outline btn-sm">Go</button>
         </form>
-        {listing && <nav aria-label="Directory breadcrumbs" className="flex flex-wrap items-center gap-0.5 break-all">
+        {listing && <nav aria-label="Directory Breadcrumbs" className="flex flex-wrap items-center gap-0.5 break-all">
           <button className={crumb} onClick={() => navigate('/')}>/</button>
           {parts.map((part, i) => <span key={i} className="flex items-center gap-0.5">
             <ChevronRight className="size-3 shrink-0 text-ink-4" />
@@ -94,11 +94,11 @@ export function FilesPanel({ viewer, open }) {
           <button className={cx(crumb, 'ml-auto inline-flex items-center gap-1')} disabled={listing.path === '/'} onClick={() => navigate('/' + parts.slice(0, -1).join('/'))}><ArrowUp className="size-3" /> Parent</button>
         </nav>}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-ink-3">
-          <label className="inline-flex items-center gap-1.5">Sort <select aria-label="Sort files" className="select" value={options.sort} onChange={e => setOptions(o => ({ ...o, sort: e.target.value, offset: 0 }))}>
+          <label className="inline-flex items-center gap-1.5">Sort <select aria-label="Sort Files" className="select" value={options.sort} onChange={e => setOptions(o => ({ ...o, sort: e.target.value, offset: 0 }))}>
             <option value="name">Name</option><option value="size">Size</option><option value="modified">Modified</option>
           </select></label>
           <label className="inline-flex items-center gap-1.5"><input type="checkbox" className="check" checked={options.desc} onChange={e => setOptions(o => ({ ...o, desc: e.target.checked, offset: 0 }))} /> Descending</label>
-          <label className="inline-flex items-center gap-1.5"><input type="checkbox" className="check" checked={options.hidden} onChange={e => setOptions(o => ({ ...o, hidden: e.target.checked, offset: 0 }))} /> Hidden files</label>
+          <label className="inline-flex items-center gap-1.5"><input type="checkbox" className="check" checked={options.hidden} onChange={e => setOptions(o => ({ ...o, hidden: e.target.checked, offset: 0 }))} /> Hidden Files</label>
         </div>
       </div>
       {upload && <div className="callout callout-info m-2 flex items-center gap-2 break-all" role="status">
@@ -108,7 +108,7 @@ export function FilesPanel({ viewer, open }) {
       </div>}
       {loading && <p role="status" className="flex items-center gap-2 px-3 py-4 text-ink-3"><Loader2 className="size-3 animate-spin" /> Loading directory…</p>}
       {error && <p role="alert" className="callout callout-bad m-2">{errorText} {error.message}</p>}
-      {listing?.entries.length === 0 && <p className="px-3 py-6 text-center text-ink-4">{listing.total ? 'No entries on this page.' : 'This directory is empty.'}</p>}
+      {listing?.entries.length === 0 && <p className="px-3 py-6 text-center text-ink-4">{listing.total ? 'No Entries' : 'Empty Directory'}</p>}
       {listing?.entries.map(entry => {
         const folder = entry.kind === 'directory' || entry.target_kind === 'directory';
         const downloadable = entry.kind === 'file' || entry.target_kind === 'file';
@@ -124,7 +124,7 @@ export function FilesPanel({ viewer, open }) {
           </div>
           <div className="flex shrink-0 items-center gap-px">
             {downloads && downloadable && <button className="btn btn-ghost size-6 px-0" title="Download" aria-label="Download" onClick={() => downloadFile(entry.name, listing.path).catch(e => viewer.notice(e.message))}><Download className="size-3.5" /></button>}
-            {manages && <button className="btn btn-ghost size-6 px-0" title="Rename" aria-label="Rename" onClick={() => { const new_name = prompt('Rename entry', entry.name); if (new_name && new_name !== entry.name) mutate(path => manageFile({ op: 'rename', path, name: entry.name, new_name })); }}><Pencil className="size-3.5" /></button>}
+            {manages && <button className="btn btn-ghost size-6 px-0" title="Rename" aria-label="Rename" onClick={() => { const new_name = prompt('Rename', entry.name); if (new_name && new_name !== entry.name) mutate(path => manageFile({ op: 'rename', path, name: entry.name, new_name })); }}><Pencil className="size-3.5" /></button>}
             {manages && entry.kind !== 'directory' && <button className="btn btn-ghost size-6 px-0 hover:bg-bad/10 hover:text-bad" title="Delete" aria-label="Delete" onClick={() => { if (confirm(`Delete ${entry.name}?`)) mutate(path => deleteFile(entry.name, path)); }}><Trash2 className="size-3.5" /></button>}
           </div>
         </div>;

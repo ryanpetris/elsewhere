@@ -63,7 +63,7 @@ export function Launcher({ viewer, onClose }) {
             if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
           }}
           onKeyUp={e => { if (e.key === 'Enter' && needle && selected) launch(selected); }}
-          placeholder="Search applications…"
+          placeholder="Search Applications…"
           spellCheck={false}
           autoComplete="off"
           className="min-w-0 flex-1 bg-transparent text-sm text-ink placeholder:text-ink-4 focus:outline-none"
@@ -95,7 +95,7 @@ export function Launcher({ viewer, onClose }) {
       </div>
       <div className="flex items-center gap-3 border-t border-line px-3 py-1.5 text-[11px] text-ink-4">
         <span>{apps ? `${shown.length} ${shown.length === 1 ? 'application' : 'applications'}` : ''}</span>
-        <span className="ml-auto hidden items-center gap-1.5 sm:flex"><kbd className="kbd">↑</kbd><kbd className="kbd">↓</kbd> select <kbd className="kbd ml-1">↵</kbd> launch</span>
+        <span className="ml-auto hidden items-center gap-1.5 sm:flex"><kbd className="kbd">↑</kbd><kbd className="kbd">↓</kbd> Select <kbd className="kbd ml-1">↵</kbd> Launch</span>
       </div>
     </Popover>
   );
@@ -125,7 +125,7 @@ export function PowerMenu({ viewer, onClose }) {
         <div className="p-2">
           <div className="flex items-start gap-3">
             <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-bad/15 text-bad"><TriangleAlert className="size-4" /></span>
-            <p className="text-sm leading-relaxed text-ink-2">Quit Elsewhere? Every window closes with it, and the desktop is gone until it is started again.</p>
+            <p className="text-sm leading-relaxed text-ink-2">Quit Elsewhere and close all windows?</p>
           </div>
           <div className="mt-4 flex justify-end gap-2">
             <button ref={ref} type="button" onClick={onClose} className="btn btn-outline btn-sm">Cancel</button>
@@ -135,7 +135,6 @@ export function PowerMenu({ viewer, onClose }) {
       ) : (
         <button ref={ref} type="button" aria-label="Quit Elsewhere" onClick={() => setSure(true)} className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-left text-sm text-ink transition-colors hover:bg-bad/10 hover:text-bad">
           <Power className="size-4 text-bad" /> Quit Elsewhere
-          <span className="ml-auto text-[11px] text-ink-4">stops the server</span>
         </button>
       )}
     </Popover>

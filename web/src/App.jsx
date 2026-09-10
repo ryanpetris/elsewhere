@@ -36,7 +36,8 @@ export function App({ viewer }) {
   const [TerminalPanel, setTerminalPanel] = useState(null);
   const [terminalError, setTerminalError] = useState(null);
   const toggleTerminal = () => {
-    if (terminal) { setTerminal(false); return; }
+    viewer.setControlsHidden(false);
+    if (terminal && !hidden) { setTerminal(false); return; }
     setTerminal(true); setTerminalError(null);
     if (!TerminalPanel) import('./components/TerminalPanel.jsx')
       .then(module => setTerminalPanel(() => module.default))
@@ -76,7 +77,6 @@ export function App({ viewer }) {
         onHideControls={() => viewer.setControlsHidden(true)}
         menu={menu} onMenu={m => setMenu(menu === m ? null : m)}
         keyboard={keyboard} onKeyboard={() => (keyboard ? focusKeyboard() : setKeyboard(true))}
-        terminal={terminal} onTerminal={toggleTerminal}
       /></div>
       {menu === 'about' && !fullscreen && <About viewer={viewer} onClose={closeMenu} />}
       {menu === 'apps' && <Launcher viewer={viewer} onClose={closeMenu} />}
@@ -97,13 +97,13 @@ export function App({ viewer }) {
             <TerminalIcon className="size-3.5 text-ink-3" />
             <span className="font-medium text-ink">Terminal</span>
             <span role="status" className="flex items-center gap-2 text-ink-3">{terminalError ? <span className="text-warn">{terminalError}</span> : <><Loader2 className="size-3 animate-spin" /> Opening terminal…</>}</span>
-            <IconButton icon={X} label="Close terminal" size="sm" className="ml-auto" onClick={closeTerminal} />
+            <IconButton icon={X} label="Close Terminal" size="sm" className="ml-auto" onClick={closeTerminal} />
           </div>
         ))}
       </div>
       {audioPanel && !windowMode && <AudioPanel viewer={viewer} hidden={hidden} onClose={() => setAudioPanel(false)} />}
       {mixerPanel && !windowMode && <MixerPanel viewer={viewer} hidden={hidden} onClose={() => { setMixerPanel(false); document.getElementById('session-mixer-toggle')?.focus(); }} />}
-      {!PIP && <StatusBar controlsHidden={hidden} onShowControls={() => viewer.setControlsHidden(false)} mixerPanel={mixerPanel} onMixer={!windowMode ? () => { viewer.setControlsHidden(false); setMixerPanel(hidden || !mixerPanel); } : undefined} viewer={viewer} audioPanel={audioPanel} onAudioPanel={!windowMode ? () => { viewer.setControlsHidden(false); setAudioPanel(hidden || !audioPanel); } : undefined} />}
+      {!PIP && <StatusBar terminal={terminal} onTerminal={!windowMode ? toggleTerminal : undefined} controlsHidden={hidden} onShowControls={() => viewer.setControlsHidden(false)} mixerPanel={mixerPanel} onMixer={!windowMode ? () => { viewer.setControlsHidden(false); setMixerPanel(hidden || !mixerPanel); } : undefined} viewer={viewer} audioPanel={audioPanel} onAudioPanel={!windowMode ? () => { viewer.setControlsHidden(false); setAudioPanel(hidden || !audioPanel); } : undefined} />}
       {(status === 'no-token' || status === 'unauthorized') && <TokenForm viewer={viewer} />}
     </div>
   );

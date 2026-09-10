@@ -50,8 +50,8 @@ try {
   await page.goto('http://127.0.0.1:8088/#token=' + token);
   await page.waitForFunction(() => window.elsewhere?.store.get().status === 'connected');
   if (disabled) {
-    await page.getByRole('button', { name: 'Session audio mixer', exact: true }).click();
-    const panel = page.getByRole('region', { name: 'Session audio mixer', exact: true });
+    await page.getByRole('button', { name: 'Audio Mixer', exact: true }).click();
+    const panel = page.getByRole('region', { name: 'Audio Mixer', exact: true });
     await panel.getByText('Session audio is unavailable.', { exact: true }).waitFor();
     assert.equal(await panel.getByRole('slider').count(), 0);
     assert.equal(await page.evaluate(() => elsewhere.store.get().mic), false);
@@ -59,8 +59,8 @@ try {
   } else {
   assert.equal(await page.evaluate(() => elsewhere.store.get().audioAvailable), true);
   await page.waitForFunction(() => elsewhere.store.get().mixer.available);
-  await page.getByRole('button', { name: 'Session audio mixer', exact: true }).click();
-  const panel = page.getByRole('region', { name: 'Session audio mixer', exact: true });
+  await page.getByRole('button', { name: 'Audio Mixer', exact: true }).click();
+  const panel = page.getByRole('region', { name: 'Audio Mixer', exact: true });
   await panel.waitFor();
   assert.equal(await page.evaluate(() => elsewhere.store.get().mic), false);
   await page.evaluate(command => elsewhere.spawn(command), toneCommand({ name: 'MixerBrowserTest', application: 'BrowserTest' }));
@@ -85,7 +85,7 @@ try {
     });
     await next.goto('http://127.0.0.1:8088/#token=' + key);
     await next.waitForFunction(() => window.elsewhere?.store.get().status === 'connected' && elsewhere.store.get().mixer.available);
-    await next.getByRole('button', { name: 'Session audio mixer', exact: true }).click();
+    await next.getByRole('button', { name: 'Audio Mixer', exact: true }).click();
     return next;
   };
   const raw = (target, command) => target.evaluate(command => {
@@ -142,17 +142,17 @@ try {
   const levelCount = await page.evaluate(() => window.mixerLevelCount) - beforeLevels;
   assert(levelCount >= 8 && levelCount <= 13, 'meter updates stay around 10 Hz: ' + levelCount);
   console.log('multiple native/Pulse streams in one application have separate rows and shared monitors');
-  for (const target of [page, participant]) await target.getByRole('button', { name: 'Close mixer', exact: true }).click();
+  for (const target of [page, participant]) await target.getByRole('button', { name: 'Close Mixer', exact: true }).click();
   assert.equal(meters().length, 4, 'read-only subscriber retains shared meters');
-  await observer.getByRole('button', { name: 'Close mixer', exact: true }).click();
+  await observer.getByRole('button', { name: 'Close Mixer', exact: true }).click();
   await waitFor(() => meters().length === 0);
   for (const target of [page, participant, observer]) assert.equal(await target.evaluate(() => elsewhere.store.get().mic), false);
   console.log('last subscriber removes all monitors without starting browser capture');
   await participant.close();
   await page.waitForFunction(() => elsewhere.store.get().role === 'controller');
-  await page.getByRole('button', { name: 'Session audio mixer', exact: true }).click();
+  await page.getByRole('button', { name: 'Audio Mixer', exact: true }).click();
   await waitFor(() => meters().length === 4);
-  await page.getByRole('button', { name: 'Fullscreen (browser shortcuts go to the desktop)', exact: true }).click();
+  await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
   await page.waitForFunction(() => !!document.fullscreenElement);
   await waitFor(() => meters().length === 0);
   await page.evaluate(() => document.exitFullscreen());
@@ -199,7 +199,7 @@ try {
   await page.waitForFunction(([id, target]) => elsewhere.store.get().mixer.nodes.find(n => n.id === id).targets.includes(target) && Math.abs(elsewhere.store.get().mixerLevels[target] - .0343) < .002, [currentId, otherId]);
   await row.getByRole('combobox').selectOption('');
   await page.waitForFunction(id => !elsewhere.store.get().mixer.nodes.find(n => n.name === 'MixerBrowserTest').targets.includes(id) && elsewhere.store.get().mixerLevels[id] === 0, otherId);
-  await panel.getByRole('group', { name: 'OtherBrowser Output', exact: true }).getByRole('button', { name: 'Make default', exact: true }).click();
+  await panel.getByRole('group', { name: 'OtherBrowser Output', exact: true }).getByRole('button', { name: 'Make Default', exact: true }).click();
   await page.waitForFunction(id => elsewhere.store.get().mixer.nodes.find(n => n.id === id).is_default, otherId);
   console.log('graph reconnect refreshes UI IDs; target/default widgets route real signal');
   const revoked = await revokeToken('http://127.0.0.1:8088', token);

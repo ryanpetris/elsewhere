@@ -53,7 +53,7 @@ try {
   await canvas.click();
   assert.equal(await page.evaluate(() => !!document.pointerLockElement), false);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  const toggle = page.getByRole('checkbox', { name: 'Capture mouse on click' });
+  const toggle = page.getByRole('checkbox', { name: 'Capture Mouse on Click' });
   await toggle.check();
   assert.equal(await page.evaluate(() => localStorage.getItem('elsewhere.captureOnClick')), '1');
   await page.reload(); await ready();

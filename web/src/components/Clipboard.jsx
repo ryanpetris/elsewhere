@@ -32,9 +32,9 @@ function ImagePreview({ blob }) {
     return () => { live = false; if (url) URL.revokeObjectURL(url); };
   }, [blob]);
   if (!image) return <p role="status" className="text-ink-3">Loading preview…</p>;
-  if (image.error) return <p className="text-ink-3">Preview unavailable</p>;
+  if (image.error) return <p className="text-ink-3">Preview Unavailable</p>;
   return <>
-    <span className="flex justify-center rounded-lg bg-canvas p-2 ring-1 ring-line"><img src={image.url} alt="Desktop clipboard image" className="max-h-64 max-w-full object-contain" /></span>
+    <span className="flex justify-center rounded-lg bg-canvas p-2 ring-1 ring-line"><img src={image.url} alt="Desktop Clipboard Image" className="max-h-64 max-w-full object-contain" /></span>
     <p className="mt-2 font-mono text-xs text-ink-3">{image.width} × {image.height}</p>
   </>;
 }
@@ -74,9 +74,9 @@ export function ClipboardControl({ viewer }) {
     finally { setPending(false); }
   };
   const loading = readable && (state.status === 'loading' || state.status === 'ready' && state.preview === 'loading');
-  const label = !readable ? 'Write desktop clipboard' : loading ? 'Desktop clipboard: loading'
-    : state.status === 'unavailable' ? 'Desktop clipboard: unavailable'
-    : state.present ? 'Desktop clipboard: has contents' : 'Desktop clipboard: empty';
+  const label = !readable ? 'Write Desktop Clipboard' : loading ? 'Desktop Clipboard: Loading'
+    : state.status === 'unavailable' ? 'Desktop Clipboard: Unavailable'
+    : state.present ? 'Desktop Clipboard: Has Contents' : 'Desktop Clipboard: Empty';
   const Icon = loading ? LoaderCircle : state.status === 'unavailable' ? ClipboardX : state.present ? ClipboardCheck : Clipboard;
   if (!readable && !allowed) return null;
   return <>
@@ -84,7 +84,7 @@ export function ClipboardControl({ viewer }) {
       onClick={() => setOpen(!open)} className={cx('inline-flex size-6 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-surface-3 focus-visible:outline-2 focus-visible:outline-accent', open ? 'bg-accent/15 text-accent-2' : state.present ? 'text-accent-2' : 'text-ink-3 hover:text-ink')}>
       <Icon className={cx('size-3.5', loading && 'animate-spin')} />
     </button>
-    {open && createPortal(<Popover floating ref={panel} id="desktop-clipboard" role="dialog" aria-label="Desktop clipboard" onClose={close}
+    {open && createPortal(<Popover floating ref={panel} id="desktop-clipboard" role="dialog" aria-label="Desktop Clipboard" onClose={close}
       onKeyDown={event => {
         event.stopPropagation();
         if (event.key !== 'Tab') return;
@@ -98,26 +98,26 @@ export function ClipboardControl({ viewer }) {
       style={position} className="font-sans text-sm text-ink-2 select-text">
       <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
         <Clipboard className="size-3.5 text-ink-3" />
-        <h2 className="font-medium text-ink">Desktop clipboard</h2>
-        {state.present && <span className="ml-1 truncate font-mono text-[10px] text-ink-4">{state.mime || 'Unknown format'}{state.size != null ? ` · ${sizeLabel(state.size)}` : ''}</span>}
-        <IconButton icon={X} label="Close clipboard" size="sm" className="ml-auto" onClick={close} />
+        <h2 className="font-medium text-ink">Desktop Clipboard</h2>
+        {state.present && <span className="ml-1 truncate font-mono text-[10px] text-ink-4">{state.mime || 'Unknown Format'}{state.size != null ? ` · ${sizeLabel(state.size)}` : ''}</span>}
+        <IconButton icon={X} label="Close Clipboard" size="sm" className="ml-auto" onClick={close} />
       </div>
       <div className="flex min-h-0 flex-col gap-3 overflow-auto p-3">
         {draft ? <>
-          {conflict && <div className="callout callout-warn"><p className="font-medium">Clipboard changed</p><p className="mt-0.5 text-warn/80">Your draft is preserved.</p>
-            <button type="button" className="btn btn-outline btn-xs mt-2" disabled={pending || state.text === null || !editable} onClick={edit}>Load current contents</button>
+          {conflict && <div className="callout callout-warn"><p className="font-medium">Clipboard Changed</p><p className="mt-0.5 text-warn/80">Your draft is preserved.</p>
+            <button type="button" className="btn btn-outline btn-xs mt-2" disabled={pending || state.text === null || !editable} onClick={edit}>Load Current Contents</button>
           </div>}
-          <textarea aria-label="Clipboard text" autoFocus value={draft.text} onChange={event => setDraft({ ...draft, text: event.target.value })} disabled={pending}
+          <textarea aria-label="Clipboard Text" autoFocus value={draft.text} onChange={event => setDraft({ ...draft, text: event.target.value })} disabled={pending}
             spellCheck={false} className="input min-h-40 resize-y py-2 font-mono whitespace-pre-wrap" />
           <div className="flex justify-end gap-1.5">
             <button type="button" className="btn btn-outline btn-xs" disabled={pending} onClick={() => { setDraft(null); setError(''); }}>Cancel</button>
-            <button type="button" className="btn btn-primary btn-xs" disabled={!allowed || pending} onClick={() => write(draft.text)}>{conflict ? 'Replace with draft' : 'Save'}</button>
+            <button type="button" className="btn btn-primary btn-xs" disabled={!allowed || pending} onClick={() => write(draft.text)}>{conflict ? 'Replace with Draft' : 'Save'}</button>
           </div>
         </> : <>
-          {!readable ? <p className="text-ink-3">This token allows writing the clipboard.</p> : loading ? <p role="status" className="text-ink-3">Loading clipboard…</p>
-            : state.status === 'unavailable' ? <p className="text-ink-3">Clipboard unavailable</p>
-            : !state.present ? <p className="py-4 text-center text-ink-4">Clipboard is empty</p>
-            : state.preview !== 'available' ? <p className="text-ink-3">Preview unavailable</p>
+          {!readable ? <p className="text-ink-3">Write-Only Access</p> : loading ? <p role="status" className="text-ink-3">Loading clipboard…</p>
+            : state.status === 'unavailable' ? <p className="text-ink-3">Clipboard Unavailable</p>
+            : !state.present ? <p className="py-4 text-center text-ink-4">Clipboard Empty</p>
+            : state.preview !== 'available' ? <p className="text-ink-3">Preview Unavailable</p>
             : state.mime === 'image/png' && state.blob ? <ImagePreview blob={state.blob} />
             : state.files.length ? <ul className="flex flex-col gap-1">{state.files.map((name, index) => <li key={index} className="flex items-center gap-2 rounded-md bg-surface-2 px-2 py-1.5">
               <FileText className="size-3.5 shrink-0 text-ink-4" /><span className="min-w-0 flex-1 break-all">{name}</span>{readable && permissions.includes('files.download') && <button type="button" className="btn btn-ghost size-6 shrink-0 px-0" aria-label={`Download ${name}`} title={`Download ${name}`} onClick={() => downloadClipboardFile(index, name).catch(error => setError(error.message))}><Download className="size-3.5" /></button>}
@@ -125,11 +125,11 @@ export function ClipboardControl({ viewer }) {
             : state.text !== null ? <pre tabIndex={0} className="max-h-64 overflow-auto rounded-lg border border-line bg-canvas p-2.5 font-mono text-xs break-words whitespace-pre-wrap text-ink focus-visible:outline-2 focus-visible:outline-accent">{state.text}</pre>
             : <p role="status" className="text-ink-3">Loading preview…</p>}
           {allowed && <div className="flex justify-end gap-1.5">
-            {editable && <button type="button" className="btn btn-outline btn-xs" disabled={pending || (readable && state.text === null)} onClick={edit}>{readable ? 'Edit' : 'New text'}</button>}
+            {editable && <button type="button" className="btn btn-outline btn-xs" disabled={pending || (readable && state.text === null)} onClick={edit}>{readable ? 'Edit' : 'New Text'}</button>}
             <button type="button" className="btn btn-outline btn-xs" disabled={pending || (readable && state.status !== 'ready')} onClick={() => write('')}>Clear</button>
           </div>}
         </>}
-        {pending && <p role="status" className="flex items-center gap-2 text-ink-3"><LoaderCircle className="size-3 animate-spin" /> Waiting for the desktop clipboard…</p>}
+        {pending && <p role="status" className="flex items-center gap-2 text-ink-3"><LoaderCircle className="size-3 animate-spin" /> Saving…</p>}
         {(error || state.error) && <p role="alert" className="callout callout-bad">{error || state.error}</p>}
       </div>
     </Popover>, document.querySelector('[data-viewer]') ?? document.body)}

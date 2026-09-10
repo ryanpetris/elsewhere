@@ -49,7 +49,7 @@ try {
     return page;
   };
   const main = await connect(null);
-  assert.equal(await main.getByTitle('Encoding effort', { exact: true }).inputValue(), 'fast');
+  assert.equal(await main.getByTitle('Encoding Effort', { exact: true }).inputValue(), 'fast');
   await main.evaluate(() => elsewhere.spawn('foot --app-id=effort-check'));
   await main.waitForFunction(() => elsewhere.store.get().windows.some(window => window.app_id === 'effort-check'));
   const id = await main.evaluate(() => elsewhere.store.get().windows.find(window => window.app_id === 'effort-check').id);
@@ -73,7 +73,7 @@ try {
       await page.reload();
       await page.waitForFunction(() => elsewhere.store.get().streamState?.effort?.requested === 'high' && !elsewhere.store.get().streamState.effort.pending);
       await page.waitForFunction(() => elsewhere.store.get().stats.frames > 0);
-      assert.equal(await page.getByTitle('Encoding effort', { exact: true }).inputValue(), 'high');
+      assert.equal(await page.getByTitle('Encoding Effort', { exact: true }).inputValue(), 'high');
       console.log(windowId ? 'window' : 'desktop', 'unsupported OpenH264 effort remains truthful and saved');
       if (windowId) await page.close();
       continue;
@@ -82,10 +82,10 @@ try {
     assert.ok(codecs.length >= 3, 'rig exposes multiple codec implementations');
     for (const codec of codecs) {
       let qualityMaximum;
-      await page.getByTitle('Video codec', { exact: true }).selectOption(codec);
+      await page.getByTitle('Video Codec', { exact: true }).selectOption(codec);
       for (const [index, effort] of ['fast', 'balanced', 'high'].entries()) {
         const frames = await page.evaluate(() => elsewhere.store.get().stats.frames);
-        await page.getByTitle('Encoding effort', { exact: true }).selectOption(effort);
+        await page.getByTitle('Encoding Effort', { exact: true }).selectOption(effort);
         await page.waitForFunction(({ codec, effort }) => {
           const state = elsewhere.store.get().streamState;
           return state?.codec === codec && state.effort.requested === effort && !state.effort.pending;
@@ -126,7 +126,7 @@ try {
     await page.waitForFunction(() => elsewhere.store.get().streamState?.effort?.requested === 'high' && !elsewhere.store.get().streamState.effort.pending);
     await page.waitForFunction(() => elsewhere.store.get().stats.frames > 0);
     assert.deepEqual(await page.evaluate(() => elsewhere.store.get().streamState.effort), savedEffort);
-    assert.equal(await page.getByTitle('Encoding effort', { exact: true }).inputValue(), 'high');
+    assert.equal(await page.getByTitle('Encoding Effort', { exact: true }).inputValue(), 'high');
     await page.evaluate(() => viewerSocket.close());
     await page.waitForFunction(() => elsewhere.store.get().stats.connects >= 2 && elsewhere.store.get().streamState?.effort?.requested === 'high' && !elsewhere.store.get().streamState.effort.pending);
     assert.deepEqual(await page.evaluate(() => elsewhere.store.get().streamState.effort), savedEffort);

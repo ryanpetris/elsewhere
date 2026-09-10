@@ -51,7 +51,7 @@ try {
   await about.waitFor();
   assert.equal(await about.getByRole('link', { name: 'Acknowledgements', exact: true }).getAttribute('href'),
     'https://github.com/ryanpetris/elsewhere/blob/master/ACKNOWLEDGEMENTS.md');
-  assert.equal(await about.getByRole('link', { name: 'GitHub repository', exact: true }).getAttribute('href'),
+  assert.equal(await about.getByRole('link', { name: 'GitHub Repository', exact: true }).getAttribute('href'),
     'https://github.com/ryanpetris/elsewhere');
   await about.focus();
   await page.keyboard.press('Shift+Tab');
@@ -68,13 +68,13 @@ try {
   assert(await aboutButton.evaluate(node => node === document.activeElement), 'Escape restores About trigger focus');
   assert.equal(chunks.length, 0, 'About does not load the visualiser');
 
-  await page.getByRole('button', { name: 'Session audio mixer', exact: true }).click();
-  await page.getByRole('region', { name: 'Session audio mixer', exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Close mixer', exact: true }).click();
+  await page.getByRole('button', { name: 'Audio Mixer', exact: true }).click();
+  await page.getByRole('region', { name: 'Audio Mixer', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Close Mixer', exact: true }).click();
   assert.equal(chunks.length, 0, 'mixer does not load the optional visualiser');
 
-  await page.getByRole('button', { name: 'Audio visualiser', exact: true }).click();
-  await page.getByText('Waiting for session audio.', { exact: false }).waitFor();
+  await page.getByRole('button', { name: 'Audio Visualizer', exact: true }).click();
+  await page.getByText('Waiting for audio…', { exact: false }).waitFor();
   await page.evaluate(async () => {
     const context = new AudioContext({ sampleRate: 48000 });
     await context.resume();
@@ -92,13 +92,13 @@ try {
     }, 50);
     window.elsewhere.store.set({ playback: { context, source }, stats: { ...window.elsewhere.store.get().stats, audio: { packets: 1, decoded: 1, lead: 0, state: 'running', signalPeak: .1, level: 200 } } });
   });
-  const panel = page.getByRole('region', { name: 'Session audio' });
+  const panel = page.getByRole('region', { name: 'Audio Visualizer' });
   await chunkRequested;
-  await panel.getByRole('button', { name: 'Close visualiser', exact: true }).click();
+  await panel.getByRole('button', { name: 'Close Visualizer', exact: true }).click();
   releaseChunk();
   await page.waitForTimeout(200);
-  assert.equal(await page.locator('[aria-label="Session audio"] canvas').count(), 0, 'closed during loading stays disposed');
-  await page.getByRole('button', { name: 'Audio visualiser', exact: true }).click();
+  assert.equal(await page.locator('[aria-label="Audio Visualizer"] canvas').count(), 0, 'closed during loading stays disposed');
+  await page.getByRole('button', { name: 'Audio Visualizer', exact: true }).click();
   await panel.locator('canvas').waitFor({ timeout: 5000 }).catch(async e => { console.log(await page.locator('body').innerText(), errors); throw e; });
   assert.equal(chunks.length, 1);
   const checkEdges = async expected => {
@@ -106,21 +106,21 @@ try {
     assert.equal(await page.evaluate(() => window.graphEdges.filter(([from, to]) => from === window.testPlayback.source && to === window.testPlayback.context.destination).length), 1);
   };
   await checkEdges(2);
-  await panel.getByText('Session signal received.', { exact: false }).waitFor();
+  await panel.getByText('Playing', { exact: false }).waitFor();
   await page.evaluate(() => window.testPlayback.context.suspend());
-  await panel.getByText('Playback is waiting for a user gesture.', { exact: false }).waitFor();
+  await panel.getByText('Playback paused.', { exact: false }).waitFor();
   await page.evaluate(() => window.testPlayback.context.resume());
-  await panel.getByText('Session signal received.', { exact: false }).waitFor();
+  await panel.getByText('Playing', { exact: false }).waitFor();
   for (const style of ['line', 'radial', 'stereo', 'bars']) {
     await panel.getByRole('combobox', { name: /^Style/ }).selectOption(style);
     await checkEdges(2);
   }
   assert(await panel.locator('canvas').evaluate(c => c.width >= c.clientWidth * 1.9), 'HiDPI canvas');
-  await panel.getByRole('button', { name: 'Fullscreen visualiser', exact: true }).click();
+  await panel.getByRole('button', { name: 'Fullscreen Visualizer', exact: true }).click();
   await page.waitForFunction(() => !!document.fullscreenElement);
   assert(await panel.isVisible(), 'fullscreen panel remains visible');
   await checkEdges(2);
-  await panel.getByRole('button', { name: 'Exit fullscreen', exact: true }).click();
+  await panel.getByRole('button', { name: 'Exit Fullscreen', exact: true }).click();
   await page.waitForFunction(() => !document.fullscreenElement);
   await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
   await page.waitForFunction(() => !!document.fullscreenElement);
@@ -162,9 +162,9 @@ try {
   };
   const clickListeners = await listeners();
   for (let i = 0; i < 8; i++) {
-    await panel.getByRole('button', { name: 'Close visualiser', exact: true }).click();
+    await panel.getByRole('button', { name: 'Close Visualizer', exact: true }).click();
     await checkEdges(1);
-    await page.getByRole('button', { name: 'Audio visualiser', exact: true }).click();
+    await page.getByRole('button', { name: 'Audio Visualizer', exact: true }).click();
     await panel.locator('canvas').waitFor();
     await checkEdges(2);
   }
@@ -175,7 +175,7 @@ try {
   // Check this canvas, since each open creates a fresh renderer and FFT input.
   const renderedImage = async signal => {
     const result = await page.waitForFunction(signal => {
-      const canvas = document.querySelector('[aria-label="Session audio"] canvas');
+      const canvas = document.querySelector('[aria-label="Audio Visualizer"] canvas');
       if (!canvas?.width || !canvas.height) return false;
       const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
       let coloured = 0;
@@ -193,7 +193,7 @@ try {
     window.testPlayback.oscillator.stop();
     window.elsewhere.store.set({ stats: { ...window.elsewhere.store.get().stats, audio: { packets: 1, decoded: 1, lead: 0, state: 'running', signalPeak: 0, level: 0 } } });
   });
-  await panel.getByText('Connected, but silent.', { exact: false }).waitFor();
+  await panel.getByText('Silent', { exact: false }).waitFor();
   assert.notEqual(await renderedImage(false), signalImage, 'signal and silence draw differently');
   // Same wrapper must also follow a replacement playback graph.
   await page.evaluate(() => {
@@ -206,7 +206,7 @@ try {
   await page.waitForTimeout(200);
   await checkEdges(2);
   assert.equal(await page.evaluate(() => window.graphEdges.filter(([from]) => from === window.oldPlayback.source).length), 1);
-  await panel.getByRole('button', { name: 'Close visualiser', exact: true }).click();
+  await panel.getByRole('button', { name: 'Close Visualizer', exact: true }).click();
   await checkEdges(1);
   assert.equal(await page.evaluate(() => window.testPlayback.context.state === 'closed'), false);
   assert.equal(await panel.locator('canvas').count(), 0);
@@ -220,11 +220,11 @@ try {
     window.testPlayback = { context, source };
     elsewhere.store.set({ status: 'connected', role: 'viewer', permissions: ['desktop.view', 'audio.listen'], audioAvailable: true, micAvailable: false, playback: { context, source } });
   });
-  await page.getByRole('button', { name: 'Audio visualiser', exact: true }).click();
-  await page.getByRole('alert').filter({ hasText: 'Visualiser unavailable' }).waitFor();
+  await page.getByRole('button', { name: 'Audio Visualizer', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: 'Visualizer unavailable' }).waitFor();
   await checkEdges(1);
   assert.equal(await page.evaluate(() => window.testPlayback.context.state), 'running');
-  assert.equal(await page.getByRole('region', { name: 'Session audio' }).locator('canvas').count(), 0);
+  assert.equal(await page.getByRole('region', { name: 'Audio Visualizer' }).locator('canvas').count(), 0);
   assert.equal(errors.length, 0, errors.join('\n'));
   console.log('renderer failure isolation, lazy load, styles, HiDPI, fullscreen, animation off, reduced motion, hidden page/stage, close while loading, eight open/close cycles, listener and graph ownership, silence, source replacement passed');
 } finally { await browser.close(); server.close(); }
