@@ -125,7 +125,7 @@ try {
       for (const backend of ['wayland', 'x11']) {
         const title = 'display-limits-' + backend;
         await control(0, 'spawn', { cmd: `GDK_BACKEND=${backend} GTK_CSD=0 /usr/bin/python3 /src/crates/elsewhere-compositor/checks/restore-client.py ${title} 800 600 900 650 950 700` });
-        await wait('limited window', async () => (await windows()).some(w => w.title === title));
+        await wait('limited window has committed its initial size and hints', async () => (await windows()).some(w => w.title === title && w.w >= 800 && w.h >= 600));
         const limited = (await windows()).find(w => w.title === title);
         await control(limited.id, 'move', { x: 600, y: 500 });
         await control(limited.id, 'resize', { w: 400, h: 300 });

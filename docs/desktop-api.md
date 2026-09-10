@@ -715,8 +715,13 @@ Restoring a maximized or fullscreen window fits its saved geometry into the curr
 including compositor decorations, while honoring advertised client size limits. A client minimum larger than
 the work area keeps that minimum size with its top-left corner and title bar in the work area.
 Saved geometry that still fits is preserved.
+Wayland recommended bounds describe the available content area under the current decoration policy;
+fullscreen bounds cover the output. Bounds follow decoration changes and output resizing.
 
 Run `npm run check:display` in the Docker rig to exercise live resizing, controller handoffs, kiosk
 layout restoration, startup kiosk exit, permissions and settings replay.
 Run `node checks/window-restore.mjs` in the Docker rig with Python GI and GTK 3 to check Wayland and
 X11 restoration after resolution shrink, including kiosk-created windows and oversized minimums.
+Run `node checks/window-bounds.mjs` with a C compiler, libwayland-dev, wayland-protocols and
+plasma-wayland-protocols in the Docker rig to verify emitted Wayland bounds across xdg/KDE decoration,
+fullscreen, kiosk and resolution changes, including minimized windows.

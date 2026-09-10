@@ -90,6 +90,7 @@ impl KdeDecorationHandler for State {
                 *r.0.borrow_mut() = None;
             }
         });
+        self.decorations_changed();
     }
 }
 

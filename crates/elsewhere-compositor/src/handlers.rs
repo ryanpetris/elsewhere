@@ -361,6 +361,9 @@ fn ensure_initial_configure(surface: &WlSurface, state: &mut State) {
     if let Some(window) = state.window_for(surface) {
         if let Some(toplevel) = window.toplevel() {
             if !toplevel.is_initial_configure_sent() {
+                let fullscreen = toplevel.with_pending_state(|s| s.states.contains(xdg_toplevel::State::Fullscreen));
+                let bounds = state.fill_rect(&window, fullscreen).size;
+                toplevel.with_pending_state(|s| s.bounds = Some(bounds));
                 toplevel.send_configure();
             }
         }
@@ -402,7 +405,6 @@ impl XdgShellHandler for State {
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         let work = self.work_area();
         surface.with_pending_state(|s| {
-            s.bounds = Some(work.size);
             s.decoration_mode = Some(DecorationMode::ServerSide); // ours unless the client asks to draw its own
             s.capabilities.replace([xdg_toplevel::WmCapabilities::Maximize, xdg_toplevel::WmCapabilities::Fullscreen]);
             if !self.kiosk {
@@ -569,6 +571,7 @@ impl State {
         surface.with_pending_state(|s| {
             s.states.set(what);
             s.size = Some(geo.size);
+            s.bounds = Some(geo.size);
         });
         self.space.map_element(window, geo.loc, false); // raise, but focus is focus_window's job
         surface.send_pending_configure();
@@ -588,7 +591,8 @@ impl State {
         // the size it had, said explicitly: a client that only ever takes what it is told keeps the big one otherwise
         let Some(window) = self.window_for(surface.wl_surface()) else { return };
         let saved = window.user_data().get::<RestoreLocation>().and_then(|r| r.borrow_mut().take()).map(|r| self.restore_rect(&window, r));
-        surface.with_pending_state(|s| s.size = saved.map(|r| r.size));
+        let bounds = self.fill_rect(&window, false).size;
+        surface.with_pending_state(|s| { s.size = saved.map(|r| r.size); s.bounds = Some(bounds); });
         if let Some(rect) = saved {
             self.space.map_element(window, rect.loc, false);
         }
@@ -633,9 +637,6 @@ impl XdgDecorationHandler for State {
     }
     fn request_mode(&mut self, toplevel: ToplevelSurface, mode: DecorationMode) {
         toplevel.with_pending_state(|s| s.decoration_mode = Some(mode));
-        if toplevel.is_initial_configure_sent() {
-            toplevel.send_pending_configure();
-        }
         self.decorations_changed();
     }
     fn unset_mode(&mut self, toplevel: ToplevelSurface) {

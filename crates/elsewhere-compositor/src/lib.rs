@@ -701,16 +701,15 @@ impl State {
     }
 
     pub fn relayout(&mut self) {
-        let work = self.work_area();
         let scale = self.geometry.scale;
-        for window in self.space.elements().cloned().collect::<Vec<_>>() {
+        for window in self.space.elements().chain(self.minimized.iter().map(|(w, ..)| w)).cloned().collect::<Vec<_>>() {
             // maximized windows fill the work area (under their title bar), fullscreen ones the whole output
             let (output, work_rect) = (self.fill_rect(&window, true), self.fill_rect(&window, false));
             let filled = match window.underlying_surface() {
                 WindowSurface::Wayland(toplevel) => {
                     let rect = toplevel.with_pending_state(|s| {
                         use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State as S;
-                        s.bounds = Some(work.size);
+                        s.bounds = Some(if s.states.contains(S::Fullscreen) { output.size } else { work_rect.size });
                         let rect = if s.states.contains(S::Fullscreen) {
                             Some(output)
                         } else if s.states.contains(S::Maximized) {
@@ -742,6 +741,7 @@ impl State {
             };
             // map_element raises: re-map every window in this back-to-front order to keep the stacking
             let loc = match (filled, self.space.element_location(&window)) {
+                (_, None) => continue,
                 (Some(rect), _) => rect.loc,
                 (None, Some(loc)) => {
                     let clamped = self.clamp_to_output(&window, loc); // keep a corner of every floating window reachable
@@ -750,7 +750,6 @@ impl State {
                     }
                     clamped
                 }
-                (None, None) => continue,
             };
             self.space.map_element(window.clone(), loc, false);
             window.with_surfaces(|_, states| {
