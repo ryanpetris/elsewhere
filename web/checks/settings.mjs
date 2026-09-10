@@ -205,6 +205,7 @@ try {
   await apps.click();
   const search = page.getByPlaceholder('Search Applications…');
   await search.fill('Local Test');
+  await page.locator('[data-app="local-test.desktop"]').waitFor();
   await search.press('Enter');
   await search.waitFor({ state: 'detached' });
   assert.equal(await search.count(), 0);
