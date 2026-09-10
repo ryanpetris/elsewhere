@@ -39,7 +39,11 @@ export function BroadcastsPanel({ viewer, open }) {
   const action = async fn => {
     if (busy) return;
     setBusy(true); setError(''); generation.current++;
-    try { await fn(); const runs = await listBroadcasts(); generation.current++; setStreams(runs); }
+    try {
+      const run = await fn();
+      generation.current++;
+      setStreams(runs => [...runs.filter(s => s.id !== run.id), run].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    }
     catch (e) { setError(e.message); }
     finally { setBusy(false); }
   };
@@ -51,8 +55,9 @@ export function BroadcastsPanel({ viewer, open }) {
       retry = { request_id: crypto.randomUUID(), settings: serialized, created: Date.now() };
       pending.current.set(preset_id, retry);
     }
-    await startBroadcast({ ...settings, request_id: retry.request_id });
+    const run = await startBroadcast({ ...settings, request_id: retry.request_id });
     pending.current.delete(preset_id);
+    return run;
   });
   const save = event => {
     event.preventDefault();
