@@ -10,7 +10,7 @@ pub const POINTER_LOCK: u8 = 0x04;
 pub const AUDIO: u8 = 0x05;
 /// `[WINDOWS][JSON array of WindowInfo]`
 pub const WINDOWS: u8 = 0x06;
-/// UTF-8 text a desktop application put on the clipboard.
+/// JSON clipboard metadata, with text when the observed selection contains supported text.
 pub const CLIPBOARD: u8 = 0x07;
 /// `[ROLE][u8 role][u8 features]`: input ownership, with 0 unable to control, 1 eligible,
 /// and 2 controlling. Features reflect grants and server availability: bit 0 microphone,
@@ -18,9 +18,6 @@ pub const CLIPBOARD: u8 = 0x07;
 pub const ROLE: u8 = 0x08;
 /// `[NOTICE][utf-8 text]`: something the page should tell its user about what it just did.
 pub const NOTICE: u8 = 0x09;
-/// A desktop application copied something that isn't text; the payload is its mime type (`image/png`)
-/// and the bytes are at `GET /api/clipboard`.
-pub const CLIPBOARD_DATA: u8 = 0x0A;
 /// The open desktop notifications, as a JSON array of `Notification`, whenever they change (and in the replay).
 pub const NOTIFICATIONS: u8 = 0x0B;
 /// JSON `{"codec","codecs","status","attempt","preset","ceiling_kbps","medium_kbps","bitrate_kbps","max_fps"}`: what this session's encoder does right now;
@@ -214,10 +211,9 @@ fn notice_kind(kind: u8, text: &str) -> Bytes {
     b.into()
 }
 
-pub fn clipboard(text: &str) -> Bytes {
-    let mut b = Vec::with_capacity(1 + text.len());
-    b.push(CLIPBOARD);
-    b.extend_from_slice(text.as_bytes());
+pub fn clipboard(metadata: &serde_json::Value) -> Bytes {
+    let mut b = vec![CLIPBOARD];
+    b.extend_from_slice(&serde_json::to_vec(metadata).unwrap());
     b.into()
 }
 
@@ -277,13 +273,6 @@ pub fn stream_state(codec: Option<Codec>, codecs: &[Codec], hardware: bool, stat
 pub fn notifications(list: &[crate::notify::Notification]) -> Bytes {
     let mut b = vec![NOTIFICATIONS];
     b.extend_from_slice(serde_json::to_string(list).unwrap().as_bytes());
-    b.into()
-}
-
-pub fn clipboard_data(mime: &str) -> Bytes {
-    let mut b = Vec::with_capacity(1 + mime.len());
-    b.push(CLIPBOARD_DATA);
-    b.extend_from_slice(mime.as_bytes());
     b.into()
 }
 
@@ -367,6 +356,7 @@ pub struct PasteMsg {
     pub paste: bool,
     pub shift_insert: bool,
     pub epoch: u64,
+    pub request: u32,
     pub selection: PasteSelection,
 }
 #[derive(Debug, PartialEq)]
@@ -402,7 +392,8 @@ pub fn decode(b: &[u8]) -> Option<ClientMsg> {
             let flags = u8_at(1)?;
             if flags & !7 != 0 { return None; }
             let epoch = u64::from_le_bytes(b.get(2..10)?.try_into().ok()?);
-            let payload = b.get(10..)?;
+            let request = u32::from_le_bytes(b.get(10..14)?.try_into().ok()?);
+            let payload = b.get(14..)?;
             let selection = if flags & 4 != 0 {
                 if payload.len() > 1 << 20 { return None; }
                 let files: PasteFiles = serde_json::from_slice(payload).ok()?;
@@ -412,7 +403,7 @@ pub fn decode(b: &[u8]) -> Option<ClientMsg> {
                 if payload.len() > 16 << 20 { return None; }
                 PasteSelection::Png(payload.to_vec())
             };
-            ClientMsg::PasteClipboard(PasteMsg { paste: flags & 1 != 0, shift_insert: flags & 2 != 0, epoch, selection })
+            ClientMsg::PasteClipboard(PasteMsg { paste: flags & 1 != 0, shift_insert: flags & 2 != 0, epoch, request, selection })
         },
         TAKE_CONTROL => ClientMsg::TakeControl,
         HANDOFF if b.len() == 9 => ClientMsg::Handoff(u64::from_le_bytes(b[1..].try_into().ok()?)),
@@ -440,10 +431,10 @@ mod tests {
 
     #[test]
     fn compound_paste_payload_boundaries() {
-        let packet = |flags: u8, body: &[u8]| [&[PASTE_CLIPBOARD, flags][..], &42u64.to_le_bytes(), body].concat();
+        let packet = |flags: u8, body: &[u8]| [&[PASTE_CLIPBOARD, flags][..], &42u64.to_le_bytes(), &7u32.to_le_bytes(), body].concat();
         let png = packet(3, &[137, 80, 78, 71]);
-        assert!(matches!(decode(&png), Some(ClientMsg::PasteClipboard(PasteMsg { paste: true, shift_insert: true, epoch: 42, selection: PasteSelection::Png(_) }))));
-        for end in 0..10 { assert_eq!(decode(&png[..end]), None); }
+        assert!(matches!(decode(&png), Some(ClientMsg::PasteClipboard(PasteMsg { paste: true, shift_insert: true, epoch: 42, request: 7, selection: PasteSelection::Png(_) }))));
+        for end in 0..14 { assert_eq!(decode(&png[..end]), None); }
         assert_eq!(decode(&packet(8, &[])), None);
         assert_eq!(decode(&packet(4, br#"{"names":[],"batch":"b"}"#)), None);
         assert_eq!(decode(&packet(4, br#"{"names":["a"],"batch":"b","unexpected":1}"#)), None);

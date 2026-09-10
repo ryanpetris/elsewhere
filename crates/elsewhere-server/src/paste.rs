@@ -58,7 +58,11 @@ impl App {
                 let Some(viewer) = windows.get(&(session & !(1 << 63))) else { return Ok(()); };
                 Some(viewer.window)
             } else { None };
-            self.send(Command::PasteClipboard { mime: mime.into(), data, shift_insert: msg.shift_insert, window,
+            let mut viewers = self.viewers.lock().unwrap();
+            let operation = elsewhere_core::ClipboardOperation { id: viewers.next_clipboard_write,
+                source: Some(elsewhere_core::ClipboardSource { session, request: msg.request }) };
+            viewers.next_clipboard_write += 1;
+            self.send(Command::PasteClipboard { mime: mime.into(), data, operation, shift_insert: msg.shift_insert, window,
                 admission: Box::new(Admission { app: Arc::downgrade(self), key: key.clone(), session, epoch: msg.epoch, paste: msg.paste, files }) })
         });
         if let Err(error) = result { self.paste_notice(key, session, error); }
@@ -112,10 +116,30 @@ mod tests {
             receiver
         }
         fn queue(&self, key: &Key, selection: PasteSelection) -> Box<dyn ClipboardPaste> {
-            self.app.paste_clipboard(key, (1 << 63) | 1, PasteMsg { paste: true, shift_insert: false, epoch: 0, selection });
+            self.app.paste_clipboard(key, (1 << 63) | 1, PasteMsg { paste: true, shift_insert: false, epoch: 0, request: 1, selection });
             let Command::PasteClipboard { admission, .. } = self.commands.try_recv().unwrap() else { panic!("expected clipboard operation") };
             admission
         }
+    }
+
+    #[tokio::test]
+    async fn clipboard_broadcast_bounds_converted_text_and_preserves_explicit_empty_text() {
+        let rig = Rig::new().await;
+        let key = rig.key(&[P::DesktopView, P::ClipboardRead]).await;
+        let mut received = rig.window(&key);
+        let (events, receiver) = mpsc::unbounded_channel();
+        let forward = tokio::spawn(crate::ws::forward_events(rig.app.clone(), receiver));
+        for (raw, length, included) in [(vec![0xff; 1 << 20], 3 << 20, false), (vec![b'a'; 1 << 20], 1 << 20, true), (vec![], 0, true)] {
+            events.send(elsewhere_core::Event::Clipboard { mime: "STRING".into(), data: raw.into(), operation: None }).unwrap();
+            let packet = received.recv().await.unwrap();
+            assert_eq!(packet[0], protocol::CLIPBOARD);
+            let metadata: serde_json::Value = serde_json::from_slice(&packet[1..]).unwrap();
+            assert_eq!(metadata["size"], length);
+            assert_eq!(metadata.get("text").is_some(), included);
+            if included { assert_eq!(metadata["text"].as_str().unwrap().len(), length); }
+        }
+        drop(events);
+        forward.await.unwrap();
     }
 
     #[tokio::test]

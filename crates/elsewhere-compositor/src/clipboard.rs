@@ -235,7 +235,7 @@ impl State {
 
     /// Text, a PNG or a file list (`text/uri-list`) from the browser or the API becomes the clipboard, offered
     /// to Wayland and X11 clients.
-    pub fn set_clipboard(&mut self, mime: String, data: Vec<u8>, operation: Option<u64>) {
+    pub fn set_clipboard(&mut self, mime: String, data: Vec<u8>, operation: Option<elsewhere_core::ClipboardOperation>) {
         self.cancel_clipboard_read(); // an application's older clipboard must not land after this one
         let mimes: Vec<String> = match mime.as_str() {
             PNG => vec![mime.clone()],

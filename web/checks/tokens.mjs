@@ -57,7 +57,7 @@ try {
   const clipboard = await request('/api/clipboard', a.token, 'PUT', 'private text');
   assert.equal(clipboard.status, 202);
   await delay(150);
-  assert.ok(two.packets.every(p => ![5, 7, 10, 15, 16].includes(p[0])), 'desktop-only token has no clipboard or audio packets');
+  assert.ok(two.packets.every(p => ![5, 7, 15, 16].includes(p[0])), 'desktop-only token has no clipboard or audio packets');
   await request('/api/control', a.token, 'POST', { op: 'spawn', cmd: 'stdbuf -oL wev > held-input.log' });
   let heldWindow;
   await wait('input observer', async () => { heldWindow = (await (await request('/api/windows', admin)).json()).find(w => w.app_id === 'wev'); return heldWindow; });

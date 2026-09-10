@@ -66,7 +66,7 @@ try {
   for (const windowId of [null, id]) {
     await load(token, windowId);
     const main = await wd(route + '/window');
-    for (const pip of [false, true]) {
+    for (const pip of await js('return elsewhere.pip.supported') ? [false, true] : [false]) {
       if (pip) {
         const before = await wd(route + '/window/handles');
         await click('button[title="Picture-in-Picture"]');

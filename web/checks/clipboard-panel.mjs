@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
-import { CONFIG, ROLE, CLIPBOARD_DATA, KEY } from '../src/protocol.js';
+import { CONFIG, ROLE, CLIPBOARD, KEY } from '../src/protocol.js';
 
 const root = await mkdtemp('/tmp/elsewhere-clipboard-panel-');
 let serial = 0, operation = 0, clipboard, queued = [], previewReads = 0, fileReads = 0, failWrite = false, delayPreview, releasePreview;
@@ -87,7 +87,10 @@ try {
     }, { ROLE, CONFIG, token });
     await page.waitForFunction(() => elsewhere.store.get().clipboardState.status === 'ready');
   };
-  const notify = () => page.evaluate(CLIPBOARD_DATA => packet([CLIPBOARD_DATA, ...new TextEncoder().encode('changed')]), CLIPBOARD_DATA);
+  const notify = () => page.evaluate(({ CLIPBOARD, full, restricted }) => {
+    const metadata = full.mime === 'text/uri-list' && !elsewhere.store.get().permissions.includes('files.download') ? restricted : full;
+    packet([CLIPBOARD, ...new TextEncoder().encode(JSON.stringify(metadata))]);
+  }, { CLIPBOARD, full: { ...meta(false), ...(clipboard.mime?.startsWith('text/plain') && clipboard.data.length <= 1024 * 1024 && (!clipboard.preview || clipboard.preview === 'available') ? { text: clipboard.data.toString() } : {}) }, restricted: meta(true) });
   const panel = page.getByRole('dialog', { name: 'Desktop Clipboard', exact: true });
   const toggle = page.locator('#clipboard-toggle');
   const open = () => toggle.click();
@@ -109,6 +112,18 @@ try {
   set(null); await notify();
   await panel.getByText('Clipboard Empty', { exact: true }).waitFor();
   assert.equal(await page.evaluate(() => copies.length), copiesBeforeOwnerClear, 'owner clear must not erase the browser clipboard');
+  const beforeLive = previewReads;
+  set('text/plain;charset=utf-8', 'live text'); await notify();
+  await text('live text').waitFor();
+  assert.equal(previewReads, beforeLive, 'live text populates the panel without a payload GET');
+  set('text/plain;charset=utf-8', ''); await notify();
+  await panel.getByText('Clipboard Empty', { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => copies.at(-1)), '', 'explicit empty text clears the browser clipboard');
+  const beforeOversized = { reads: previewReads, copies: await page.evaluate(() => copies.length) };
+  set('text/plain;charset=utf-8', 'a'.repeat(1024 * 1024 + 1)); await notify();
+  await panel.getByText('Preview Unavailable', { exact: true }).waitFor();
+  assert.equal(previewReads, beforeOversized.reads, 'oversized text is not fetched');
+  assert.equal(await page.evaluate(() => copies.length), beforeOversized.copies, 'oversized text is not copied');
   set('text/plain;charset=utf-8', ' \n\t'); await notify();
   await page.waitForFunction(() => elsewhere.store.get().clipboardState.text === ' \n\t');
   assert.match(await toggle.getAttribute('aria-label'), /Has Contents/);
@@ -161,7 +176,7 @@ try {
   await text('metadata-only copy').waitFor();
   assert.equal(await page.evaluate(() => copies.length), copiesAfterUnsupported, 'an unsupported offer cannot leave a browser copy pending for a later owner');
 
-  set('text/plain;charset=utf-8', 'wrong response', { responseType: 'image/png' }); await notify();
+  set('text/plain;charset=utf-8', 'wrong response', { responseType: 'image/png' }); await page.evaluate(() => elsewhere.clipboard.refresh(true));
   await panel.getByRole('alert').filter({ hasText: 'Clipboard preview type changed' }).waitFor();
   assert.equal(await panel.locator('pre').count(), 0);
   const copiesAfterFailure = await page.evaluate(() => copies.length);

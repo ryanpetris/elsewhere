@@ -57,9 +57,9 @@ pub enum Command {
     /// Prepare an interactive shell with the current desktop client environment.
     ShellCommand { reply: std::sync::mpsc::Sender<std::process::Command> },
     /// Text or an image (`image/png`) from the browser or the API becomes the desktop clipboard.
-    SetClipboard { mime: String, data: Vec<u8>, operation: Option<u64> },
+    SetClipboard { mime: String, data: Vec<u8>, operation: Option<ClipboardOperation> },
     /// Install a selection and optionally tap its paste chord under the originating session's admission.
-    PasteClipboard { mime: String, data: Vec<u8>, shift_insert: bool, window: Option<u64>, admission: Box<dyn ClipboardPaste> },
+    PasteClipboard { mime: String, data: Vec<u8>, operation: ClipboardOperation, shift_insert: bool, window: Option<u64>, admission: Box<dyn ClipboardPaste> },
     /// The browser is dragging local files over the desktop (the pointer is already where the drag is).
     Drag(Drag),
     /// A finger on the browser's touchscreen, as a `wl_touch` point (`slot` tells fingers apart); the
@@ -84,6 +84,12 @@ pub enum Command {
 pub trait ClipboardPaste: std::fmt::Debug + Send {
     fn execute(self: Box<Self>, apply: Box<dyn FnOnce(bool) -> bool + '_>);
 }
+
+/// Echoed by the compositor only after installing the selection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClipboardOperation { pub id: u64, pub source: Option<ClipboardSource> }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClipboardSource { pub session: u64, pub request: u32 }
 
 /// Straight-alpha RGBA, top row first.
 pub struct Snapshot {
@@ -278,7 +284,7 @@ pub enum Event {
     /// The window list changed (full list, bottom to top, minimized last).
     Windows(Vec<WindowInfo>),
     /// A desktop application put text (a `text/*` mime) or a PNG on the clipboard.
-    Clipboard { mime: String, data: Bytes, operation: Option<u64> },
+    Clipboard { mime: String, data: Bytes, operation: Option<ClipboardOperation> },
     /// A clipboard owner changed or its read failed. No mime means no selection.
     ClipboardOffer { mime: Option<String>, loading: bool },
     /// A drag from the browser was dropped: the application under the pointer took it, or nobody did.

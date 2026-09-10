@@ -179,7 +179,7 @@ struct Clipboard {
     data: Option<Bytes>,
     loading: bool,
     observation: u64,
-    operation: Option<u64>,
+    operation: Option<elsewhere_core::ClipboardOperation>,
 }
 
 impl Clipboard {
@@ -187,10 +187,11 @@ impl Clipboard {
         self.mime.is_some() && !(self.mime.as_deref().is_some_and(api::text_mime) && self.data.as_ref().is_some_and(Bytes::is_empty))
     }
 
-    fn metadata(&self, key: &Key, scope: &str) -> serde_json::Value {
-        let restricted = self.mime.as_deref() == Some(api::URI_LIST) && !key.has(P::FilesDownload);
+    fn metadata(&self, files_download: bool, scope: &str) -> serde_json::Value {
+        let restricted = self.mime.as_deref() == Some(api::URI_LIST) && !files_download;
         serde_json::json!({
-            "observation": format!("{scope}:{}", self.observation), "operation": self.operation.map(|id| format!("{scope}:{id}")),
+            "observation": format!("{scope}:{}", self.observation), "operation": self.operation.map(|op| format!("{scope}:{}", op.id)),
+            "source": self.operation.and_then(|op| op.source).map(|source| serde_json::json!({ "session": source.session.to_string(), "request": source.request })),
             "present": self.present(), "mime": self.mime, "size": self.data.as_ref().filter(|_| !restricted).map(Bytes::len),
             "preview": if !self.present() { "empty" } else if restricted { "restricted" } else if self.loading { "loading" }
                 else if self.data.is_some() { "available" } else { "unavailable" },
@@ -406,12 +407,12 @@ fn mcp_service(app: Arc<App>) -> StreamableHttpService<mcp::Mcp, LocalSessionMan
 
 /// Unauthenticated until the first message (see `ws::session`).
 async fn websocket(ws: WebSocketUpgrade, State(app): State<Arc<App>>) -> Response {
-    ws.max_message_size(10 + (16 << 20)).max_frame_size(10 + (16 << 20)).on_upgrade(move |socket| ws::session(socket, app)) // PNG paste carries up to 16 MiB
+    ws.max_message_size(14 + (16 << 20)).max_frame_size(14 + (16 << 20)).on_upgrade(move |socket| ws::session(socket, app)) // PNG paste carries up to 16 MiB
 }
 
 /// One window as its own stream (see `ws::window_session`).
 async fn window_websocket(ws: WebSocketUpgrade, UrlPath(id): UrlPath<u64>, State(app): State<Arc<App>>) -> Response {
-    ws.max_message_size(10 + (16 << 20)).max_frame_size(10 + (16 << 20)).on_upgrade(move |socket| ws::window_session(socket, app, id))
+    ws.max_message_size(14 + (16 << 20)).max_frame_size(14 + (16 << 20)).on_upgrade(move |socket| ws::window_session(socket, app, id))
 }
 
 /// Bearer authentication creates one live token context for the request and its response body.
@@ -598,7 +599,7 @@ async fn api_control(Extension(key): Extension<Key>, State(app): State<Arc<App>>
 async fn api_clipboard_state(Extension(key): Extension<Key>, State(app): State<Arc<App>>) -> Response {
     if let Err(e) = key.require(P::ClipboardRead) { return e.into_response(); }
     let viewers = app.viewers.lock().unwrap();
-    (NO_STORE, Json(viewers.clipboard.metadata(&key, &viewers.clipboard_scope))).into_response()
+    (NO_STORE, Json(viewers.clipboard.metadata(key.has(P::FilesDownload), &viewers.clipboard_scope))).into_response()
 }
 
 /// Current clipboard bytes. If-Match binds a preview read to its metadata observation.

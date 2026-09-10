@@ -369,8 +369,10 @@ a file list, then text, then PNG, through a pipe on the next loop idle (the requ
 any read still in progress is dropped), reads it on the event loop (calloop `Generic` on the
 non-blocking read end; 1 MiB cap for text, 16 MiB for a PNG) and sends `Event::Clipboard`;
 the server keeps the observed contents for `GET /api/clipboard`, whose Content-Type says which it is, and tells
-the viewers with the `Clipboard` message (the text itself) or `ClipboardData` (the mime only; the page
-fetches the bytes). Neither is replayed to a connecting viewer, whose browser clipboard may be newer.
+the viewers with `Clipboard` metadata and the full body for text. Observed operations identify installed
+writes; a compound paste also identifies its originating socket and request so that viewer can reuse
+its retained PNG. Other viewers fetch binary bodies conditionally against the observation. This message
+is not replayed to a connecting viewer, whose browser clipboard may be newer.
 `Command::SetClipboard` makes a compositor-owned selection whose user data carries the
 bytes (text is offered under every text mime, a PNG as `image/png`); `send_selection` writes them from a
 calloop source on the non-blocking pipe, so a slow reader never blocks the compositor, and X11 clients

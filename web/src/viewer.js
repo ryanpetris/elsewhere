@@ -11,7 +11,7 @@ import { createStore } from './store.js';
 import { startMic, stopMic } from './mic.js';
 import { startCam, stopCam } from './cam.js';
 import { openRtc, rtcEndpoint, RTC_TIMING } from './rtc.js';
-import { PASTE_CLIPBOARD, PERMISSIONS, DISPLAY, CONFIG, VIDEO, CURSOR, POINTER_LOCK, AUDIO, WINDOWS, CLIPBOARD, ROLE, NOTICE, CLIPBOARD_DATA, NOTIFICATIONS, STREAM_STATE, RTC, ROLES, CODEC_FAMILIES, EFFORTS, PRESETS, AUTH, HELLO, RESIZE, MOTION_ABS, MOTION_REL, BUTTON, AXIS, KEY, REQUEST_KEYFRAME, BLUR, POINTER_LOCK_LOST, POINTER_LOCK_GAINED, CONTROL, SET_CLIPBOARD, TAKE_CONTROL, NOTIFY, STREAM, DRAG, INPUT, TOUCH, MIC, CAM, RTC_CLIENT, REPORT, BTN, MIXER_STATE, MIXER_LEVELS, MIXER_ERROR, MIXER_CLIENT, SESSION, HANDOFF, FILE_RESULT } from './protocol.js';
+import { PASTE_CLIPBOARD, PERMISSIONS, DISPLAY, CONFIG, VIDEO, CURSOR, POINTER_LOCK, AUDIO, WINDOWS, CLIPBOARD, ROLE, NOTICE, NOTIFICATIONS, STREAM_STATE, RTC, ROLES, CODEC_FAMILIES, EFFORTS, PRESETS, AUTH, HELLO, RESIZE, MOTION_ABS, MOTION_REL, BUTTON, AXIS, KEY, REQUEST_KEYFRAME, BLUR, POINTER_LOCK_LOST, POINTER_LOCK_GAINED, CONTROL, SET_CLIPBOARD, TAKE_CONTROL, NOTIFY, STREAM, DRAG, INPUT, TOUCH, MIC, CAM, RTC_CLIENT, REPORT, BTN, MIXER_STATE, MIXER_LEVELS, MIXER_ERROR, MIXER_CLIENT, SESSION, HANDOFF, FILE_RESULT } from './protocol.js';
 
 const AUDIO_LEAD = 0.06;
 const qualityName = name => PRESETS.includes(name) ? name : 'medium';
@@ -471,11 +471,8 @@ export function createViewer() {
         if (streamState.status === 'switching' && (previous?.status !== 'switching' || previous.codec !== streamState.codec)) notice(`Video encoding failed. Switching to ${streamState.codec.toUpperCase()}.`);
         break;
       }
-      case CLIPBOARD_DATA:
-        onClipboardData(new TextDecoder().decode(new Uint8Array(buf, 1)));
-        break;
       case CLIPBOARD:
-        onClipboard(new TextDecoder().decode(new Uint8Array(buf, 1)));
+        clipboard.observed(JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 1))));
         break;
       case MIXER_STATE: {
         const mixer = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 1)));
@@ -1100,23 +1097,11 @@ export function createViewer() {
   });
 
   // --- clipboard ---------------------------------------------------------------------------
-  // Desktop -> browser: text copied in an application arrives as CLIPBOARD, an image as CLIPBOARD_DATA
-  // (its bytes are fetched from the API); the browser clipboard takes it right away when the page may
-  // write, otherwise on the next gesture. Browser -> desktop: Ctrl+V (or Shift+Insert) is held back until
-  // the browser's paste event delivers the text or image, which goes to the desktop first, so the
-  // application pastes what the browser had.
+  // Observed clipboard selections update the panel and browser; denied browser writes retry on a gesture.
+  let clipboardRequest = 0;
   let pendingClipboard = null, pendingPaste = null, pasteTimer, swallowKeyup = null;
   const clipboard = createClipboard(store, item => { pendingClipboard = item; flushClipboard(); });
   const clearPasteTarget = () => canvas?.removeAttribute('contenteditable');
-  function onClipboard(text) {
-    clipboard.changed();
-    pendingClipboard = text; // empty text clears the browser's clipboard too
-    flushClipboard();
-  }
-  function onClipboardData() {
-    pendingClipboard = null;
-    clipboard.changed(true);
-  }
   function flushClipboard() {
     if (!can('clipboard.read') || pendingClipboard === null || !navigator.clipboard?.writeText) return;
     const item = pendingClipboard;
@@ -1154,10 +1139,13 @@ export function createViewer() {
         if (!eligible()) return;
         const focused = !WINDOW || document.hasFocus();
         if (paste && !focused) notice('Paste skipped because the window viewer lost focus.');
-        const header = new ArrayBuffer(10), dv = new DataView(header);
+        const request = ++clipboardRequest;
+        const header = new ArrayBuffer(14), dv = new DataView(header);
         dv.setUint8(0, PASTE_CLIPBOARD);
         dv.setUint8(1, (paste && focused ? 1 : 0) | (shiftInsert ? 2 : 0) | (fileList ? 4 : 0));
         dv.setBigUint64(2, epoch, true);
+        dv.setUint32(10, request, true);
+        if (!fileList) clipboard.retain(request, payload);
         socket.send(new Blob([header, payload]));
       };
       if (image) {

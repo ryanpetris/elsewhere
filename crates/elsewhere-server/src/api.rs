@@ -188,7 +188,7 @@ impl App {
         let mut viewers = self.viewers.lock().unwrap();
         let operation = viewers.next_clipboard_write;
         viewers.next_clipboard_write += 1;
-        self.send(Command::SetClipboard { mime: mime.to_string(), data: data.to_vec(), operation: Some(operation) })?;
+        self.send(Command::SetClipboard { mime: mime.to_string(), data: data.to_vec(), operation: Some(elsewhere_core::ClipboardOperation { id: operation, source: None }) })?;
         Ok(operation)
     }
 

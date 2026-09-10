@@ -27,7 +27,7 @@ try {
   await wait('server', async () => { try { return (await fetch(origin)).ok; } catch { return false; } });
   admin = await createToken(root);
   browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: false, args: ['--no-sandbox'] });
-  const connect = async (token = admin, { baseline = false, windowId = null, latency = 0 } = {}) => {
+  const connect = async (token = admin, { windowId = null, latency = 0 } = {}) => {
     const context = await browser.newContext();
     await context.route('**/api/**', async route => {
       const request = route.request(), path = new URL(request.url()).pathname;
@@ -68,7 +68,6 @@ try {
       pasteTest.raw = bytes => Socket.prototype.send.call(pasteTest.socket, new Uint8Array(bytes));
     }, latency);
     const page = await context.newPage(); page.on('pageerror', e => errors.push(e.message));
-    if (baseline) await page.route('**/app.js', route => route.fulfill({ path: process.env.BASELINE_BUNDLE, contentType: 'text/javascript' }));
     await page.goto(origin + '/' + (windowId ? '?window=' + windowId : '') + '#token=' + token);
     await page.waitForFunction(() => elsewhere.store.get().status === 'connected');
     return page;
@@ -108,29 +107,27 @@ try {
     }, { image, files, shift, holdModifier });
   };
   for (const backend of ['wayland', 'x11']) for (const windowMode of [false, true]) {
-    for (const baseline of process.env.BASELINE_BUNDLE ? [true, false] : [false]) {
-      const page = await connect(admin, { baseline, windowId: windowMode ? windows[backend].id : null, latency: 200 });
-      await activate(page, backend);
-      for (const files of [null, [{ name: 'same.txt', text: 'first' }, { name: 'same.txt', text: 'second' }]]) {
-        const name = 'paste-' + backend, before = (await received(name)).length, keys = await pasteCount(name);
-        await page.evaluate(() => { pasteTest.requests = []; pasteTest.packets = []; });
-        const start = await paste(page, files, !!files);
-        const receipt = await wait('native paste', async () => (await received(name))[before]);
-        await delay(250);
-        assert.equal(await pasteCount(name), keys + 1, 'exactly one paste chord');
-        const held = new Map((await records(name)).filter(r => r.kind === 'key').map(r => [r.code, r.pressed]));
-        assert([...held.values()].every(pressed => !pressed), 'paste leaves no keys or modifiers held');
-        if (files) {
-          assert.deepEqual(receipt.files.map(f => f.text), ['first', 'second']);
-          assert.equal(new Set(receipt.files.map(f => f.name)).size, 2, 'collision-renamed saved names');
-        } else assert.equal(receipt.sha256, imageHash, 'exact native PNG receipt');
-        const chain = await page.evaluate(() => ({ http: pasteTest.requests.filter(r => /\/api\/(?:drop\/|clipboard(?:\/files)?$|input$)/.test(r.path)), compound: pasteTest.packets.length }));
-        assert.equal(chain.http.length + chain.compound, (files ? 2 : 0) + (baseline ? 2 : 1));
-        assert.equal(chain.http.filter(r => r.path === '/api/input').length, baseline ? 1 : 0);
-        console.log(JSON.stringify({ backend, windowMode, baseline, kind: files ? 'files' : 'png', operations: chain.http.length + chain.compound, applicationPasteMs: Math.round(receipt.at - start) }));
-      }
-      await page.context().close();
+    const page = await connect(admin, { windowId: windowMode ? windows[backend].id : null, latency: 200 });
+    await activate(page, backend);
+    for (const files of [null, [{ name: 'same.txt', text: 'first' }, { name: 'same.txt', text: 'second' }]]) {
+      const name = 'paste-' + backend, before = (await received(name)).length, keys = await pasteCount(name);
+      await page.evaluate(() => { pasteTest.requests = []; pasteTest.packets = []; });
+      const start = await paste(page, files, !!files);
+      const receipt = await wait('native paste', async () => (await received(name))[before]);
+      await delay(250);
+      assert.equal(await pasteCount(name), keys + 1, 'exactly one paste chord');
+      const held = new Map((await records(name)).filter(r => r.kind === 'key').map(r => [r.code, r.pressed]));
+      assert([...held.values()].every(pressed => !pressed), 'paste leaves no keys or modifiers held');
+      if (files) {
+        assert.deepEqual(receipt.files.map(f => f.text), ['first', 'second']);
+        assert.equal(new Set(receipt.files.map(f => f.name)).size, 2, 'collision-renamed saved names');
+      } else assert.equal(receipt.sha256, imageHash, 'exact native PNG receipt');
+      const chain = await page.evaluate(() => ({ http: pasteTest.requests.filter(r => /\/api\/(?:drop\/|clipboard(?:\/files)?$|input$)/.test(r.path)), compound: pasteTest.packets.length }));
+      assert.equal(chain.http.length + chain.compound, (files ? 2 : 0) + 1);
+      assert.equal(chain.http.filter(r => r.path === '/api/input').length, 0);
+      console.log(JSON.stringify({ backend, windowMode, kind: files ? 'files' : 'png', operations: chain.http.length + chain.compound, applicationPasteMs: Math.round(receipt.at - start) }));
     }
+    await page.context().close();
   }
   await activate(owner);
   const name = 'paste-wayland';

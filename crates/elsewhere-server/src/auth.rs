@@ -45,8 +45,7 @@ impl Access {
     pub fn event_allowed(&self, packet: &[u8]) -> bool {
         use crate::protocol::*;
         match packet.first().copied() {
-            Some(CLIPBOARD | CLIPBOARD_DATA) => self.has(P::ClipboardRead)
-                && (packet.get(1..) != Some(crate::api::URI_LIST.as_bytes()) || self.has(P::FilesDownload)),
+            Some(CLIPBOARD) => self.has(P::ClipboardRead),
             Some(AUDIO | MIXER_STATE | MIXER_LEVELS) => self.has(P::AudioListen),
             _ => self.has(P::DesktopView),
         }

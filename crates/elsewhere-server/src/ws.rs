@@ -131,19 +131,17 @@ pub async fn forward_events(app: Arc<App>, mut rx: mpsc::UnboundedReceiver<Event
                 msg
             }
             Event::Clipboard { mime, data, operation } => {
-                let (msg, data) = if mime == api::PNG || mime == api::URI_LIST {
-                    (protocol::clipboard_data(&mime), data)
-                } else {
-                    let text = String::from_utf8_lossy(&data).into_owned(); // a legacy STRING owner may hand us Latin-1
-                    (protocol::clipboard(&text), Bytes::from(text))
-                };
+                let data = if api::text_mime(&mime) {
+                    Bytes::from(String::from_utf8_lossy(&data).into_owned())
+                } else { data };
                 v.clipboard = crate::Clipboard { mime: Some(mime), data: Some(data), loading: false, observation: v.clipboard.observation + 1, operation };
-                msg
+                app.broadcast_clipboard(&v);
+                continue;
             }
             Event::ClipboardOffer { mime, loading } => {
-                let msg = protocol::clipboard_data(mime.as_deref().unwrap_or_default());
                 v.clipboard = crate::Clipboard { mime, loading, observation: v.clipboard.observation + 1, ..Default::default() };
-                msg
+                app.broadcast_clipboard(&v);
+                continue;
             }
             Event::DragEnded { taken, target, batch } => {
                 // Only the token that staged the batch receives its result.
@@ -472,7 +470,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
     let replay: Vec<Bytes> = {
         let v = app.viewers.lock().unwrap();
         let role = if key.has(P::DesktopControl) { Role::Controller } else { Role::Viewer };
-        [v.cursor.clone(), v.windows.clone(), v.locked.then(|| Bytes::from(vec![protocol::POINTER_LOCK, 1])), Some(protocol::role(role, 0, 0))].into_iter().flatten().collect()
+        [Some(protocol::session(stream | 1 << 63)), v.cursor.clone(), v.windows.clone(), v.locked.then(|| Bytes::from(vec![protocol::POINTER_LOCK, 1])), Some(protocol::role(role, 0, 0))].into_iter().flatten().collect()
     };
     for msg in replay {
         let _ = send(&mut socket, &key, msg).await;
@@ -697,6 +695,26 @@ impl App {
 
     /// A state message to every viewer and window session.
     /// ponytail: a session that can't keep up misses a state change (it is dropped after ten seconds anyway)
+    fn broadcast_clipboard(&self, viewers: &crate::Viewers) {
+        let mut metadata = viewers.clipboard.metadata(true, &viewers.clipboard_scope);
+        if viewers.clipboard.mime.as_deref().is_some_and(api::text_mime) {
+            if let Some(data) = viewers.clipboard.data.as_ref().filter(|data| data.len() <= api::clipboard_limit(api::TEXT)) {
+                metadata["text"] = String::from_utf8_lossy(data).as_ref().into();
+            }
+        }
+        let full = protocol::clipboard(&metadata);
+        let restricted = (viewers.clipboard.mime.as_deref() == Some(api::URI_LIST))
+            .then(|| protocol::clipboard(&viewers.clipboard.metadata(false, &viewers.clipboard_scope)));
+        let send = |key: &Key, events: &mpsc::Sender<Bytes>| {
+            if key.event_allowed(&full) {
+                let packet = if key.has(P::FilesDownload) { &full } else { restricted.as_ref().unwrap_or(&full) };
+                let _ = events.try_send(packet.clone());
+            }
+        };
+        for session in viewers.sessions.values() { send(&session.key, &session.events); }
+        for session in self.window_viewers.lock().unwrap().values() { send(&session.key, &session.events); }
+    }
+
     pub(crate) fn broadcast(&self, msg: Bytes) {
         for s in self.viewers.lock().unwrap().sessions.values() {
             if s.key.event_allowed(&msg) { let _ = s.events.try_send(msg.clone()); }
