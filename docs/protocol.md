@@ -50,6 +50,7 @@ Binary frames, little-endian, byte 0 is the type. Mirrored in `crates/elsewhere-
 | `0x10` | MixerLevels | JSON array of `{id, peak}`, at about 10 Hz to subscribed desktop viewers. Peaks are linear amplitudes measured from audio, shared across subscribers. |
 | `0x11` | MixerError | UTF-8 error for the viewer's mixer command. |
 | `0x12` | Session | `u64 id`: this desktop connection, used for conditional presentation handoff. |
+| `0x14` | Display | JSON `{kiosk, resolution}`: shared display settings on connection and when changed. The latest snapshot is retained for slow readers. See [display settings](#display-settings). |
 
 Config and Video share the active transport's ordering. RTC queue replacement retains a Config
 before the recovery key. While RTC owns video, the viewer ignores delayed WebSocket Video messages.

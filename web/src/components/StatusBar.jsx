@@ -127,7 +127,7 @@ function StreamChip({ viewer }) {
 /// A fixed-width live readout; the width keeps neighbours still while the number changes.
 function Metric({ icon: Icon, value, width, title, warn = false, className = '' }) {
   return (
-    <span className={cx('inline-flex shrink-0 items-center gap-1.5 overflow-hidden whitespace-nowrap tabular-nums', width, warn ? 'text-warn' : '', className)} title={title}>
+    <span data-metric className={cx('inline-flex shrink-0 items-center gap-1.5 overflow-hidden whitespace-nowrap tabular-nums', width, warn ? 'text-warn' : '', className)} title={title}>
       {Icon && <Icon className="size-3 shrink-0 text-ink-4" />}
       {value}
     </span>
@@ -159,7 +159,7 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
     : 'WebSocket · retrying WebRTC';
   const bad = s.lost + s.dropped + s.decodeErrors;
   const listens = permissions.includes('audio.listen');
-  // The first four children are the readouts, in this order. The bar never wraps: each width hides what
+  // The four readouts follow the optional exit button. The bar never wraps: each width hides what
   // does not fit, and the controls clip rather than overflow during the switch between the inline
   // controls and the chip.
   return (
@@ -177,12 +177,12 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
       <span className="ml-auto flex min-w-0 items-center gap-1 overflow-x-clip sm:gap-1.5">
         <ClipboardControl viewer={viewer} />
         {listens && onMixer && (
-          <button id="session-mixer-toggle" type="button" aria-label="Session audio mixer" title="Session audio mixer" aria-expanded={mixerPanel} onClick={onMixer} className={control}>
+          <button id="session-mixer-toggle" type="button" aria-label="Session audio mixer" title="Session audio mixer" aria-expanded={mixerPanel && !controlsHidden} onClick={onMixer} className={control}>
             <SlidersHorizontal className="size-3.5" /><span className="hidden 2xl:inline">Mixer</span>
           </button>
         )}
         {listens && onAudioPanel && (
-          <button type="button" aria-label="Audio visualiser" title="Audio visualiser" aria-expanded={audioPanel} onClick={onAudioPanel} className={control}>
+          <button type="button" aria-label="Audio visualiser" title="Audio visualiser" aria-expanded={audioPanel && !controlsHidden} onClick={onAudioPanel} className={control}>
             <AudioLines className="size-3.5" /><span className="hidden 2xl:inline">Visualiser</span>
           </button>
         )}

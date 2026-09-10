@@ -232,6 +232,16 @@ try {
   assert.equal(await popup.getByRole('button', { name: 'Settings', exact: true }).count(), 0);
   assert.equal(await popup.evaluate(() => elsewhere.store.get().elementsOn), false);
   await page.keyboard.press('Escape');
+  await page.evaluate(() => elsewhere.store.set({ permissions: ['desktop.view', 'audio.listen'] }));
+  for (const name of ['Session audio mixer', 'Audio visualiser']) {
+    const toggle = page.getByRole('button', { name, exact: true });
+    await toggle.click();
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
+    await page.locator('#hide-controls').click();
+    await toggle.click();
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'true', `${name} opens from hidden controls`);
+    await toggle.click();
+  }
   for (const current of [page, popup, phone]) {
     const stage = current.locator('canvas.stage');
     await current.evaluate(() => { window.originalCanvas = document.querySelector('canvas.stage'); window.originalSocket = socket; });

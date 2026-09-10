@@ -47,7 +47,9 @@ try {
       if (initialKiosk) {
         await settings({ kiosk: false });
         await wait('startup kiosk exit maximizes', async () => { const w = await window(first.id); return w.maximized && !w.fullscreen && w.y >= w.decoration && w.h + w.decoration === 768; });
-        console.log('startup kiosk exit maximizes within decorated work area');
+        await control(first.id, 'unmaximize');
+        await wait('startup kiosk unmaximize stays in work area', async () => { const w = await window(first.id); return !w.maximized && w.y + w.h <= 768; });
+        console.log('startup kiosk exit and unmaximize stay within decorated work area');
         continue;
       }
 
@@ -65,10 +67,17 @@ try {
       await control(0, 'spawn', { cmd: 'foot --app-id=display-new' });
       await wait('new kiosk window', async () => (await windows()).some(w => w.app_id === 'display-new' && w.fullscreen));
       const added = (await windows()).find(w => w.app_id === 'display-new');
+      await control(0, 'spawn', { cmd: 'xmessage -name display-born-x11 -geometry 300x180 kiosk > born-x11.log 2>&1' });
+      await wait('new kiosk X11', async () => (await windows()).some(w => w.x11 && w.id !== x11.id && w.fullscreen));
+      const bornX11 = (await windows()).find(w => w.x11 && w.id !== x11.id);
       await settings({ kiosk: false });
       await wait('restore floating geometry', async () => { const w = await window(first.id); return !w.fullscreen && !w.maximized && ['x', 'y', 'w', 'h'].every(key => w[key] === before[key]); });
       await wait('new kiosk window maximized', async () => { const w = await window(added.id); return w.maximized && !w.fullscreen && w.h + w.decoration === 768; });
       assert((await window(x11.id)).maximized && (await window(x11.id)).minimized);
+      for (const id of [added.id, bornX11.id]) {
+        await control(id, 'unmaximize');
+        await wait('new kiosk window unmaximize stays in work area', async () => { const w = await window(id); return !w.maximized && !w.fullscreen && w.y >= w.decoration && w.y + w.h <= 768; });
+      }
       await settings({ kiosk: true });
       await wait('fullscreen before stopped client', async () => (await window(first.id)).fullscreen);
       process.kill(first.pid, 'SIGSTOP');

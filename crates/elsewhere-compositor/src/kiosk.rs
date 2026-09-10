@@ -7,7 +7,7 @@ use smithay::{
     utils::{Logical, Rectangle, SERIAL_COUNTER},
 };
 
-use crate::State;
+use crate::{State, handlers::RestoreLocation};
 
 struct Layout {
     fullscreen: bool,
@@ -50,6 +50,10 @@ impl State {
                 let fullscreen = layout.as_ref().is_some_and(|s| s.fullscreen);
                 self.fill(window, XdgState::Maximized, maximized);
                 self.fill(window, XdgState::Fullscreen, fullscreen);
+                if layout.is_none() {
+                    // Without a floating layout, unmaximize also uses the decorated work area.
+                    *window.user_data().get::<RestoreLocation>().unwrap().borrow_mut() = Some(self.fill_rect(window, false));
+                }
                 if let Some(layout) = layout.filter(|s| !s.fullscreen && !s.maximized) {
                     let location = self.clamp_to_output(window, layout.geometry.loc);
                     self.space.map_element(window.clone(), location, false);

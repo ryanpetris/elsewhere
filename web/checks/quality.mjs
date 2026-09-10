@@ -147,7 +147,7 @@ try {
       assert(await page.locator('footer').evaluate(el => el.scrollWidth <= el.clientWidth), `quality controls fit ${width}px`);
     }
     assert(await page.locator('footer').evaluate(footer => {
-      const metrics = [...footer.children].slice(0, 4);
+      const metrics = [...footer.querySelectorAll('[data-metric]')];
       const nodes = metrics.map(el => [...el.childNodes]);
       const icon = metrics[0].querySelector('svg').cloneNode(true);
       let stable = true;

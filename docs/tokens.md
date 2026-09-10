@@ -59,8 +59,8 @@ permission: a camera grant does not enable a server started without webcam suppo
 
 | Permission | Operations |
 | --- | --- |
-| `desktop.view` | Desktop/window streams, windows, screenshots, elements, installed application metadata/icons, notifications, codec discovery |
-| `desktop.control` | Pointer, keyboard, touch, window actions, taking/handing off control, notification actions |
+| `desktop.view` | Desktop/window streams, windows, screenshots, elements, installed application metadata/icons, notifications, codec discovery, shared display settings |
+| `desktop.control` | Pointer, keyboard, touch, window actions, taking/handing off control, notification actions, kiosk and resolution settings |
 | `apps.launch` | Launch an installed application |
 | `commands.execute` | Execute a command or open an interactive terminal |
 | `server.manage` | Quit the server |

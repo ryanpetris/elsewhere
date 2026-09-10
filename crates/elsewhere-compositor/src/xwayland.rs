@@ -25,10 +25,7 @@ use smithay::{
     },
 };
 
-use crate::{State, grabs, handlers::KeyboardFocus};
-
-/// Geometry to go back to after maximize/fullscreen.
-type Restore = std::cell::RefCell<Option<Rectangle<i32, Logical>>>;
+use crate::{State, grabs, handlers::{KeyboardFocus, RestoreLocation}};
 
 impl State {
     /// Launch Xwayland; `x11_display` is set once it is ready and the window manager is attached.
@@ -283,8 +280,8 @@ impl State {
 
     pub(crate) fn fill_x11(&mut self, window: X11Surface, set: impl Fn(&X11Surface) -> Result<(), smithay::reexports::x11rb::rust_connection::ConnectionError>) {
         let Some(win) = self.window_for_x11(&window) else { return };
-        win.user_data().insert_if_missing(Restore::default);
-        let restore = win.user_data().get::<Restore>().unwrap();
+        win.user_data().insert_if_missing(RestoreLocation::default);
+        let restore = win.user_data().get::<RestoreLocation>().unwrap();
         if restore.borrow().is_none() {
             let mut r = win.geometry();
             r.loc = self.space.element_location(&win).unwrap_or_default();
@@ -302,7 +299,7 @@ impl State {
             let geo = self.fill_rect(&win, window.is_fullscreen());
             return self.place_x11(&win, &window, geo); // still filled the other way: re-fit to that rect
         }
-        let saved = win.user_data().get::<Restore>().and_then(|r| r.borrow_mut().take());
+        let saved = win.user_data().get::<RestoreLocation>().and_then(|r| r.borrow_mut().take());
         if let Some(mut rect) = saved {
             rect.loc = self.clamp_to_output(&win, rect.loc); // the output may have shrunk meanwhile
             self.place_x11(&win, &window, rect);
