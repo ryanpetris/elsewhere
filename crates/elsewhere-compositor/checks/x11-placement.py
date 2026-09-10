@@ -139,6 +139,13 @@ with tempfile.TemporaryDirectory(prefix="elsewhere-x11-placement-") as directory
                         send("move 600 350")
                         wait(lambda: rect() == (600, 350, 120, 90))
                         wait(lambda: painted((600, 350, 720, 440)))
+                        send('move 1200 700')
+                        wait(lambda: painted((1200,700,1320,790)))
+                        request('/api/display',{'resolution':{'mode':'fixed','width':800,'height':600}})
+                        wait(lambda: painted(None))
+                        assert rect()==(1200,700,120,90),rect()
+                        request('/api/display',{'resolution':{'mode':'fixed','width':1920,'height':1080}})
+                        wait(lambda: painted((1200,700,1320,790)))
                     print(mode, "frame extents", extents, "passed", flush=True)
                     send("quit")
         except BaseException:

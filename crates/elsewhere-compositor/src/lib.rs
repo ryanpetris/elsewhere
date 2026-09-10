@@ -703,6 +703,7 @@ impl State {
     pub fn relayout(&mut self) {
         let scale = self.geometry.scale;
         for window in self.space.elements().chain(self.minimized.iter().map(|(w, ..)| w)).cloned().collect::<Vec<_>>() {
+            let client_positioned = window.x11_surface().is_some_and(|x| x.is_override_redirect());
             // maximized windows fill the work area (under their title bar), fullscreen ones the whole output
             let (output, work_rect) = (self.fill_rect(&window, true), self.fill_rect(&window, false));
             let filled = match window.underlying_surface() {
@@ -726,7 +727,9 @@ impl State {
                     rect
                 }
                 WindowSurface::X11(x11) => {
-                    let rect = if x11.is_fullscreen() {
+                    let rect = if client_positioned {
+                        None
+                    } else if x11.is_fullscreen() {
                         Some(output)
                     } else if x11.is_maximized() {
                         Some(work_rect)
@@ -744,7 +747,8 @@ impl State {
                 (_, None) => continue,
                 (Some(rect), _) => rect.loc,
                 (None, Some(loc)) => {
-                    let clamped = self.clamp_to_output(&window, loc); // keep a corner of every floating window reachable
+                    // Override-redirect positions belong to the X11 client; managed windows keep a reachable corner.
+                    let clamped = if client_positioned { loc } else { self.clamp_to_output(&window, loc) };
                     if let (true, WindowSurface::X11(x11)) = (clamped != loc, window.underlying_surface()) {
                         crate::xwayland::relocate(x11, clamped);
                     }

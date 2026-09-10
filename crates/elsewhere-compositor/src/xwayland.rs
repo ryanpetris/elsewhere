@@ -166,7 +166,7 @@ impl XwmHandler for State {
     fn property_notify(&mut self, _xwm: XwmId, window: X11Surface, property: WmWindowProperty) {
         if property != WmWindowProperty::FrameExtents { return; }
         let Some(win) = self.window_for_x11(&window) else { return };
-        let loc = if window.is_maximized() || window.is_fullscreen() {
+        let loc = if !window.is_override_redirect() && (window.is_maximized() || window.is_fullscreen()) {
             let rect = self.fill_rect(&win, window.is_fullscreen());
             configure(&window, rect);
             rect.loc
