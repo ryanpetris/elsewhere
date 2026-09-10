@@ -236,6 +236,7 @@ try {
     });
     assert.deepEqual(r.canvas, [1346, 908]);
     assert.deepEqual(r.errors, []);
+    if (r.renderer === '2d') assert.equal(await frame.evaluate(() => document.querySelector('canvas.stage').getContext('2d').getContextAttributes().alpha), false, 'desktop video stage is opaque');
     // Inspect the presented canvas, including a real WebGPU canvas when requested.
     if (r.renderer === 'webgpu') await frame.waitForFunction(() => probe.gpuColors);
     const colors = await frame.evaluate(async () => {

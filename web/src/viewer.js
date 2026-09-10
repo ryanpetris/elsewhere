@@ -176,7 +176,8 @@ export function createViewer() {
       try { draw = await initWebGPU(); } catch (e) { console.warn('WebGPU unavailable:', e); }
     }
     if (!draw) {
-      ctx = canvas.getContext('2d');
+      // Desktop video is opaque; alpha compositing adds work to every decoded frame.
+      ctx = canvas.getContext('2d', { alpha: false });
       draw = frame => { try { ctx.drawImage(frame, 0, 0); } finally { frame.close(); } };
     }
     store.set({ renderer: draw && !ctx ? 'webgpu' : '2d' });
