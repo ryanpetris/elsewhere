@@ -352,6 +352,7 @@ try {
       const before = await gpu.evaluate((color) => {
         probe.retain = true;
         probe.retained ??= [];
+        if (probe.retained.length) probe.configure(1264, 870);
         const before = probe.imports;
         const pixels = new Uint8Array(1408 * 912 * 4);
         for (let i = 0; i < pixels.length; i += 4) pixels.set(color, i);
@@ -382,7 +383,7 @@ try {
         { color: [0, 0, 255, 255], timestamp: 123, duration: 456 },
         { color: [255, 0, 0, 255], timestamp: 123, duration: 456 }
       ],
-      'canvas reuse preserves retained RGB snapshots'
+      'canvas reuse and resize preserve retained RGB snapshots'
     );
   }
   for (const [width, height, scale] of [
@@ -427,11 +428,12 @@ try {
         closed: late.codedWidth === 0,
         painted: probe.draws - count,
         newKeys,
+        connected: elsewhere.store.get().status === 'connected',
         x: dv.getFloat32(1, true),
         y: dv.getFloat32(5, true)
       };
     });
-    assert(result.closed && !result.painted && !result.newKeys, 'stale decoder output closed before geometry check');
+    assert(result.closed && !result.painted && !result.newKeys && result.connected, 'stale decoder output closed before geometry check');
     assert(
       Math.abs(result.x - (width / scale) * 0.99) < 0.001 && Math.abs(result.y - (height / scale) * 0.99) < 0.001,
       'edge pointer maps to configured logical pixels'

@@ -306,12 +306,11 @@ belonging to a superseded stream id is discarded. The controller and the sizing 
 crops exposed right/bottom alignment padding to its Config's physical image dimensions, preserving any
 existing visible origin. An undersized frame stops video with an error until a new configuration arrives.
 Desktop, window and PiP viewers share this path; server-generated PNG snapshots and previews bypass encoding.
-A WebGPU
-external-texture path exists behind `?renderer=webgpu` but is opt-in because Chromium on Linux
+A WebGPU external-texture path exists behind `?renderer=webgpu` but is opt-in because Chromium on Linux
 occasionally presented a blank frame with it. Cropped WebGPU frames pass through a reusable Canvas 2D
 image before import to prevent chroma filtering from sampling padding. This adds a browser-managed
-conversion/copy, without explicit pixel readback into JavaScript. The canvas fills the stage, the area between the top
-bar, the side panel and the status bar; the desktop's output takes the stage's size (a `ResizeObserver`
+conversion/copy, without explicit pixel readback into JavaScript. The canvas fills the stage, the area
+between the top bar, the side panel and the status bar; the desktop's output takes the stage's size (a `ResizeObserver`
 sends a debounced `Resize`), and the old picture is stretched until the new stream arrives. Fullscreen
 is requested on the stage, so the chrome disappears and the output becomes the screen's size; the
 Keyboard Lock API then lets shortcuts like Ctrl+W reach the desktop. The status bar shows fps, bandwidth,
