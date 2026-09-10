@@ -159,7 +159,7 @@ export function StatusBar({ viewer, audioPanel, onAudioPanel, mixerPanel, onMixe
     : 'WebSocket · retrying WebRTC';
   const bad = s.lost + s.dropped + s.decodeErrors;
   const listens = permissions.includes('audio.listen');
-  // The four readouts follow the optional exit button. The bar never wraps: each width hides what
+  // The four readouts follow the optional Show controls button. The bar never wraps: each width hides what
   // does not fit, and the controls clip rather than overflow during the switch between the inline
   // controls and the chip.
   return (

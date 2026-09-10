@@ -512,8 +512,6 @@ impl XdgShellHandler for State {
     }
 }
 
-/// Where a window was before it got maximized/fullscreened.
-/// Where (and how big) a window was before it filled the output.
 /// Geometry to go back to after maximize/fullscreen, for Wayland and X11 windows.
 pub(crate) type RestoreLocation = RefCell<Option<Rectangle<i32, Logical>>>;
 

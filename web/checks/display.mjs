@@ -155,6 +155,7 @@ try {
     } catch (error) {
       console.error((await readFile(root + '/server.log', 'utf8')).split('\n').slice(-12).join('\n'));
       console.error(await readFile(root + '/xmessage.log', 'utf8').catch(() => ''));
+      console.error(await readFile(root + '/born-x11.log', 'utf8').catch(() => ''));
       console.error(error);
       throw error;
     } finally {
