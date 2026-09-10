@@ -172,15 +172,27 @@ export function createViewer() {
     };
   }
   async function initRenderer() {
-    if (new URLSearchParams(location.search).get('renderer') === 'webgpu') {
+    const webgpu = new URLSearchParams(location.search).get('renderer') === 'webgpu';
+    if (webgpu) {
       try { draw = await initWebGPU(); } catch (e) { console.warn('WebGPU unavailable:', e); }
     }
+    if (disposed) return false;
     if (!draw) {
       // Desktop video is opaque; alpha compositing adds work to every decoded frame.
       ctx = canvas.getContext('2d', { alpha: false });
+      if (!ctx && webgpu) {
+        // A canvas already bound to WebGPU needs a fresh document to use 2D.
+        const next = new URL(location.href);
+        next.searchParams.delete('renderer');
+        // Carry credentials when session storage is unavailable.
+        if (TOKEN) next.hash = new URLSearchParams({ token: TOKEN }).toString();
+        location.replace(next);
+        return false;
+      }
       draw = frame => { try { ctx.drawImage(frame, 0, 0); } finally { frame.close(); } };
     }
     store.set({ renderer: draw && !ctx ? 'webgpu' : '2d' });
+    return true;
   }
 
   // --- connection -----------------------------------------------------------------
@@ -1357,7 +1369,7 @@ export function createViewer() {
     canvas.addEventListener('dragover', onDragOver);
     canvas.addEventListener('dragleave', onDragLeave);
     canvas.addEventListener('drop', onDrop);
-    initRenderer().then(connect);
+    initRenderer().then(ready => { if (ready) connect(); });
   }
 
   const viewer = {

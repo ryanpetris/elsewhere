@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import { chromium } from 'playwright-core';
 import { execFileSync } from 'node:child_process';
-import { CONFIG, VIDEO, ROLE, PERMISSIONS, MOTION_ABS, REQUEST_KEYFRAME } from '../src/protocol.js';
+import { CONFIG, VIDEO, ROLE, PERMISSIONS, MOTION_ABS, REQUEST_KEYFRAME, AUTH } from '../src/protocol.js';
 
 // Saturated padding surrounds four distinct valid edges. VP8 supplies real decoded frames.
 const ivf = execFileSync(
@@ -33,7 +33,7 @@ const ivf = execFileSync(
 );
 const key = [...ivf.subarray(44, 44 + ivf.readUInt32LE(32))];
 const server = http.createServer((req, res) => {
-  const path = new URL(req.url, 'http://localhost').pathname;
+  const path = new URL(req.url, 'http://localhost').pathname.replace(/^\/prefixed(?=\/)/, '');
   if (path.startsWith('/api/')) {
     res.setHeader('Content-Type', 'application/json');
     return res.end(
@@ -51,7 +51,8 @@ const server = http.createServer((req, res) => {
       'Content-Type',
       path.endsWith('.js') ? 'text/javascript' : path.endsWith('.css') ? 'text/css' : 'text/html'
     );
-    res.end(fs.readFileSync(new URL('../dist/' + (path === '/' ? 'index.html' : path.slice(1)), import.meta.url)));
+    const body = fs.readFileSync(new URL('../dist/' + (path === '/' ? 'index.html' : path.slice(1)), import.meta.url));
+    res.end(path === '/' && req.url.startsWith('/prefixed/') ? body.toString().replace('<base href="/">', '<base href="/prefixed/">') : body);
   } catch {
     res.writeHead(404).end();
   }
@@ -205,7 +206,7 @@ try {
         socket.onmessage({ data: bytes.buffer });
       };
     },
-    { key, tags: { CONFIG, VIDEO, ROLE, PERMISSIONS, MOTION_ABS, REQUEST_KEYFRAME } }
+    { key, tags: { CONFIG, VIDEO, ROLE, PERMISSIONS, MOTION_ABS, REQUEST_KEYFRAME, AUTH } }
   );
   const url = `http://127.0.0.1:${server.address().port}/`;
   const ready = async (frame) => {
@@ -397,6 +398,54 @@ try {
       ],
       'canvas reuse and resize preserve retained RGB snapshots'
     );
+  }
+  if (process.env.TEST_WEBGPU) for (const blockedStorage of [false, true]) {
+    const failed = await context.newPage(), attempts = [];
+    await failed.exposeFunction('reportGpuFailure', value => attempts.push(value));
+    await failed.addInitScript(blockedStorage => {
+      if (blockedStorage) Object.defineProperty(window, 'sessionStorage', { get() { throw Error('Storage unavailable'); } });
+      GPUDevice.prototype.createRenderPipeline = function () {
+        const stage = document.querySelector('canvas.stage');
+        reportGpuFailure({ bound: !!stage.getContext('webgpu'), socket: !!probe.socketUrl, decoders: probe.callbacks.length }).catch(() => {});
+        throw Error('Injected pipeline initialization failure');
+      };
+    }, blockedStorage);
+    await failed.goto(url + 'prefixed/?renderer=webgpu&window=1&keep=1#token=fixture');
+    await failed.waitForURL(value => !value.searchParams.has('renderer'), { timeout: 5000 });
+    const recovered = new URL(failed.url());
+    assert.equal(recovered.pathname, '/prefixed/');
+    assert.equal(recovered.searchParams.get('window'), '1');
+    assert.equal(recovered.searchParams.get('keep'), '1');
+    await ready(failed);
+    assert.deepEqual(attempts, [{ bound: true, socket: false, decoders: 0 }]);
+    const result = await capture(failed, blockedStorage ? 'gpu-init-storage-blocked' : 'gpu-init-recovery');
+    assert.equal(result.renderer, '2d');
+    assert.equal(result.socketPath, '/prefixed/ws/window/1');
+    assert.equal(await failed.evaluate(tag => new TextDecoder().decode(new Uint8Array(probe.sent.find(bytes => bytes[0] === tag).slice(1))), AUTH), 'fixture');
+    await failed.close();
+  }
+  if (process.env.TEST_WEBGPU) {
+    const unbound = await context.newPage();
+    await unbound.addInitScript(() => {
+      navigator.gpu.requestAdapter = async () => { throw Error('Injected adapter request failure'); };
+    });
+    await unbound.goto(url + '?renderer=webgpu#token=fixture');
+    await ready(unbound);
+    assert.equal(new URL(unbound.url()).searchParams.get('renderer'), 'webgpu', 'unbound canvas recovers without navigation');
+    assert.equal((await capture(unbound, 'gpu-adapter-recovery')).renderer, '2d');
+    await unbound.close();
+    const disposed = await context.newPage();
+    await disposed.addInitScript(() => {
+      navigator.gpu.requestAdapter = () => new Promise((resolve, reject) => { window.rejectGpu = reject; });
+    });
+    await disposed.goto(url + '?renderer=webgpu#token=fixture');
+    await disposed.waitForFunction(() => typeof rejectGpu === 'function');
+    const before = disposed.url();
+    await disposed.evaluate(() => { elsewhere.dispose(); rejectGpu(Error('Delayed GPU initialization failure')); });
+    await disposed.waitForTimeout(150);
+    assert.equal(disposed.url(), before, 'disposed viewer does not navigate on a late GPU rejection');
+    assert.deepEqual(await disposed.evaluate(() => ({ status: elsewhere.store.get().status, socket: !!probe.socketUrl, decoders: probe.callbacks.length, errors: probe.errors })), { status: 'closed', socket: false, decoders: 0, errors: [] });
+    await disposed.close();
   }
   for (const [width, height, scale] of [
     [1346, 908, 1.25],
