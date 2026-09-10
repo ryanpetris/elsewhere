@@ -82,6 +82,12 @@ recording streams. Streams with application metadata are grouped together, but e
 stream. Read-only viewers can inspect; only the current controlling viewer can change audio.
 Changes affect the shared session for every viewer.
 
+Pop Out Mixer opens the panel in a resizable browser window using the same viewer
+connection and control permissions. Its meters follow that window's visibility,
+independently of the main viewer's controls. The status-bar button focuses an
+existing pop-out. Closing the pop-out leaves the mixer closed until reopened.
+The pop-out closes when the main viewer closes or navigates away.
+
 Volume ranges from 0 to 100 percent with cubic gain: 50 percent means linear gain 0.125. Mute and
 volume use the object's native controls. Unsupported controls are disabled or explained. Current
 routing is shown for application streams. When more than one compatible session endpoint exists,

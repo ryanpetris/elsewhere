@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { AudioLines, ChevronsDownUp, ChevronsUpDown, Maximize, Minimize, X } from 'lucide-react';
+import { AudioLines, ChevronsDownUp, ChevronsUpDown, ExternalLink, Maximize, Minimize, X } from 'lucide-react';
 import { pref } from '../api.js';
 import { useStore } from '../store.js';
 import { IconButton, cx } from './ui.jsx';
 
 const loadRenderer = () => import('../visualiser.js');
 
-export function AudioPanel({ viewer, hidden, onClose }) {
+export function AudioPanel({ viewer, hidden = false, onClose, onPopOut, poppedOut = false }) {
   const panel = useRef(null), canvas = useRef(null), renderer = useRef(null);
   const playback = useStore(viewer.store, s => s.playback);
   const audio = useStore(viewer.store, s => s.stats.audio);
@@ -82,12 +82,13 @@ export function AudioPanel({ viewer, hidden, onClose }) {
     : audio?.signalPeak > 0.0001 ? 'Playing' : 'Silent';
   const live = status === 'connected' && playback && audio?.state !== 'suspended';
   return (
-    <section ref={panel} hidden={hidden} aria-label="Audio Visualizer" className={cx('flex shrink-0 flex-col border-t border-line bg-surface text-xs', fullscreen && 'bg-canvas')}>
+    <section ref={panel} hidden={hidden} aria-label="Audio Visualizer" className={cx('flex shrink-0 flex-col border-t border-line bg-surface text-xs', poppedOut && 'h-full overflow-auto', fullscreen && 'bg-canvas')}>
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-line px-3">
         <AudioLines className="size-3.5 text-ink-3" />
         <strong className="font-medium text-ink">Audio Visualizer</strong>
         <span className="ml-auto flex items-center gap-1">
-          <button type="button" className="btn btn-ghost btn-xs" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>{expanded ? <><ChevronsDownUp className="size-3" /> Collapse</> : <><ChevronsUpDown className="size-3" /> Expand</>}</button>
+          {!poppedOut && <button type="button" className="btn btn-ghost btn-xs" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>{expanded ? <><ChevronsDownUp className="size-3" /> Collapse</> : <><ChevronsUpDown className="size-3" /> Expand</>}</button>}
+          {onPopOut && <IconButton icon={ExternalLink} label="Pop Out Visualizer" size="sm" onClick={onPopOut} />}
           {document.fullscreenEnabled && <button type="button" className="btn btn-ghost btn-xs" onClick={() => {
             const action = fullscreen ? document.exitFullscreen() : panel.current.requestFullscreen();
             action.catch(() => setError('Fullscreen unavailable.'));
@@ -112,7 +113,7 @@ export function AudioPanel({ viewer, hidden, onClose }) {
       </div>
       {error && <p role="alert" className="callout callout-warn mx-3 mb-2">{error}</p>}
       {playback && !ready && !error && <p className="px-3 pb-1.5 text-ink-4">Loading…</p>}
-      <div ref={canvas} className="mx-3 mb-3 overflow-hidden rounded-lg bg-canvas ring-1 ring-line" style={{ height: fullscreen ? 'calc(100vh - 160px)' : expanded ? '35vh' : '130px' }} aria-hidden="true" />
+      <div ref={canvas} className={cx('mx-3 mb-3 overflow-hidden rounded-lg bg-canvas ring-1 ring-line', poppedOut && 'min-h-32 flex-1')} style={poppedOut ? undefined : { height: fullscreen ? 'calc(100vh - 160px)' : expanded ? '35vh' : '130px' }} aria-hidden="true" />
     </section>
   );
 }

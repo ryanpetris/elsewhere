@@ -16,11 +16,22 @@ hiding the page or hiding the controls or entering viewer fullscreen, disabling 
 pause drawing and disconnect the analysis input. Playback retains its context and
 speaker connection. Animation is capped at 30 fps.
 
+Pop Out Visualizer opens a resizable browser window with the same display
+preferences and playback source. Its visibility and fullscreen controls belong to
+that window, so hiding the main viewer does not pause a visible pop-out. The
+status-bar button focuses an existing pop-out. Closing the pop-out leaves the
+visualiser closed; the status-bar button can open the docked panel again.
+The main viewer must stay open. Navigating away or transferring desktop playback
+to picture-in-picture closes the visualiser pop-out.
+
 ## Verification
 
 In the Docker image, install Node, npm and Chromium, then run `npm ci` in `web`.
 `npm run build && npm run check:visualiser` exercises the emitted viewer in
 Chromium.
+`npm run check:panel-windows` checks both audio pop-outs, shared connection and
+audio ownership, URL prefixes, independent visibility, resize and fullscreen,
+mixer permissions and subscriptions, reconnects, blocked pop-ups and cleanup.
 The checks cover graph ownership, repeated disposal and click listener counts,
 style changes, HiDPI, fullscreen, reduced motion, animation off, delayed audio
 initialization and source replacement.

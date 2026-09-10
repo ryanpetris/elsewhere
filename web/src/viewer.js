@@ -3,6 +3,7 @@ import { websocketUrl, storageKey } from './urls.js';
 // React only draws the chrome around it (App.jsx) and reads what it publishes on `store`.
 // Wire format mirrors crates/elsewhere-server/src/protocol.rs.
 import { createPip } from './pip.js';
+import { createPanelWindows } from './panel-windows.js';
 import { createClipboard } from './clipboard.js';
 import { KEYCODES } from './keycodes.js';
 import { TOKEN, WINDOW, PIP, api, elementsOf, snapshot, control, uploadFile, clipboardFiles, pref } from './api.js';
@@ -281,10 +282,12 @@ export function createViewer() {
     return true;
   }
 
-  function subscribeMixer(enabled) {
-    mixerSubscribed = !!enabled;
+  const mixerSubscribers = new Set();
+  function subscribeMixer(enabled, owner = 'viewer') {
+    if (enabled) mixerSubscribers.add(owner); else mixerSubscribers.delete(owner);
+    mixerSubscribed = mixerSubscribers.size > 0;
     sendText(MIXER_CLIENT, JSON.stringify({ op: 'subscribe', enabled: mixerSubscribed }));
-    if (!enabled) { cancelMixerVolumes(); store.set({ mixerLevels: {} }); }
+    if (!mixerSubscribed) { cancelMixerVolumes(); store.set({ mixerLevels: {} }); }
   }
 
   /// A window action or spawn for the compositor, as JSON.
@@ -804,6 +807,7 @@ export function createViewer() {
   }
   function dispose() {
     if (disposed) return;
+    viewer.panels?.dispose();
     viewer.pip?.dispose();
     clipboard.dispose();
     disposed = true;
@@ -1310,7 +1314,7 @@ export function createViewer() {
     can,
     resumeAudio,
     notice,
-    setPlaybackEnabled(on) { playbackEnabled = on; if (!on) stopPlayback(); },
+    setPlaybackEnabled(on) { playbackEnabled = on; if (!on) { viewer.panels.close('audio'); stopPlayback(); } },
     handoff: id => { if (id != null) send(HANDOFF, 8, dv => dv.setBigUint64(1, BigInt(id), true)); },
     attach,
     dispose,
@@ -1368,6 +1372,7 @@ export function createViewer() {
     dropNext: () => { dropNext = true; },
   };
   viewer.pip = createPip(viewer);
+  viewer.panels = createPanelWindows(viewer);
   // Console helpers, as documented: elsewhere() for the numbers, elsewhere.windows() and friends for the desktop.
   window.elsewhere = () => ({ ...state().stats, stream, renderer: state().renderer, awaitingKey, locked: !!document.pointerLockElement, decoder: decoder?.state, clipboard: state().clipboardState, videoSeq, audioSeq });
   Object.assign(window.elsewhere, viewer);

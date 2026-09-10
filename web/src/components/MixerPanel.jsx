@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { MousePointer2, SlidersHorizontal, Volume2, VolumeX, X } from 'lucide-react';
+import { ExternalLink, MousePointer2, SlidersHorizontal, Volume2, VolumeX, X } from 'lucide-react';
 import { useStore } from '../store.js';
 import { Badge, Eyebrow, IconButton, cx } from './ui.jsx';
 
@@ -74,7 +74,8 @@ function MixerRow({ viewer, node, nodes, controls, routing }) {
   );
 }
 
-export function MixerPanel({ viewer, hidden, onClose }) {
+export function MixerPanel({ viewer, hidden = false, onClose, onPopOut, poppedOut = false }) {
+  const subscription = useRef({});
   const snapshot = useStore(viewer.store, s => s.mixer);
   const error = useStore(viewer.store, s => s.mixerError);
   const role = useStore(viewer.store, s => s.role);
@@ -88,8 +89,8 @@ export function MixerPanel({ viewer, hidden, onClose }) {
     return () => document.removeEventListener('visibilitychange', visibility);
   }, []);
   useEffect(() => {
-    viewer.mixer.subscribe(!hidden && visible && status === 'connected');
-    return () => viewer.mixer.subscribe(false);
+    viewer.mixer.subscribe(!hidden && visible && status === 'connected', subscription.current);
+    return () => viewer.mixer.subscribe(false, subscription.current);
   }, [viewer, hidden, visible, status]);
   const controls = role === 'controller' && status === 'connected' && snapshot.available;
   const groups = new Map();
@@ -99,13 +100,14 @@ export function MixerPanel({ viewer, hidden, onClose }) {
     groups.get(name).push(node);
   }
   return (
-    <section aria-label="Audio Mixer" hidden={hidden} className="flex max-h-[45vh] shrink-0 flex-col border-t border-line bg-surface text-sm">
+    <section aria-label="Audio Mixer" hidden={hidden} className={cx('flex shrink-0 flex-col border-t border-line bg-surface text-sm', poppedOut ? 'h-full' : 'max-h-[45vh]')}>
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-line px-3">
         <SlidersHorizontal className="size-3.5 text-ink-3" />
         <h2 className="text-xs font-medium text-ink">Audio Mixer</h2>
         {role !== 'controller' && <Badge tone="warn" className="ml-2">Read Only</Badge>}
         <span className="ml-auto flex items-center gap-1">
           {role === 'participant' && <button type="button" className="btn btn-primary btn-xs" onClick={viewer.takeControl}><MousePointer2 className="size-3" /> Take Control</button>}
+          {onPopOut && <IconButton icon={ExternalLink} label="Pop Out Mixer" size="sm" onClick={onPopOut} />}
           <IconButton ref={close} icon={X} label="Close Mixer" size="sm" onClick={onClose} />
         </span>
       </div>
