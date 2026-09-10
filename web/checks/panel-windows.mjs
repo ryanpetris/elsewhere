@@ -17,13 +17,16 @@ const server = createServer(async (req, res) => {
   } catch { res.writeHead(404).end(); }
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'] });
+// An externally launched browser exercises real focus/visibility without Playwright's overrides.
+const browser = process.env.BROWSER_CDP
+  ? await chromium.connectOverCDP(process.env.BROWSER_CDP, { noDefaults: true })
+  : await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'] });
 const until = async (condition, message) => {
   const deadline = Date.now() + 5000;
   while (!await condition()) { assert(Date.now() < deadline, message); await delay(25); }
 };
 try {
-  const context = await browser.newContext({ deviceScaleFactor: 2 });
+  const context = process.env.BROWSER_CDP ? browser.contexts()[0] : await browser.newContext({ deviceScaleFactor: 2 });
   context.setDefaultTimeout(5000);
   const errors = [], commands = [];
   let connections = 0;
@@ -46,7 +49,9 @@ try {
     connections++;
     socket.onMessage(data => { if (typeof data !== 'string' && data[0] === MIXER_CLIENT) commands.push(JSON.parse(data.subarray(1).toString())); });
   });
+  const initialPages = context.pages();
   const page = await context.newPage();
+  for (const initial of initialPages) await initial.close();
   const base = `http://127.0.0.1:${server.address().port}/nested/`;
   await page.goto(base);
   await page.waitForFunction(() => !!window.elsewhere?.store);
@@ -102,77 +107,100 @@ try {
   const beforeSize = await region(audio, 'Audio Visualizer').locator('canvas').evaluate(canvas => canvas.width);
   await audio.setViewportSize({ width: 950, height: 650 });
   await audio.waitForFunction(before => document.querySelector('canvas').width !== before, beforeSize);
-  assert.equal(await audio.evaluate(() => document.querySelector('canvas').width > 950), true, 'HiDPI canvas');
+  assert.equal(await audio.evaluate(() => {
+    const canvas = document.querySelector('canvas');
+    return Math.abs(canvas.width - canvas.clientWidth * devicePixelRatio) <= 1;
+  }), true, 'canvas follows display pixel ratio');
   await audio.getByRole('button', { name: 'Fullscreen Visualizer', exact: true }).click();
   await audio.waitForFunction(() => document.fullscreenElement?.getAttribute('aria-label') === 'Audio Visualizer');
   await audio.getByRole('button', { name: 'Exit Fullscreen', exact: true }).click();
 
   const mixer = await open('Audio Mixer', 'Pop Out Mixer');
   await until(() => commands.at(-1)?.op === 'subscribe' && commands.at(-1).enabled, 'mixer subscription survives dock cleanup');
-  await page.evaluate(() => {
-    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
-    document.dispatchEvent(new Event('visibilitychange'));
-    elsewhere.setControlsHidden(true);
-    elsewhere.store.set({ mixerLevels: { output: 0.5 } });
-  });
-  await mixer.waitForFunction(() => document.querySelector('meter').value === 0.5);
-  const paints = await audio.evaluate(() => window.paints);
-  await audio.waitForFunction(before => window.paints > before + 3, paints);
-  assert.equal(await edges(), 2, 'hidden parent controls and document do not pause visible popout');
-  await mixer.getByRole('button', { name: 'Speakers Mute', exact: true }).click();
-  await until(() => commands.some(c => c.op === 'mute' && c.id === 'output' && c.value), 'mixer sends through shared socket');
-  await page.evaluate(() => elsewhere.store.set({ role: 'viewer' }));
-  await mixer.getByText('Read Only', { exact: true }).waitFor();
-  assert.equal(await mixer.getByRole('button', { name: 'Speakers Mute', exact: true }).isDisabled(), true);
-  await page.evaluate(() => {
-    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
-    document.dispatchEvent(new Event('visibilitychange'));
-    elsewhere.setControlsHidden(false);
-    elsewhere.store.set({ status: 'retrying', playback: null });
-  });
-  await audio.getByText('Connecting…', { exact: true }).waitFor();
-  await until(async () => await edges() === 1, 'disconnect disposes the old analysis branch');
-  await page.evaluate(async () => {
-    window.oldPlayback = playback;
-    const context = new AudioContext(); await context.resume();
-    const source = context.createAnalyser(); source.connect(context.destination);
-    window.playback = { context, source };
-    elsewhere.store.set({ status: 'connected', playback: { context, source } });
-  });
-  await until(async () => await edges() === 2, 'replacement source attaches');
-  await until(() => commands.at(-1)?.op === 'subscribe' && commands.at(-1).enabled, 'mixer resubscribes after reconnect');
-  await mixer.close();
-  await until(() => commands.at(-1)?.op === 'subscribe' && !commands.at(-1).enabled, 'closing mixer unsubscribes');
-  assert.equal(await region(page, 'Audio Mixer').count(), 0, 'closing popup leaves dock closed');
-  await audio.close();
-  await until(async () => await edges() === 1, 'window close disposes analysis');
-  assert.equal(await page.evaluate(() => playback.context.state), 'running');
-  assert.equal(await region(page, 'Audio Visualizer').count(), 0);
-  await show('Audio Visualizer');
-  assert.equal(await page.getByRole('combobox', { name: /^Style/ }).inputValue(), 'radial', 'preferences survive reopening');
-  await page.evaluate(() => { window.originalOpen = window.open; window.open = () => null; });
-  await page.getByRole('button', { name: 'Pop Out Visualizer', exact: true }).click();
-  assert.equal(await region(page, 'Audio Visualizer').count(), 1, 'blocked popup keeps dock open');
-  await page.getByText(/Allow pop-ups for this site/).waitFor();
-  await page.evaluate(() => { window.open = window.originalOpen; });
-  await page.getByRole('button', { name: 'Close Visualizer', exact: true }).click();
-  for (let i = 0; i < 3; i++) {
+  if (process.env.BROWSER_CDP) {
+    await page.bringToFront();
+    const newTab = page.waitForEvent('popup');
+    await page.evaluate(() => window.open('about:blank', '_blank'));
+    const background = await newTab;
+    await background.bringToFront();
+    await page.waitForFunction(() => document.visibilityState === 'hidden', undefined, { polling: 100 });
+    await audio.bringToFront();
+    await audio.waitForFunction(() => document.visibilityState === 'visible');
+    const before = await audio.evaluate(() => window.paints);
+    await audio.waitForFunction(before => window.paints > before + 3, before);
+    await mixer.bringToFront();
+    const volume = mixer.getByRole('slider', { name: 'Speakers Volume', exact: true });
+    await volume.focus();
+    await volume.press('ArrowRight');
+    await until(() => commands.some(c => c.op === 'volume' && c.value === 51), 'volume command works with real background opener');
+    await background.close();
+    console.log('headed browser: real background opener, visible popup animation and mixer volume command passed');
+  } else {
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+      elsewhere.setControlsHidden(true);
+      elsewhere.store.set({ mixerLevels: { output: 0.5 } });
+    });
+    await mixer.waitForFunction(() => document.querySelector('meter').value === 0.5);
+    const paints = await audio.evaluate(() => window.paints);
+    await audio.waitForFunction(before => window.paints > before + 3, paints);
+    assert.equal(await edges(), 2, 'hidden parent controls and document do not pause visible popout');
+    await mixer.getByRole('button', { name: 'Speakers Mute', exact: true }).click();
+    await until(() => commands.some(c => c.op === 'mute' && c.id === 'output' && c.value), 'mixer sends through shared socket');
+    await page.evaluate(() => elsewhere.store.set({ role: 'viewer' }));
+    await mixer.getByText('Read Only', { exact: true }).waitFor();
+    assert.equal(await mixer.getByRole('button', { name: 'Speakers Mute', exact: true }).isDisabled(), true);
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+      document.dispatchEvent(new Event('visibilitychange'));
+      elsewhere.setControlsHidden(false);
+      elsewhere.store.set({ status: 'retrying', playback: null });
+    });
+    await audio.getByText('Connecting…', { exact: true }).waitFor();
+    await until(async () => await edges() === 1, 'disconnect disposes the old analysis branch');
+    await page.evaluate(async () => {
+      window.oldPlayback = playback;
+      const context = new AudioContext(); await context.resume();
+      const source = context.createAnalyser(); source.connect(context.destination);
+      window.playback = { context, source };
+      elsewhere.store.set({ status: 'connected', playback: { context, source } });
+    });
+    await until(async () => await edges() === 2, 'replacement source attaches');
+    await until(() => commands.at(-1)?.op === 'subscribe' && commands.at(-1).enabled, 'mixer resubscribes after reconnect');
+    await mixer.close();
+    await until(() => commands.at(-1)?.op === 'subscribe' && !commands.at(-1).enabled, 'closing mixer unsubscribes');
+    assert.equal(await region(page, 'Audio Mixer').count(), 0, 'closing popup leaves dock closed');
+    await audio.close();
+    await until(async () => await edges() === 1, 'window close disposes analysis');
+    assert.equal(await page.evaluate(() => playback.context.state), 'running');
+    assert.equal(await region(page, 'Audio Visualizer').count(), 0);
+    await show('Audio Visualizer');
+    assert.equal(await page.getByRole('combobox', { name: /^Style/ }).inputValue(), 'radial', 'preferences survive reopening');
+    await page.evaluate(() => { window.originalOpen = window.open; window.open = () => null; });
+    await page.getByRole('button', { name: 'Pop Out Visualizer', exact: true }).click();
+    assert.equal(await region(page, 'Audio Visualizer').count(), 1, 'blocked popup keeps dock open');
+    await page.getByText(/Allow pop-ups for this site/).waitFor();
+    await page.evaluate(() => { window.open = window.originalOpen; });
+    await page.getByRole('button', { name: 'Close Visualizer', exact: true }).click();
+    for (let i = 0; i < 3; i++) {
+      audio = await open('Audio Visualizer', 'Pop Out Visualizer');
+      await until(async () => await edges() === 2, 'analysis attached');
+      await audio.getByRole('button', { name: 'Close Visualizer', exact: true }).click();
+      await until(() => audio.isClosed(), 'panel close closes popup');
+      await until(async () => await edges() === 1, 'repeated popup cleanup');
+    }
     audio = await open('Audio Visualizer', 'Pop Out Visualizer');
-    await until(async () => await edges() === 2, 'analysis attached');
-    await audio.getByRole('button', { name: 'Close Visualizer', exact: true }).click();
-    await until(() => audio.isClosed(), 'panel close closes popup');
-    await until(async () => await edges() === 1, 'repeated popup cleanup');
+    await page.evaluate(() => elsewhere.setPlaybackEnabled(false));
+    await until(() => audio.isClosed(), 'desktop PiP playback handoff closes visualizer popup');
+    const lastMixer = await open('Audio Mixer', 'Pop Out Mixer');
+    await page.reload();
+    await until(() => lastMixer.isClosed(), 'parent navigation closes popup');
+    assert.equal(errors.length, 0, errors.join('\n'));
+    const orphan = await context.newPage();
+    await orphan.goto(`${base}?panel=mixer`);
+    await orphan.getByText('Open this panel from the main Elsewhere viewer.').waitFor();
+    assert.equal(await orphan.evaluate(() => typeof window.elsewhere), 'undefined');
+    console.log('panel popouts: shared connection/audio, URL prefix, controls, permissions, visibility, sizing, fullscreen, preferences, reconnect, blocked popup, repeated cleanup, PiP handoff and parent navigation passed');
   }
-  audio = await open('Audio Visualizer', 'Pop Out Visualizer');
-  await page.evaluate(() => elsewhere.setPlaybackEnabled(false));
-  await until(() => audio.isClosed(), 'desktop PiP playback handoff closes visualizer popup');
-  const lastMixer = await open('Audio Mixer', 'Pop Out Mixer');
-  await page.reload();
-  await until(() => lastMixer.isClosed(), 'parent navigation closes popup');
-  assert.equal(errors.length, 0, errors.join('\n'));
-  const orphan = await context.newPage();
-  await orphan.goto(`${base}?panel=mixer`);
-  await orphan.getByText('Open this panel from the main Elsewhere viewer.').waitFor();
-  assert.equal(await orphan.evaluate(() => typeof window.elsewhere), 'undefined');
-  console.log('panel popouts: shared connection/audio, URL prefix, controls, permissions, visibility, sizing, fullscreen, preferences, reconnect, blocked popup, repeated cleanup, PiP handoff and parent navigation passed');
 } finally { await browser.close(); server.close(); }

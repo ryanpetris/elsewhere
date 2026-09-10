@@ -32,6 +32,11 @@ Chromium.
 `npm run check:panel-windows` checks both audio pop-outs, shared connection and
 audio ownership, URL prefixes, independent visibility, resize and fullscreen,
 mixer permissions and subscriptions, reconnects, blocked pop-ups and cleanup.
+For actual background-tab behavior, start ordinary Chromium with remote debugging
+in the Docker rig under Xvfb and set `BROWSER_CDP` to its debugging endpoint when
+running `check:panel-windows`. This mode avoids Playwright's forced visibility and
+checks animation and mixer volume commands while the opener is in a background
+tab. Both browser modes passed, as did `check:viewer-disposal`.
 The checks cover graph ownership, repeated disposal and click listener counts,
 style changes, HiDPI, fullscreen, reduced motion, animation off, delayed audio
 initialization and source replacement.
