@@ -6,7 +6,7 @@ import { Badge, Eyebrow, cx } from './ui.jsx';
 
 const defaults = () => ({ preset_id: crypto.randomUUID(), label: 'Broadcast', url: '', stream_key: '', width: 1280, height: 720, fps: 30, bitrate_kbps: 4000, audio: 'silence', cursor: true });
 const terminal = state => ['stopped', 'failed'].includes(state);
-const STATE = { running: ['ok', true], starting: ['warn', true], stopping: ['warn', true], stopped: ['neutral', false], failed: ['bad', false] };
+const STATE = { sending: ['ok', true], reconnecting: ['warn', true], starting: ['warn', true], stopping: ['warn', true], stopped: ['neutral', false], failed: ['bad', false] };
 
 export function BroadcastsPanel({ viewer, open }) {
   const permissions = useStore(viewer.store, s => s.permissions);
@@ -106,7 +106,7 @@ export function BroadcastsPanel({ viewer, open }) {
     {streams.length === 0 && <p className="rounded-lg border border-dashed border-line-2 px-3 py-4 text-center text-xs text-ink-4">No Streams</p>}
     {streams.map(s => {
       const [tone, pulse] = STATE[s.state] ?? ['neutral', false];
-      return <div key={s.id} className={cx('card p-3', s.state === 'running' && 'border-ok/30')} data-broadcast-id={s.id}>
+      return <div key={s.id} className={cx('card p-3', s.state === 'sending' && 'border-ok/30')} data-broadcast-id={s.id}>
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-medium text-ink">{s.label}</div>
