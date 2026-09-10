@@ -34,12 +34,31 @@ try {
     }
     for (const windowId of [null, id]) {
       const context = await browser.newContext({ viewport: { width: 1000, height: 700 } });
-      await context.addInitScript(() => {
+      await context.addInitScript(scene => {
         localStorage.setItem('elsewhere.codec', 'vp8');
-        window.initialFrame = { configs: [], requests: [], frames: [], painted: 0, delivered: 0, hold: true, fail: false, cause: '' };
+        localStorage.setItem('elsewhere.effort', 'fast');
+        window.initialFrame = { configs: [], deliveries: [], paints: [], requests: [], frames: [], painted: 0, hold: true, fail: false, cause: '', replaceFirst: scene === 'changing', staleClosed: false };
+        const draw = CanvasRenderingContext2D.prototype.drawImage;
+        CanvasRenderingContext2D.prototype.drawImage = function (...args) {
+          const result = draw.apply(this, args);
+          if (this.canvas.matches('canvas.stage')) initialFrame.painted++;
+          return result;
+        };
         const OriginalDecoder = VideoDecoder;
         window.VideoDecoder = class extends OriginalDecoder {
-          constructor(init) { initialFrame.error = init.error; const config = initialFrame.configs.length; super({ ...init, output: frame => { initialFrame.painted++; initialFrame.paintedConfig = config; init.output(frame); } }); }
+          constructor(init) { initialFrame.error = init.error; const config = initialFrame.configs.length; super({ ...init, output: frame => {
+            const deliver = () => {
+              const before = initialFrame.painted;
+              init.output(frame);
+              if (initialFrame.painted > before) { initialFrame.paintedConfig = config; initialFrame.paints[config - 1] += initialFrame.painted - before; }
+            };
+            // Deliver an old native output after a real encoder restart.
+            if (initialFrame.replaceFirst) {
+              initialFrame.replaceFirst = false;
+              initialFrame.pendingOutput = () => { const before = initialFrame.painted, live = frame.codedWidth > 0; deliver(); initialFrame.staleClosed = live && frame.codedWidth === 0 && initialFrame.painted === before; };
+              elsewhere.setChoice({ effort: 'balanced' });
+            } else deliver();
+          } }); }
           get decodeQueueSize() { return initialFrame.pressure ? 5 : super.decodeQueueSize; }
           decode(chunk) {
             if (initialFrame.fail) { initialFrame.fail = false; throw Error('Injected decoder failure'); }
@@ -52,14 +71,16 @@ try {
           set onmessage(handler) {
             super.onmessage = event => {
               const bytes = new Uint8Array(event.data), tag = bytes[0];
-              if (tag === 1) initialFrame.configs.push(JSON.parse(new TextDecoder().decode(bytes.subarray(1))));
+              if (tag === 1) { initialFrame.configs.push(JSON.parse(new TextDecoder().decode(bytes.subarray(1)))); initialFrame.deliveries.push(0); initialFrame.paints.push(0); }
               if (tag === 2) {
-                initialFrame.frames.push({ key: !!(bytes[1] & 1), bytes: bytes.length - 12 });
-                if (initialFrame.hold && initialFrame.delivered) return;
-                initialFrame.delivered++;
+                initialFrame.frames.push({ config: initialFrame.configs.length, key: !!(bytes[1] & 1), bytes: bytes.length - 12 });
+                // Each configuration may deliver its first frame while later video is held.
+                if (initialFrame.hold && initialFrame.deliveries.at(-1)) return;
+                initialFrame.deliveries[initialFrame.configs.length - 1]++;
               }
               initialFrame.cause = tag === 1 ? 'config' : 'recovery';
               try { handler(event); } finally { initialFrame.cause = ''; }
+              if (tag === 1 && initialFrame.pendingOutput) { const output = initialFrame.pendingOutput; initialFrame.pendingOutput = null; output(); }
             };
           }
           send(data) {
@@ -67,34 +88,47 @@ try {
             super.send(data);
           }
         };
-      });
+      }, scene);
       const page = await context.newPage();
       // This check exercises the main viewer bundle only; baseline lazy chunks are not opened.
       if (process.env.BASELINE_BUNDLE) await page.route('**/app.js', route => route.fulfill({ path: process.env.BASELINE_BUNDLE, contentType: 'text/javascript' }));
       await page.goto(origin + '/' + (windowId ? '?window=' + windowId : '') + '#token=' + token);
-      await page.waitForFunction(() => initialFrame.painted > 0);
+      await page.waitForFunction(() => initialFrame.painted > 0).catch(async error => {
+        error.message += '\nInitial frame: ' + await page.evaluate(() => JSON.stringify(initialFrame)); throw error;
+      });
       await page.waitForTimeout(1200);
-      assert.equal(await page.evaluate(() => elsewhere.store.get().stats.frames), 1, 'viewer painted the first frame while later video was held');
-      const sample = await page.evaluate(() => ({
-        configs: initialFrame.configs, requests: initialFrame.requests, frames: initialFrame.frames,
-        painted: initialFrame.painted, delivered: initialFrame.delivered,
-      }));
-      assert.equal(sample.delivered, 1);
-      assert.equal(sample.painted, 1, 'first frame paints without any subsequent frame');
-      assert(sample.frames[0].key, 'first video is a recovery keyframe');
+      const snapshot = await page.waitForFunction(() => {
+        if (initialFrame.pendingOutput || initialFrame.paintedConfig !== initialFrame.configs.length) return false;
+        return structuredClone({ configs: initialFrame.configs, requests: initialFrame.requests, frames: initialFrame.frames,
+          painted: initialFrame.painted, deliveries: initialFrame.deliveries, paints: initialFrame.paints,
+          staleClosed: initialFrame.staleClosed });
+      }).catch(async error => {
+        error.message += '\nCurrent frame: ' + await page.evaluate(() => JSON.stringify(initialFrame)); throw error;
+      });
+      const sample = await snapshot.jsonValue();
+      await snapshot.dispose();
+      assert.equal(sample.deliveries.at(-1), 1);
+      assert.equal(sample.paints.at(-1), 1, 'current configuration paints its first frame without later video');
+      assert(sample.deliveries.every(count => count <= 1) && sample.paints.every(count => count <= 1));
+      assert(sample.frames.find(frame => frame.config === sample.configs.length).key, 'first video is a recovery keyframe');
+      if (scene === 'changing') assert(sample.staleClosed, 'superseded decoder output is released without painting');
       assert.equal(sample.requests.filter(request => request.cause === 'config' && request.config === 1).length, Number(process.env.EXPECT_INITIAL_REQUEST || 0));
       const streamIds = new Set(sample.configs.map(c => String(c.streamId)));
       const encoded = (await readFile(root + '/server.log', 'utf8')).replace(/\x1b\[[0-9;]*m/g, '').split('\n')
         .filter(line => line.includes('ffmpeg encoded') && streamIds.has(line.match(/stream_id=(\d+)/)?.[1]));
       assert(encoded.length > 0, 'encoder measurements identify the measured stream');
       console.log(JSON.stringify({ scene, viewer: windowId ? 'window' : 'desktop', requests: sample.requests, codec: sample.configs[0].codec,
+        configurations: sample.configs.length, delivered: sample.deliveries, painted: sample.paints, staleClosed: sample.staleClosed,
         frames: sample.frames.length, keyframes: sample.frames.filter(f => f.key).length,
         frameBytes: sample.frames.reduce((n, f) => n + f.bytes, 0),
         encoderFrames: encoded.length, encoderKeyframes: encoded.filter(line => line.includes('keyframe=true')).length,
         encoderBytes: encoded.reduce((n, line) => n + Number(line.match(/bytes=(\d+)/)?.[1] || 0), 0) }));
       // A real decoder failure must still ask for and paint a new recovery frame.
-      await page.evaluate(() => { initialFrame.hold = false; initialFrame.fail = true; initialFrame.socket.send(new Uint8Array([0x88])); });
-      await page.waitForFunction(() => initialFrame.requests.some(request => request.cause === 'recovery') && initialFrame.painted > 1);
+      const beforeFailure = await page.evaluate(() => {
+        const before = { painted: initialFrame.painted, requests: initialFrame.requests.length };
+        initialFrame.hold = false; initialFrame.fail = true; initialFrame.socket.send(new Uint8Array([0x88])); return before;
+      });
+      await page.waitForFunction(before => !initialFrame.fail && initialFrame.requests.slice(before.requests).some(request => request.cause === 'recovery') && initialFrame.painted > before.painted, beforeFailure);
       for (const choice of [{ quality: 'low' }, { codec: 'vp9' }, { codec: 'vp8' }]) {
         const before = await page.evaluate(() => initialFrame.configs.length);
         await page.evaluate(choice => elsewhere.setChoice(choice), choice);
