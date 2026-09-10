@@ -21,9 +21,10 @@ export function About({ viewer, onClose }) {
   };
   const link = 'flex items-center gap-3 rounded-md px-2 py-2 text-sm text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent';
   return (
-    <Popover id="viewer-about" role="dialog" aria-label="About Elsewhere" onClose={onClose} onKeyDown={keyDown} onPaste={event => event.stopPropagation()}
+    <Popover id="viewer-about" role="dialog" aria-labelledby="viewer-about-heading" onClose={onClose} onKeyDown={keyDown} onPaste={event => event.stopPropagation()}
       className="left-2 max-h-[calc(100dvh-4rem)] w-[22rem] max-w-[calc(100vw-1rem)] overflow-y-auto text-sm select-text sm:left-3">
-      <div className="flex justify-end px-2 pt-2">
+      <div className="flex items-center justify-between border-b border-line px-3 py-2">
+        <h2 id="viewer-about-heading" className="text-sm font-medium text-ink">About Elsewhere</h2>
         <IconButton ref={close} icon={X} label="Close About" size="sm" onClick={onClose} />
       </div>
       <div className="flex flex-col gap-0.5 p-2">
