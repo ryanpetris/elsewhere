@@ -1552,7 +1552,7 @@ The desktop notifications currently shown (id, app, summary, body, actions, time
 
 ### `resize_window`
 
-Resize a floating window's geometry to w h (logical px).
+Resize a mapped window to w h (logical px), clamped to the client's advertised minimum and maximum size, clearing maximized/fullscreen state. Ignored while kiosk is on.
 
 ```json
 {
