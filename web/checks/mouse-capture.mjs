@@ -68,7 +68,12 @@ try {
   const before = await canvas.boundingBox();
   await canvas.click(); await captured();
   assert.equal(await page.evaluate(type => sent.filter(p => p[0] === type).length, POINTER_LOCK_GAINED), 1, 'successful capture notifies the desktop once');
-  assert.equal((await mousePackets()).filter(p => p[0] === BUTTON).length, 0, 'capture click is not sent to the game');
+  await page.mouse.wheel(0, 20);
+  const capturePackets = await page.evaluate(types => sent.filter(p => types.includes(p[0])), [MOTION_ABS, MOTION_REL, POINTER_LOCK_GAINED, BUTTON, AXIS]);
+  assert.deepEqual(capturePackets.map(p => p[0]), [MOTION_ABS, POINTER_LOCK_GAINED, AXIS], 'capture positions the pointer before resuming locks and scrolling, consuming the click');
+  const capturePosition = new DataView(new Uint8Array(capturePackets[0]).buffer);
+  assert.equal(capturePosition.getFloat32(1, true), 640);
+  assert.equal(capturePosition.getFloat32(5, true), 360);
   assert(await page.locator('[data-mouse-capture]').isVisible(), 'the top bar warns while the mouse is captured');
   assert.deepEqual(await canvas.boundingBox(), before, 'capture does not resize the desktop');
   assert(await page.locator('[data-captured-cursor]').isVisible());
@@ -135,6 +140,21 @@ try {
   await page.waitForTimeout(1300);
   await canvas.click(); await captured();
   await page.evaluate(() => elsewhere.setCaptureOnClick(false)); await released();
+  await page.reload(); await ready();
+  await canvas.click();
+  await page.evaluate(({ POINTER_LOCK, MOTION_ABS }) => {
+    window.capturedAbsolute = 0;
+    const send = socket.send;
+    socket.send = function (data) {
+      if (document.pointerLockElement && new Uint8Array(data)[0] === MOTION_ABS) capturedAbsolute++;
+      send.call(this, data);
+    };
+    packet([POINTER_LOCK, 1]);
+  }, { POINTER_LOCK, MOTION_ABS });
+  await captured();
+  assert.equal(await page.evaluate(() => capturedAbsolute), 0, 'application-requested capture does not inject absolute motion');
+  await move(12, -7); assert.deepEqual(await lastMotion(), [MOTION_REL, 12, -7]);
+  await page.evaluate(() => document.exitPointerLock()); await released();
   await page.evaluate(() => elsewhere.setCaptureOnClick(true));
   await page.reload(); await ready();
   await canvas.click(); await captured();
@@ -166,6 +186,13 @@ try {
   });
   const touchMotion = await lastMotion();
   assert.deepEqual(touchMotion, [MOTION_ABS, 320, 180], 'touch-as-mouse still moves to the tap position while mouse capture is off');
+  await page.evaluate(() => localStorage.setItem('elsewhere.sidebar', '0'));
+  await page.setViewportSize({ width: 3000, height: 2000 });
+  await page.reload(); await ready();
+  const edge = await canvas.boundingBox();
+  await canvas.click({ position: { x: edge.width - 1, y: edge.height - 1 } }); await captured();
+  assert.deepEqual(await lastMotion(), [MOTION_ABS, 1279, 719], 'capture at the canvas edge stays within desktop coordinates');
+  await page.evaluate(() => document.exitPointerLock()); await released();
   await page.evaluate(() => { sent.length = 0; });
   // Simulate a browser granting an earlier request after the viewer no longer wants it.
   await page.evaluate(() => {

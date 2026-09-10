@@ -642,7 +642,11 @@ export function createViewer() {
     if (document.pointerLockElement === canvas) applicationUnlock = false;
     else if (!applicationUnlock) lockReleased = true;
     store.set({ locked: document.pointerLockElement === canvas });
-    if (captured) send(POINTER_LOCK_GAINED, 0);
+    if (captured) {
+      // Establish the capture-click target before the compositor resumes pending application locks.
+      if (!wantLock) send(MOTION_ABS, 8, dv => { dv.setFloat32(1, pointerPosition.x, true); dv.setFloat32(5, pointerPosition.y, true); });
+      send(POINTER_LOCK_GAINED, 0);
+    }
     drawCapturedCursor();
     if (released || (!document.pointerLockElement && wantLock)) { wantLock = false; send(POINTER_LOCK_LOST, 0); }
     if (released) {
@@ -920,6 +924,10 @@ export function createViewer() {
       lockReleased = false;
       if (!WINDOW && state().captureOnClick && driving() && document.pointerLockElement !== canvas) {
         pointerPosition = toDesktop(e);
+        if (stream) {
+          pointerPosition.x = Math.max(0, Math.min(stream.width / stream.scale - 1, pointerPosition.x));
+          pointerPosition.y = Math.max(0, Math.min(stream.height / stream.scale - 1, pointerPosition.y));
+        }
         captureClick = e.button;
         requestLock();
         return;
