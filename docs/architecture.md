@@ -1,7 +1,7 @@
 # Architecture
 
 Elsewhere is a headless Wayland compositor whose display is a browser tab. Clients render on
-the GPU as usual; the composited frame is hardware-encoded (VA-API through FFmpeg) and streamed
+the GPU as usual; the composited frame is hardware-encoded (VA-API or NVENC through FFmpeg) and streamed
 over a WebSocket; the browser decodes it with WebCodecs and paints it on a canvas. Mouse, keyboard
 and (optionally) audio travel the same socket; the video moves to a WebRTC data channel (`elsewhere-server`'s
 `rtc.rs`, str0m) when a viewer picks that transport, which is what reaches a server across NAT through a
@@ -53,7 +53,7 @@ and broadcast network I/O.
   └─────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Zero-copy video path: client dmabuf → GLES composite into a GBM-allocated dmabuf → the VA-API
+VA-API zero-copy video path: client dmabuf → GLES composite into a GBM-allocated dmabuf → the VA-API
 post-processor and encoder import that same dmabuf → bitstream → browser GPU decode. No CPU pixel
 copies. Without a GPU (`--render-node none`, or no node) the renderer is llvmpipe on Mesa's surfaceless
 EGL platform, frames are rendered into one texture and read back (`gpu::Targets::Texture`,
@@ -180,7 +180,7 @@ make waybar and xfce4-panel work as ordinary clients. Details in [panels.md](pan
 ## Streaming
 
 One `FfmpegSink` per desktop or window viewer owns a long-lived encoder thread. It creates, uses and
-destroys its native contexts on that thread. Hardware encoding uses this path:
+destroys its native contexts on that thread. VA-API encoding uses this path:
 
 ```
 compositor DMA-buf → DRM PRIME import → scale_vaapi to NV12 → VAAPI encoder → raw WebCodecs packet
@@ -192,6 +192,15 @@ and compositor lease through an `AVBufferRef`. Conversion synchronizes the outpu
 releasing the input, so the encoder's reference pictures do not retain compositor slots. Source
 layouts must match the dimensions, stride, offset, fourcc and actual modifier the compositor supplied.
 RGB input is full range; converted NV12 and encoded output use limited-range BT.709.
+
+On NVIDIA the compositor retains the GBM/EGL device and client DMA-buf support, but renders into
+texture targets. Desktop and window targets use the same synchronized framebuffer readback as PNG
+snapshots. The encoder worker converts owned XRGB memory through libswscale to limited-range BT.709
+YUV420P and submits it to NVENC. No compositor DMA-buf is imported into CUDA. The DRM node's PCI
+address is matched against visible CUDA devices before probing H.264, HEVC and AV1 independently.
+Each candidate must produce a recovery keyframe; unsupported codecs are omitted. NVENC uses CBR,
+ultra-low-latency tuning, no B-frames or lookahead, and immediate output. Effort selects presets
+p1, p3 or p5. Quality changes reopen the encoder and begin a new stream with a keyframe.
 
 With `--software-encoding`, the compositor supplies memory or linear DMA-buf pixels. The worker maps
 and synchronizes DMA-buf CPU access, converts through libswscale, and uses libvpx, libx264 or
@@ -258,7 +267,7 @@ also triggers fallback.
 
 Video settings disable B-frames and lookahead and constrain burst size with a short buffer budget.
 VA encoders use CBR, one reference and one asynchronous operation. Software encoders use their
-low-delay rate-control settings; software GOPs are long and VA GOPs are 1024 frames. Requested recovery
+low-delay rate-control settings; software GOPs are long and hardware GOPs are 1024 frames. Requested recovery
 forces a keyframe with the headers needed by a fresh browser decoder. Only libx264 applies bitrate
 changes live; other encoders reopen. Capture timestamps retain the same clock origin across reopens.
 

@@ -25,6 +25,7 @@ retains the requested preference and reports unavailable, with no claim that it 
 | H.264, x264 | `preset` | superfast | fast | medium |
 | HEVC, x265 | `preset` | ultrafast | superfast | fast |
 | AV1, libaom realtime | `cpu-used` | 8 | 6 | 4 |
+| NVIDIA H.264, HEVC, AV1 | `preset` | p1 | p3 | p5 |
 | VA hardware encoders | `compression_level` | driver maximum | ceiling of half maximum | 1 |
 | H.264, OpenH264 | unavailable | encoder default | encoder default | encoder default |
 
@@ -55,7 +56,8 @@ types. Encoder discovery can also be masked by an external check shim without ch
 For HEVC, run `node checks/hevc-browser.mjs` in the GPU image. The check runs headed Chromium on a
 dedicated Wayland desktop so the browser can use its native hardware decoder. It checks desktop and
 window playback, requested recovery keys and quality/effort changes, decoding each resulting key in a
-fresh WebCodecs decoder. Chromium's headless mode may omit HEVC even when its headed mode supports it.
+fresh WebCodecs decoder. `ELSEWHERE_RENDER_NODE` selects the encoder GPU;
+`ELSEWHERE_BROWSER_RENDER_NODE` selects the browser host GPU. Both default to `/dev/dri/renderD128`. Chromium's headless mode may omit HEVC even when its headed mode supports it.
 
 The benchmark launches a real Wayland Chromium canvas inside the remote desktop. A headless Chromium
 viewer decodes and paints its video over WebSocket. Software rendering uses a 30 Hz compositor clock,

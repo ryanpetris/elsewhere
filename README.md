@@ -1,7 +1,7 @@
 # Elsewhere
 
 A headless Wayland compositor whose screen is a browser tab. Clients render on the GPU, the
-composited frame is hardware-encoded with VA-API (AV1, HEVC, VP9 or H.264, whichever the browser
+composited frame is hardware-encoded with VA-API or NVIDIA NVENC (AV1, HEVC, VP9 or H.264, whichever the browser
 decodes best and the GPU encodes) and streamed over a WebSocket, and the browser decodes it with
 WebCodecs. Mouse, keyboard, audio and the clipboard travel the same way.
 
@@ -38,9 +38,9 @@ to check the broadcast helper's trusted, untrusted and wrong-host TLS connection
 
 ## Requirements
 
-- Linux, with a GPU render node (`/dev/dri/renderD128`) and Mesa for hardware rendering and encoding, or
+- Linux, with a GPU render node (`/dev/dri/renderD128`) and Mesa for Intel/AMD or the NVIDIA driver, or
   none at all (Mesa's llvmpipe renders and the CPU encodes; see below).
-- FFmpeg 7.1 or later, with VAAPI support for hardware encoding. `--software-encoding` uses
+- FFmpeg 7.1 or later, with VAAPI or NVENC support for hardware encoding. `--software-encoding` uses
   libvpx, x264 or OpenH264, x265, and libaom, according to the installed FFmpeg build.
   Software encoding runs the desktop at 30 Hz. Standard distribution FFmpeg packages supply these
   libraries; codec availability is checked by opening an encoder and producing a keyframe.
@@ -107,7 +107,7 @@ Effort defaults to Fast. Balanced and High spend more encoding time for possible
 at the same bitrate. Changes restart the viewer's stream immediately and are remembered on reconnect.
 See [encoding effort](docs/encoding-effort.md) for mappings and measured tradeoffs.
 Before accepting connections, the server probes the codecs allowed by `--codecs`. Hardware encoding
-mode advertises only working VA-API encoders on the selected render node. The browser sends its
+mode advertises only working VA-API or NVENC encoders on the selected render node. The browser sends its
 supported codecs in preference order, H.264, HEVC, AV1, VP9, then VP8, with a manual selection first.
 The server starts the first shared codec and sends its supported list and current selection to the viewer.
 If encoding fails twice, the server moves to the next shared codec and notifies the viewer. Failure
@@ -275,6 +275,41 @@ docker run -d --name turn -p 3478:3478/udp -p 3478:3478 -p 49160-49200:49160-492
 ```
 
 `--no-rtc` leaves the option out entirely.
+
+## NVIDIA
+
+Select the NVIDIA DRM render node with `--render-node`. On hybrid systems the default
+`/dev/dri/renderD128` may belong to the integrated GPU. Elsewhere matches the selected node's PCI
+address to a visible CUDA device, so the renderer and encoder use the same GPU.
+
+Use the NVIDIA driver with DRM modesetting, GBM/EGL support and its EGL GBM external platform
+library, plus an FFmpeg build with NVENC. Elsewhere renders with GLES, reads the composed pixels
+back to memory, converts them to limited-range BT.709 YUV420P and submits them to NVENC.
+This path copies pixels through CPU memory. `--software-encoding` keeps NVIDIA rendering and
+uses CPU encoders instead.
+
+H.264, HEVC and AV1 are probed independently at startup. The GPU must support the requested codec;
+RTX 30-series GPUs encode H.264 and HEVC but do not encode AV1. No CUDA SDK is needed to build
+Elsewhere. The NVIDIA driver supplies `libcuda.so.1` and `libnvidia-encode.so.1` at runtime.
+A missing driver library, an incompatible driver or an unsupported codec causes startup to fail
+if no requested encoder works. NVENC session limits apply across viewers and other applications.
+
+For Docker, install and configure the NVIDIA Container Toolkit on the host. Pass the NVIDIA
+runtime devices and driver libraries as well as the DRM node. For example, when NVIDIA is
+`renderD129`:
+
+```sh
+docker run --rm --gpus all --device /dev/dri --shm-size 1g \
+  --group-add "$(stat -c %g /dev/dri/renderD129)" \
+  -e NVIDIA_DRIVER_CAPABILITIES=compute,video,graphics,utility,display \
+  -p 8443:8443 -p 8443:8443/udp \
+  -v elsewhere-data:/home/elsewhere/.config/elsewhere \
+  elsewhere --render-node /dev/dri/renderD129
+```
+
+The host must initialize `/dev/nvidia-modeset` before creating a headless container; if needed,
+run `sudo nvidia-modprobe -m` on the host. Passing only `/dev/dri` does not supply NVENC or CUDA.
+See [NVIDIA validation](docs/nvidia.md) for the tested paths and hardware limits.
 
 ## Without a GPU
 
