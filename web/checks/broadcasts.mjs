@@ -44,7 +44,7 @@ async function mcp(method, params, auth = token) {
 }
 try {
   await mkdir(root + '/runtime', { mode: 0o700 });
-  const desktop = await start(process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere', [...(!withAudio ? ['--no-audio', '--screen-size', '640x480'] : []), '--no-tls', ...(process.env.BROADCAST_GPU === '1' ? [] : ['--render-node', 'none', '--codecs', 'vp8']), '--listen', '127.0.0.1:8097', '--rtc-port', '50997', '--socket-name', 'wayland-broadcast-check'], { ...process.env, XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime' }, 'desktop');
+  const desktop = await start(process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere', [...(!withAudio ? ['--no-audio', '--screen-size', '640x480'] : []), '--no-tls', ...(process.env.BROADCAST_GPU === '1' ? ['--render-node', process.env.ELSEWHERE_RENDER_NODE ?? '/dev/dri/renderD128'] : ['--render-node', 'none', '--codecs', 'vp8']), '--listen', '127.0.0.1:8097', '--rtc-port', '50997', '--socket-name', 'wayland-broadcast-check'], { ...process.env, XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime' }, 'desktop');
   await wait('desktop startup', async () => { try { return (await fetch(base)).ok; } catch { return false; } });
   token = await createToken(root);
   viewerToken = await createToken(root, ['desktop.view', 'audio.listen', 'clipboard.read']);

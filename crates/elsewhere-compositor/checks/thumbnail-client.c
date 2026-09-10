@@ -33,7 +33,9 @@ static void paint(struct wl_surface *surface, int w, int h, uint32_t value) {
         0xff404040, 0xff808080, 0xffc0c0c0, 0xffffffff };
     for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
         uint32_t gray = x * 255 / (w > 1 ? w - 1 : 1);
-        pixels[y*w+x] = !chart || surface != root ? value : y < h/2
+        pixels[y*w+x] = chart == 2 && surface == root
+            ? y < 8 ? 0xffff0000 : y >= h-8 ? 0xffffff00 : x < 8 ? 0xff0000ff : x >= w-8 ? 0xffff00ff : 0xff808080
+            : !chart || surface != root ? value : y < h/2
             ? patches[x*8/w] : 0xff000000 | gray * 0x010101;
     }
     struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, w*h*4);
@@ -102,6 +104,7 @@ int main(int argc, char **argv) {
         strcpy(previous, command);
         uint32_t value;
         if (sscanf(command, "root %x", &value) == 1) { chart = 0; color = value; paint(root, width, height, color); }
+        if (!strcmp(command, "edges")) { chart = 2; paint(root, width, height, color); }
         if (!strcmp(command, "chart")) { chart = 1; paint(root, width, height, color); }
         if (sscanf(command, "sub %x", &value) == 1) {
             if (!child) {

@@ -6,6 +6,8 @@ import { spawn, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { chromium } from 'playwright-core';
 
+const renderNode = process.env.ELSEWHERE_RENDER_NODE ?? 'none';
+const codec = process.env.ELSEWHERE_CODEC ?? (renderNode === 'none' ? 'vp8' : 'h264');
 const root = await mkdtemp(tmpdir() + '/elsewhere-thumbnails-');
 await mkdir(root + '/runtime', { mode: 0o700 });
 const log = await open(root + '/server.log', 'w');
@@ -22,7 +24,7 @@ const xml = '/usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml';
 execFileSync('wayland-scanner', ['client-header', xml, root + '/xdg-shell-client-protocol.h']);
 execFileSync('wayland-scanner', ['private-code', xml, root + '/xdg-shell-protocol.c']);
 execFileSync('cc', ['-I' + root, '/src/crates/elsewhere-compositor/checks/thumbnail-client.c', root + '/xdg-shell-protocol.c', '-lwayland-client', '-o', root + '/client']);
-server = spawn((process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere'), ['--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codecs', 'vp8', '--listen', '127.0.0.1:8093', '--socket-name', 'wayland-thumbnails'], {
+server = spawn((process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere'), ['--no-audio', '--no-rtc', '--no-tls', '--render-node', renderNode, '--codecs', codec, ...(process.env.ELSEWHERE_SOFTWARE_ENCODING ? ['--software-encoding'] : []), '--listen', '127.0.0.1:8093', '--socket-name', 'wayland-thumbnails'], {
   env: { ...process.env, HOME: root, XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime', RUST_LOG: 'elsewhere_server::api=debug' }, stdio: ['ignore', log.fd, log.fd],
 });
   await wait(async () => { try { return (await fetch(origin)).ok; } catch { return false; } });

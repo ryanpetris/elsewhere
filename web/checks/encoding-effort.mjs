@@ -55,6 +55,9 @@ try {
   await main.waitForFunction(() => elsewhere.store.get().windows.some(window => window.app_id === 'effort-check'));
   const id = await main.evaluate(() => elsewhere.store.get().windows.find(window => window.app_id === 'effort-check').id);
   const settings = {
+    h264_nvenc: ['preset=p1', 'preset=p3', 'preset=p5'],
+    hevc_nvenc: ['preset=p1', 'preset=p3', 'preset=p5'],
+    av1_nvenc: ['preset=p1', 'preset=p3', 'preset=p5'],
     libvpx: ['cpu-used=8', 'cpu-used=4', 'cpu-used=2'],
     'libvpx-vp9': ['cpu-used=8', 'cpu-used=6', 'cpu-used=5'],
     libx264: ['preset=superfast', 'preset=fast', 'preset=medium'],
@@ -80,7 +83,7 @@ try {
       continue;
     }
     const codecs = await page.evaluate(() => elsewhere.store.get().codecs.filter(codec => elsewhere.store.get().decodable.includes(codec.codec)).map(codec => codec.codec));
-    assert.ok(codecs.length >= 3, 'rig exposes multiple codec implementations');
+    assert.ok(codecs.includes(initialCodec), `browser and rig support requested ${initialCodec}`);
     for (const codec of codecs) {
       let qualityMaximum;
       await chooseStream(page, 'Video Codec', codec);

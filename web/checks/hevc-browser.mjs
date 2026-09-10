@@ -14,6 +14,7 @@ async function desktop(name, port, software) {
   await mkdir(runtime, { mode: 0o700 });
   const log = await open(`${root}/${name}.log`, 'w'); logs.push(log);
   const child = spawn(binary, ['--no-audio', '--no-rtc', '--no-tls', '--listen', `127.0.0.1:${port}`,
+    '--render-node', software ? (process.env.ELSEWHERE_BROWSER_RENDER_NODE ?? '/dev/dri/renderD128') : (process.env.ELSEWHERE_RENDER_NODE ?? '/dev/dri/renderD128'),
     '--socket-name', name, '--screen-size', '1280x720', '--codecs', software ? 'vp8' : 'hevc',
     ...(software ? ['--software-encoding'] : [])],
   { env: { ...process.env, XDG_RUNTIME_DIR: runtime, XDG_CONFIG_HOME: runtime + '/config' }, stdio: ['ignore', log.fd, log.fd] });

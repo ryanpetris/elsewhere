@@ -7,6 +7,8 @@ import { tmpdir } from 'node:os';
 import { chromium } from 'playwright-core';
 import { MOTION_ABS } from '../src/protocol.js';
 
+const renderNode = process.env.ELSEWHERE_RENDER_NODE ?? 'none';
+const codec = process.env.ELSEWHERE_CODEC ?? (renderNode === 'none' ? 'vp8' : 'h264');
 const binary = (process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere');
 for (const size of ['0x1080', '1921x1080', '1920x1', '8194x1080', '1920', 'ax1080', '1920x1080x2']) {
   const result = spawnSync(binary, ['--screen-size', size], { encoding: 'utf8' });
@@ -25,7 +27,7 @@ for (const fixed of [true, false]) {
   await mkdir(root + '/runtime', { mode: 0o700 });
   const log = await open(root + '/server.log', 'w');
   const origin = 'http://127.0.0.1:8093';
-  const server = spawn(binary, ['--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codecs', 'vp8', '--listen', '127.0.0.1:8093', '--socket-name', 'wayland-fixed-size', ...(fixed ? ['--screen-size', '1280x720'] : [])], {
+  const server = spawn(binary, ['--no-audio', '--no-rtc', '--no-tls', '--render-node', renderNode, '--codecs', codec, ...(process.env.ELSEWHERE_SOFTWARE_ENCODING ? ['--software-encoding'] : []), '--listen', '127.0.0.1:8093', '--socket-name', 'wayland-fixed-size', ...(fixed ? ['--screen-size', '1280x720'] : [])], {
     env: { ...process.env, HOME: root, XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime' }, stdio: ['ignore', log.fd, log.fd],
   });
   let browser;

@@ -25,7 +25,8 @@ await mkdir(root + '/runtime', { mode: 0o700 });
 const log = await open(root + '/server.log', 'w');
 const origin = 'http://127.0.0.1:8094';
 const server = spawn(binary, [
-  '--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codecs', 'vp8', '--bitrate', String(bitrate),
+  '--no-audio', '--no-rtc', '--no-tls', '--render-node', process.env.ELSEWHERE_RENDER_NODE ?? 'none', '--codecs', process.env.EFFORT_CODECS ?? 'vp8,h264,hevc,av1,vp9',
+  ...(process.env.ELSEWHERE_SOFTWARE_ENCODING ? ['--software-encoding'] : []), '--bitrate', String(bitrate),
   '--screen-size', `${width}x${height}`, '--kiosk', '--listen', '127.0.0.1:8094',
 ], { cwd: root, env: { ...process.env, HOME: root, XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime',
   RUST_LOG: 'elsewhere_stream=trace,info', NO_COLOR: '1' }, stdio: ['ignore', log.fd, log.fd] });
@@ -170,7 +171,7 @@ try {
     const seconds = (after.at - before.at) / 1000;
     const sequences = after.measurement.sequences, unique = new Set(sequences);
     const span = Math.max(...sequences) - Math.min(...sequences) + 1;
-    const row = { codec, effort, scene, width, height, encoder: after.state.effort.encoder, compositor_hz: 30, ceiling_kbps: bitrate, ...nativeRate,
+    const row = { codec, effort, scene, width, height, encoder: after.state.effort.encoder, compositor_hz: process.env.ELSEWHERE_RENDER_NODE && process.env.ELSEWHERE_RENDER_NODE !== 'none' && !process.env.ELSEWHERE_SOFTWARE_ENCODING ? 60 : 30, ceiling_kbps: bitrate, ...nativeRate,
       source_sequence_fps: span / seconds,
       actual_kbps: after.measurement.bytes * 8 / seconds / 1000, delivered_fps: after.measurement.latency.length / seconds,
       encoder_ms: [percentile(encode, .5), percentile(encode, .95)], end_to_end_ms: [percentile(after.measurement.latency, .5), percentile(after.measurement.latency, .95)],
