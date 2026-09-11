@@ -294,21 +294,40 @@ Elsewhere. The NVIDIA driver supplies `libcuda.so.1` and `libnvidia-encode.so.1`
 A missing driver library, an incompatible driver or an unsupported codec causes startup to fail
 if no requested encoder works. NVENC session limits apply across viewers and other applications.
 
-For Docker, install and configure the NVIDIA Container Toolkit on the host. Pass the NVIDIA
-runtime devices and driver libraries as well as the DRM node. For example, when NVIDIA is
-`renderD129`:
+For Docker, install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+on the host, then configure Docker with `sudo nvidia-ctk runtime configure --runtime=docker`
+and restart Docker. With Docker BuildKit available, build the standard image and its NVIDIA variant:
 
 ```sh
-docker run --rm --gpus all --device /dev/dri --shm-size 1g \
+docker build -t elsewhere .
+docker build -f Dockerfile.nvidia -t elsewhere-nvidia .
+```
+
+The NVIDIA image links the host-supplied GBM backend into the Arch library search directory.
+It supports Arch and Ubuntu/Debian hosts without packaging driver libraries. Use the standard image
+for Intel, AMD or CPU-only operation. `--build-arg BASE_IMAGE=<image>` selects a different build
+of the standard Elsewhere image.
+
+Pass the NVIDIA runtime explicitly, even when `--gpus all` works with Docker's default runtime.
+The [NVIDIA runtime](https://github.com/NVIDIA/nvidia-container-toolkit/blob/main/cmd/nvidia-container-runtime/README.md#notes-on-using-the-docker-cli)
+also supplies the graphics driver registrations used by EGL and Vulkan. For example, when NVIDIA
+is `renderD129`:
+
+```sh
+docker run --rm --runtime=nvidia --gpus all --device /dev/dri --shm-size 1g \
   --group-add "$(stat -c %g /dev/dri/renderD129)" \
   -e NVIDIA_DRIVER_CAPABILITIES=compute,video,graphics,utility,display \
   -p 8443:8443 -p 8443:8443/udp \
   -v elsewhere-data:/home/elsewhere/.config/elsewhere \
-  elsewhere --render-node /dev/dri/renderD129
+  elsewhere-nvidia --render-node /dev/dri/renderD129
 ```
 
 The host must initialize `/dev/nvidia-modeset` before creating a headless container; if needed,
 run `sudo nvidia-modprobe -m` on the host. Passing only `/dev/dri` does not supply NVENC or CUDA.
+Check the startup log for a `GL Renderer:` line naming NVIDIA and the verified NVENC encoders.
+`nvidia-smi` or successful encoding alone does not establish GPU rendering: a missing EGL/GBM
+setup can leave the compositor on llvmpipe. Render-node numbers can change after a reboot;
+check which device belongs to NVIDIA before starting the container.
 See [NVIDIA validation](docs/nvidia.md) for the tested paths and hardware limits.
 
 ## Without a GPU

@@ -22,8 +22,8 @@
 # Any number of viewers can connect; one controls at a time.
 # Arguments after the image name go to elsewhere, e.g. `... elsewhere --codecs h264`.
 # If /dev/dri/renderD128 isn't world-accessible on the host, add `--group-add $(stat -c %g /dev/dri/renderD128)`.
-# NVIDIA needs --gpus all, NVIDIA_DRIVER_CAPABILITIES=compute,video,graphics,utility,display,
-# and --render-node pointing to its DRM node. See the README for host setup.
+# For NVIDIA, extend this image with Dockerfile.nvidia and use --runtime=nvidia --gpus all
+# with --render-node pointing to its DRM node. See the README for host setup.
 # VA-API hardware encoding uses the host GPU: Intel (iHD) and AMD (Mesa) drivers are included,
 # as are Mesa's OpenGL and Vulkan drivers for both. To check them from the desktop: `glxinfo -B`,
 # `vulkaninfo --summary`, and `glxgears` / `vkcube --wsi wayland` as spinning windows (spawn them

@@ -1,0 +1,11 @@
+# syntax=docker/dockerfile:1
+# Build the standard Dockerfile as elsewhere first. The host supplies the NVIDIA driver.
+ARG BASE_IMAGE=elsewhere
+FROM ${BASE_IMAGE}
+USER root
+# Ubuntu/Debian hosts supply this backend outside Arch's GBM search directory.
+# On Arch hosts the NVIDIA runtime replaces this link with the native driver link.
+RUN mkdir -p /usr/lib/gbm \
+    && ln -s /usr/lib/x86_64-linux-gnu/gbm/nvidia-drm_gbm.so /usr/lib/gbm/nvidia-drm_gbm.so
+USER elsewhere
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,video,graphics,utility,display

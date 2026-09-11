@@ -8,6 +8,7 @@ import { createToken } from './token-fixture.mjs';
 const root = await mkdtemp('/tmp/elsewhere-gpu-surfaces-');
 const binary = process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere';
 const codec = process.env.ELSEWHERE_CODEC || 'h264';
+const nvidiaBrowser = process.env.ELSEWHERE_BROWSER_NVIDIA === '1';
 const origin = 'http://127.0.0.1:8849';
 const children = [], logs = [];
 let browser;
@@ -31,6 +32,10 @@ async function desktop(name, port, host) {
 try {
   const host = await desktop('browser-host', 8848, true);
   const target = await desktop('gpu-source', 8849, false);
+  const sourceLog = await readFile(`${target}/server.log`, 'utf8');
+  if (/verified video encoders.*Nvenc/.test(sourceLog)) {
+    assert.match(sourceLog, /GL Renderer:.*NVIDIA/, 'NVENC source must render on NVIDIA, not llvmpipe');
+  }
   const token = await createToken(target);
   const xml = '/usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml';
   execFileSync('wayland-scanner', ['client-header', xml, root + '/xdg-shell-client-protocol.h']);
@@ -38,7 +43,8 @@ try {
   execFileSync('cc', ['-I' + root, '/src/crates/elsewhere-compositor/checks/thumbnail-client.c', root + '/xdg-shell-protocol.c', '-lwayland-client', '-o', root + '/client']);
   await writeFile(root + '/command', 'edges');
   browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: false,
-    args: ['--no-sandbox', '--ozone-platform=wayland', '--enable-unsafe-webgpu', '--disable-background-timer-throttling', '--disable-renderer-backgrounding'],
+    args: ['--no-sandbox', '--ozone-platform=wayland', '--enable-unsafe-webgpu', '--disable-background-timer-throttling', '--disable-renderer-backgrounding',
+      ...(nvidiaBrowser ? ['--use-angle=vulkan', '--enable-features=Vulkan,VulkanFromANGLE'] : [])],
     env: { ...process.env, XDG_RUNTIME_DIR: host, WAYLAND_DISPLAY: 'browser-host' } });
   const context = await browser.newContext({ viewport: { width: 1450, height: 1050 } });
   await context.addInitScript(codec => {
@@ -85,6 +91,7 @@ try {
           texture = GPUCanvasContext.prototype.getCurrentTexture;
         GPUCanvasContext.prototype.configure = function (config) {
           probe.device = config.device;
+          probe.adapter = config.device.adapterInfo && { vendor: config.device.adapterInfo.vendor, isFallbackAdapter: config.device.adapterInfo.isFallbackAdapter };
           probe.format = config.format;
           config.device.addEventListener('uncapturederror', (e) => probe.errors.push(e.error.message));
           return configure.call(this, {
@@ -169,9 +176,13 @@ try {
           Math.min(canvas.width - 1, Math.floor(x * canvas.width)), Math.min(canvas.height - 1, Math.floor(y * canvas.height)), 1, 1).data]);
       }
       return { canvas: [canvas.width, canvas.height], configured: [state.stream.width, state.stream.height], dimensions: probe.dimensions, visible: probe.visible, colorSpace: probe.colorSpace,
-        colors, painted: state.renderer === 'webgpu' ? probe.gpuPainted : probe.painted,
+        colors, adapter: probe.adapter, painted: state.renderer === 'webgpu' ? probe.gpuPainted : probe.painted,
         paintedVisible: state.renderer === 'webgpu' ? probe.gpuVisible : probe.paintedVisible, decodeErrors: state.stats.decodeErrors, via: state.videoVia, renderer: state.renderer, codec: state.streamState?.codec, errors: probe.errors, frames: state.stats.frames, packets: probe.packets };
     });
+    if (nvidiaBrowser && result.renderer === 'webgpu') {
+      assert.match(result.adapter?.vendor ?? '', /nvidia/i, name + ': NVIDIA WebGPU device');
+      assert.equal(result.adapter.isFallbackAdapter, false, name + ': hardware WebGPU device');
+    }
     assert.deepEqual(result.canvas, size ?? result.configured, name);
     assert.equal(result.codec, codec);
     assert.deepEqual(result.colorSpace, { primaries: 'bt709', transfer: 'bt709', matrix: 'bt709', fullRange: false }, name + ': coded color metadata');
@@ -292,6 +303,7 @@ try {
   const glx = await readFile(root + '/glx-info', 'utf8');
   assert.match(glx, /direct rendering: Yes/);
   assert.doesNotMatch(glx, /llvmpipe|softpipe/i, 'Xwayland client uses GPU rendering');
+  if (/verified video encoders.*Nvenc/.test(sourceLog)) assert.match(glx, /OpenGL renderer string:.*NVIDIA/, 'NVENC source uses NVIDIA Xwayland rendering');
   console.log(glx.split('\n').filter(line => /renderer string|vendor string/.test(line)).join('\n'));
   for (const [cmd, title] of [['glxgears -geometry 640x480', 'glxgears'], ['eglgears_wayland', 'EGL Gears']]) {
     const previous = await main.evaluate(() => elsewhere.store.get().windows.map(w => w.id));

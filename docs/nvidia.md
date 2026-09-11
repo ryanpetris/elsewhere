@@ -9,13 +9,23 @@ See the [NVIDIA setup](../README.md#nvidia) for native and Docker requirements.
 Docker checks used an RTX 3070 Ti Laptop GPU, NVIDIA 610.57.04, FFmpeg 9.0.1, Arch Linux and
 Chromium 152. The headed viewer ran on a separate Intel GPU so Chromium could expose its HEVC
 decoder. H.264 and HEVC passed. Startup checks an initial key, a delta frame and a requested recovery key
-with increasing timestamps; NVENC forces IDRs for all three candidate codecs. The AV1 encoder probe correctly rejected this GPU; AV1 encoding
-still needs validation on hardware that supports it. Multiple physical NVIDIA GPUs and older
-FFmpeg/driver combinations were not tested. The tested FFmpeg library embeds a minimum NVIDIA
+with increasing timestamps; NVENC forces IDRs for all three candidate codecs. The AV1 encoder probe correctly rejected this GPU. Multiple physical NVIDIA GPUs and older
+NVIDIA drivers were not tested. The tested FFmpeg library embeds a minimum NVIDIA
 driver requirement of 610.00, corresponding to its NVENC 13.1 build. The requirement comes from
 FFmpeg's build-time NVENC headers, not Elsewhere's build. Other FFmpeg packages can require a
 different driver. [FFmpeg's driver/API checks](https://github.com/FFmpeg/FFmpeg/blob/n9.0.1/libavcodec/nvenc.c#L215)
 report the required API and minimum driver when initialization fails.
+
+AV1 passed on an RTX 4000 Ada with NVIDIA 610.57.04, an Ubuntu 26.04 host and the Arch
+runtime with FFmpeg 9.0.1 and Chromium 152. The compositor reported NVIDIA GLES; the viewer's
+WebGPU device reported NVIDIA Lovelace with `isFallbackAdapter=false`. Desktop/window video,
+Canvas2D/WebGPU, PiP/popouts, WebSocket/WebRTC, tiny/odd/X11 crops, screenshots, thumbnails,
+quality/effort changes and injected encoder-failure recovery passed. Fresh AV1 recovery keys
+also decoded after 3840×2160 startup and encoder reopening. This validates browser AV1 decoding,
+not browser hardware decoding or sustained 4K throughput.
+
+A Debian 13 container on the same Ada host runs the v0.10.0 package with FFmpeg 7.1.5. H.264, HEVC and AV1
+startup probes pass, and OpenArena renders through NVIDIA with private session audio.
 
 | Surface or behavior | Check |
 |---|---|
@@ -102,15 +112,46 @@ CPU percentages use one core as 100% and cover the Elsewhere process, including 
 threads. GPU figures cover the whole device, including the source application's rendering.
 Readback time was not isolated; conversion and encoding share the worker timing above.
 
+Six-second AV1 samples on the Ada rig used 1920×1080 text, scrolling and motion at an 8 Mbit/s
+ceiling. Fast delivered 53.5–53.7 fps with conversion/encode p50 5.3–5.5 ms and p95 5.7–5.9 ms;
+High delivered 53.5–53.8 fps with p50 6.5–6.6 ms and p95 7.0–7.8 ms. No source gaps, losses,
+drops or decode errors occurred. End-to-end p50 was 79–99 ms and p95 85–108 ms with the source
+and browser on the same host. These samples do not measure WAN latency or maximum GPU throughput.
+
+## Docker graphics verification
+
+`Dockerfile.nvidia` extends the standard image with a link from
+`/usr/lib/gbm/nvidia-drm_gbm.so` to the Ubuntu/Debian runtime path,
+`/usr/lib/x86_64-linux-gnu/gbm/nvidia-drm_gbm.so`. On Arch hosts, the NVIDIA runtime replaces
+that link with its native `../libnvidia-allocator.so.1` link. Both paths were checked on their
+respective hosts. The driver backend and allocator library come from the same host installation;
+no driver version is built into the image. Xwayland starts with only `PATH` and `XDG_RUNTIME_DIR`,
+so its backend must be found in the default GBM directory; `GBM_BACKENDS_PATH` does not reach it.
+
+Use `--runtime=nvidia --gpus all` with the capabilities in the README. On the Ubuntu rig,
+`--gpus all` with the default runc runtime exposed NVENC but omitted NVIDIA EGL vendor and Vulkan
+ICD registrations. Even with the NVIDIA runtime, the Arch default GBM directory did not find the
+Ubuntu backend. Both conditions must be correct to obtain NVIDIA rendering.
+
+Require a `GL Renderer:` line naming NVIDIA in the compositor log in addition to the NVENC probe. For an
+accelerated X11 client, run `glxinfo -B` inside the Elsewhere session and require NVIDIA direct
+rendering. When testing NVIDIA WebGPU, use `ELSEWHERE_BROWSER_NVIDIA=1` below: it enables the
+Chromium Vulkan/ANGLE path and asserts the vendor and non-fallback status of the device that
+actually paints each WebGPU viewer. A successful `nvidia-smi`, encoder probe or SwiftShader
+WebGPU check alone does not satisfy these rendering checks.
+
 ## Running the checks
 
 Build the viewer and release binary in the Docker build image. Mount that checkout at `/src` in
-a GPU runtime image containing Chromium, Playwright dependencies, FFmpeg, Foot, Wayland development
+a GPU runtime image. Start it with `--runtime=nvidia --gpus all` and the README capabilities;
+on Ubuntu/Debian hosts it needs the same GBM link as `Dockerfile.nvidia`. Include Chromium,
+Playwright dependencies, FFmpeg, Foot, Wayland development
 tools, X11 development headers, a C compiler, Mesa demo clients (`glxinfo`, `glxgears`, `eglgears_wayland`), GTK 3 and Python GI/Cairo. From `/src/web`:
 
 ```sh
 ELSEWHERE_RENDER_NODE=/dev/dri/renderD129 node checks/gpu-surfaces.mjs
 ELSEWHERE_RENDER_NODE=/dev/dri/renderD129 ELSEWHERE_CODEC=hevc node checks/gpu-surfaces.mjs
+ELSEWHERE_RENDER_NODE=/dev/dri/renderD129 ELSEWHERE_BROWSER_RENDER_NODE=/dev/dri/renderD129 ELSEWHERE_BROWSER_NVIDIA=1 ELSEWHERE_CODEC=av1 node checks/gpu-surfaces.mjs
 ELSEWHERE_RENDER_NODE=/dev/dri/renderD129 node checks/hevc-browser.mjs
 ELSEWHERE_RENDER_NODE=/dev/dri/renderD129 node checks/screenshot-sizing.mjs
 ELSEWHERE_RENDER_NODE=/dev/dri/renderD129 node checks/thumbnails.mjs
@@ -123,7 +164,8 @@ ELSEWHERE_RENDER_NODE=/dev/dri/renderD129 BROADCAST_GPU=1 node checks/broadcasts
 ELSEWHERE_RENDER_NODE=/dev/dri/renderD129 EFFORT_CODECS=h264 EFFORT_SIZE=1920x1080 EFFORT_BITRATE=8000 node checks/effort-benchmark.mjs
 ```
 
-Replace the node with the GPU being tested. `ELSEWHERE_BROWSER_RENDER_NODE` selects the separate
+Replace the node with the GPU being tested. The AV1 command requires an AV1-capable NVIDIA GPU.
+The surface check requires NVIDIA GLES whenever the source uses NVENC. `ELSEWHERE_BROWSER_RENDER_NODE` selects the separate
 browser host for the surface/HEVC checks and defaults to `/dev/dri/renderD128`. Run checks that use
 the same listen ports sequentially. The decoration fixture also needs fetched Wayland protocol
 sources in `CARGO_HOME/registry/src`. For the compositor retry fixture, set `ELSEWHERE_MEMORY_FRAMES=1` with the NVIDIA render node.
