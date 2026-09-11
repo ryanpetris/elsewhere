@@ -36,10 +36,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: debian-trixie
-            image: debian:trixie
-          - name: ubuntu-current
-            image: ubuntu:latest
+          - name: debian-13
+            image: debian:13
+          - name: ubuntu-26.04
+            image: ubuntu:26.04
     container: ${{ matrix.image }}
     steps:
       - name: Build dependencies
@@ -83,10 +83,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: debian-trixie
-            image: debian:trixie
-          - name: ubuntu-current
-            image: ubuntu:latest
+          - name: debian-13
+            image: debian:13
+          - name: ubuntu-26.04
+            image: ubuntu:26.04
     container: ${{ matrix.image }}
     env:
       ELSEWHERE_VERSION: ${{ needs.version.outputs.version }}

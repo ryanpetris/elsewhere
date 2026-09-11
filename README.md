@@ -10,8 +10,8 @@ Design notes: [docs/architecture.md](docs/architecture.md), [docs/protocol.md](d
 
 ## Install
 
-Releases made from `vX.Y.Z` tags carry separate native packages and tarballs for Debian stable
-and current Ubuntu, plus an Arch package. Choose the artifact for your distribution;
+Releases made from `vX.Y.Z` tags carry separate native packages and tarballs for Debian 13
+and Ubuntu 26.04, plus an Arch package. Choose the artifact for your distribution;
 FFmpeg shared-library ABIs differ between releases.
 Building from source needs Rust stable, Node 24 for the viewer, Clang, pkg-config, `glib-compile-schemas` and the development
 packages for FFmpeg, libva, PipeWire, libgbm, libEGL and libxkbcommon; `make` builds the viewer and then
