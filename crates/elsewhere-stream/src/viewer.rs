@@ -279,7 +279,10 @@ fn run(shared: &Shared, encoders: &Encoders, tx: &mpsc::Sender<StreamMsg>, redra
                 Converter::Software(converter) => converter.convert(pending.frame)?,
                 Converter::Hardware(converter) => converter.convert(pending.frame)?,
             };
+            let converted = Instant::now();
+            let conversion_us = converted.duration_since(started).as_micros() as u64;
             let packets = running.encoder.encode(frame, requested_key || running.info.is_some())?;
+            let encode_only_us = converted.elapsed().as_micros() as u64;
             let mut messages = Vec::new();
             for packet in packets {
                 let keyframe = packet.is_key();
@@ -292,7 +295,7 @@ fn run(shared: &Shared, encoders: &Encoders, tx: &mpsc::Sender<StreamMsg>, redra
                 }
                 let packet_pts = packet.pts().and_then(|pts| u64::try_from(pts).ok()).context("invalid encoded video timestamp")?;
                 messages.push(StreamMsg::Frame(epoch, EncodedFrame { stream_id: running.stream_id, keyframe, pts_us: packet_pts, data: Bytes::copy_from_slice(data) }));
-                tracing::debug!(stream_id = running.stream_id, seq, pts_us, keyframe, bytes = data.len(), encode_us = started.elapsed().as_micros() as u64, submit_to_packet_us = pending.submitted.elapsed().as_micros() as u64, "ffmpeg encoded");
+                tracing::debug!(stream_id = running.stream_id, seq, pts_us, keyframe, bytes = data.len(), conversion_us, encode_only_us, encode_us = started.elapsed().as_micros() as u64, submit_to_packet_us = pending.submitted.elapsed().as_micros() as u64, "ffmpeg encoded");
             }
             Ok(messages)
         })();

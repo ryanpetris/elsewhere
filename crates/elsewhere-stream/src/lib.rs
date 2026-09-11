@@ -18,7 +18,7 @@ use elsewhere_core::Codec;
 pub(crate) fn init() -> anyhow::Result<()> {
     static INITIALIZED: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
     INITIALIZED.get_or_init(|| {
-        ffmpeg_next::log::set_level(ffmpeg_next::log::Level::Quiet);
+        ffmpeg_next::log::set_level(ffmpeg_next::log::Level::Error);
         ffmpeg_next::init().map_err(|e| e.to_string())?;
         let result = unsafe { ffmpeg_next::ffi::avformat_network_init() };
         if result < 0 { return Err(ffmpeg_next::Error::from(result).to_string()); }

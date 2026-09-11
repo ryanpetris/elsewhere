@@ -82,7 +82,7 @@ use smithay::{
 };
 
 pub struct Config {
-    /// The GPU's render node; none renders in software (llvmpipe) and reads frames back for the CPU encoders.
+    /// The GPU's render node; none uses surfaceless EGL and reads frames back for the CPU encoders.
     pub render_node: Option<PathBuf>,
     pub socket_name: String,
     /// Output size until a viewer connects and resizes it.

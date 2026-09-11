@@ -1,6 +1,6 @@
 //! The renderer and what it renders into: a render node's GBM device with dmabuf swapchains the encoders
 //! import, or textures read back into memory for NVENC and CPU encoders. Without a render node the
-//! context uses Mesa's surfaceless platform.
+//! context uses surfaceless EGL.
 
 use std::{fs::OpenOptions, os::fd::{AsFd, OwnedFd}, path::Path, time::Duration};
 
@@ -63,8 +63,8 @@ impl Gpu {
         let Some(render_node) = render_node else {
             // Safety: the display is only used from this thread and outlives the renderer through the context.
             let renderer = unsafe { EGLDisplay::new(EGLSurfacelessDisplay).and_then(|egl| EGLContext::new(&egl)).map_err(anyhow::Error::from).and_then(|ctx| Ok(GlesRenderer::new(ctx)?)) }
-                .context("Mesa's surfaceless EGL platform (no render node; LIBGL_ALWAYS_SOFTWARE=1 forces llvmpipe)")?;
-            tracing::info!("no GPU: rendering with Mesa's surfaceless platform, frames read back into memory");
+                .context("surfaceless EGL platform (no render node)")?;
+            tracing::info!("rendering with surfaceless EGL, frames read back into memory");
             return Self::memory(None, renderer, geo, validate);
         };
         let node = DrmNode::from_path(render_node)?;
@@ -195,6 +195,7 @@ impl Targets {
 
 /// The framebuffer's pixels, 4 bytes each in `fourcc`'s order, rows top first (GL may give them bottom first).
 pub fn read_pixels(renderer: &mut GlesRenderer, fb: &GlesTarget<'_>, size: Size<i32, Buffer>, fourcc: Fourcc) -> Result<Vec<u8>> {
+    let started = std::time::Instant::now();
     let mapping = renderer.copy_framebuffer(fb, Rectangle::from_size(size), fourcc).context("copy framebuffer")?;
     let data = renderer.map_texture(&mapping).context("map texture")?;
     let (w, h) = (size.w as usize, size.h as usize);
@@ -204,6 +205,7 @@ pub fn read_pixels(renderer: &mut GlesRenderer, fb: &GlesTarget<'_>, size: Size<
         let src = if mapping.flipped() { y } else { h - 1 - y };
         out[y * stride..(y + 1) * stride].copy_from_slice(&data[src * stride..(src + 1) * stride]);
     }
+    tracing::debug!(width = size.w, height = size.h, bytes = out.len(), readback_us = started.elapsed().as_micros() as u64, "framebuffer readback");
     Ok(out)
 }
 

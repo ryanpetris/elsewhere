@@ -51,8 +51,8 @@ struct Cli {
     /// `--exec 'dbus-run-session -- gnome-shell --devkit'`.
     #[arg(long)]
     kiosk: bool,
-    /// The GPU's render node. `none`, or the default node not being there, renders with Mesa's llvmpipe
-    /// (no GPU at all: a VPS, a container without devices) and encodes in software.
+    /// The GPU's render node. `none`, or a missing default node, uses surfaceless EGL and CPU encoding.
+    /// See the README for forcing Mesa software rendering when GPU drivers are installed.
     #[arg(long, default_value = DEFAULT_RENDER_NODE)]
     render_node: PathBuf,
     #[arg(long, default_value = "elsewhere")]
@@ -178,10 +178,10 @@ fn main() -> Result<()> {
         Some("none") => None,
         _ if cli.render_node.exists() => Some(cli.render_node.clone()),
         Some(DEFAULT_RENDER_NODE) => None,
-        _ => anyhow::bail!("render node {} isn't there (--render-node none renders without a GPU)", cli.render_node.display()),
+        _ => anyhow::bail!("render node {} isn't there (--render-node none renders without a DRM node)", cli.render_node.display()),
     };
     if render_node.is_none() {
-        tracing::info!("no GPU ({}): rendering in software, encoding in software", cli.render_node.display());
+        tracing::info!("no render node ({}): rendering with surfaceless EGL, encoding in software", cli.render_node.display());
     }
     let software = cli.software_encoding || render_node.is_none();
     let encoders = elsewhere_stream::Encoders::probe(render_node.as_deref(), software, &allowed)?;

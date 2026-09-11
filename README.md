@@ -324,7 +324,7 @@ docker run --rm --runtime=nvidia --gpus all --device /dev/dri --shm-size 1g \
 
 The host must initialize `/dev/nvidia-modeset` before creating a headless container; if needed,
 run `sudo nvidia-modprobe -m` on the host. Passing only `/dev/dri` does not supply NVENC or CUDA.
-Check the startup log for a `GL Renderer:` line naming NVIDIA and the verified NVENC encoders.
+Check the startup log for a `GL Vendor:` line naming NVIDIA and the verified NVENC encoders.
 `nvidia-smi` or successful encoding alone does not establish GPU rendering: a missing EGL/GBM
 setup can leave the compositor on llvmpipe. Render-node numbers can change after a reboot;
 check which device belongs to NVIDIA before starting the container.
@@ -337,8 +337,9 @@ server renders with Mesa's llvmpipe through the surfaceless EGL platform and enc
 `--render-node none`, or nothing (a default node that isn't there means the same). Frames are read back
 into memory for the software encoders, clients draw into shared memory (there is no dmabuf global to
 offer them GPU buffers), and X11 clients render in software too. The same binary with the node present
-behaves as before. If the surfaceless platform picks a GPU driver you don't want, `LIBGL_ALWAYS_SOFTWARE=1`
-in the environment forces llvmpipe.
+behaves as before. To select CPU rendering explicitly, set
+`__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json` and
+`LIBGL_ALWAYS_SOFTWARE=1` in the environment. These select Mesa and force llvmpipe.
 
 ## Files
 
@@ -504,7 +505,7 @@ Useful flags: `--no-tls` (localhost or HTTPS proxy), `--url-prefix`, `--proxy-st
 `--codecs h264,hevc,av1,vp9,vp8` (allowlist applied before probing; omitted means all codec families;
 its order does not override the browser's preferences; no usable encoder stops startup),
 `--software-encoding`, `--exec`, `--kiosk`, `--elements`, `--no-audio`, `--webcam`, `--no-rtc`, `--rtc-port`, `--rtc-addr`, `--stun`,
-`--turn`, `--turn-user`, `--turn-pass`, `--socket-name`, `--render-node` (`none` for no GPU). `--help`
+`--turn`, `--turn-user`, `--turn-pass`, `--socket-name`, `--render-node` (`none` for no DRM node). `--help`
 lists them all.
 
 Games and other clients that lock the pointer get raw mouse deltas: the page mirrors the lock with the

@@ -1,0 +1,3623 @@
+{
+  "hardware": {
+    "gpu": "RTX 3070 Ti Laptop GPU",
+    "driver": "610.57.04",
+    "host": "Arch Linux",
+    "runtime": "Arch Linux Docker",
+    "ffmpeg": "9.0.1",
+    "chromium": "152.0.7977.82",
+    "cpu": "Intel Core i7-12700H"
+  },
+  "binary_sha256": "2786721b795e77658ef385e61aacb8f5eeb00e66117d18c5b619da2b5c69be30",
+  "sample_seconds": 10,
+  "notes": [
+    "Runs are sequential on the same GPU, with no competing validation workloads.",
+    "Timing pairs are p50/p95 milliseconds. CPU, RSS and GPU summary pairs are median/peak.",
+    "CPU covers the Elsewhere process; one core is 100 percent. GPU counters cover the device.",
+    "Readback includes pending GPU compositing, map and row copy.",
+    "Per-viewer decode counters are independent. Conversion/encoding timings pool all stream workers.",
+    "NVENC uses a nominal 60 Hz compositor; explicit CPU encoding uses 30 Hz. This compares the supported modes at their respective source rates."
+  ],
+  "samples": [
+    {
+      "codec": "h264",
+      "effort": "fast",
+      "scene": "text",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 1,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 50.80187269648371,
+          "actual_kbps": 6096.224723578046,
+          "end_to_end_ms": [
+            93,
+            103
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        45.995288426634765,
+        52.948537674829076
+      ],
+      "rss_bytes": [
+        494505984,
+        494505984
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 50.80187269648371,
+      "actual_kbps": 6096.224723578046,
+      "delivered_fps": 50.80187269648371,
+      "readback_ms": [
+        2.378,
+        3.01
+      ],
+      "conversion_ms": [
+        4.527,
+        7.39
+      ],
+      "encode_only_ms": [
+        3.556,
+        3.828
+      ],
+      "encoder_ms": [
+        8.074,
+        11.065
+      ],
+      "end_to_end_ms": [
+        93,
+        103
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 38.36169696463504,
+      "capture_sequence": 150,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.039,
+      "setting": "preset=p1",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            8,
+            9
+          ],
+          "encoder_percent": [
+            11,
+            11
+          ],
+          "memory_mib": [
+            377,
+            378
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "high",
+      "scene": "text",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 1,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 50.174912543728134,
+          "actual_kbps": 6020.989505247376,
+          "end_to_end_ms": [
+            111,
+            124
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        54.97465552933306,
+        58.02378464561181
+      ],
+      "rss_bytes": [
+        500842496,
+        500842496
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 50.174912543728134,
+      "actual_kbps": 6020.989505247376,
+      "delivered_fps": 50.174912543728134,
+      "readback_ms": [
+        2.649,
+        3.005
+      ],
+      "conversion_ms": [
+        6.471,
+        7.986
+      ],
+      "encode_only_ms": [
+        9.41,
+        9.612
+      ],
+      "encoder_ms": [
+        15.881,
+        17.447
+      ],
+      "end_to_end_ms": [
+        111,
+        124
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 38.326466313007266,
+      "capture_sequence": 810,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.005,
+      "setting": "preset=p5",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            8,
+            9
+          ],
+          "encoder_percent": [
+            40,
+            41
+          ],
+          "memory_mib": [
+            399,
+            399
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "fast",
+      "scene": "scroll",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 1,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 49.27043773735758,
+          "actual_kbps": 5892.954627223666,
+          "end_to_end_ms": [
+            108,
+            127
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        45.992495864374604,
+        51.02328912110984
+      ],
+      "rss_bytes": [
+        498864128,
+        498933760
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 49.27043773735758,
+      "actual_kbps": 5892.954627223666,
+      "delivered_fps": 49.27043773735758,
+      "readback_ms": [
+        2.748,
+        3.789
+      ],
+      "conversion_ms": [
+        4.334,
+        7.129
+      ],
+      "encode_only_ms": [
+        3.509,
+        3.751
+      ],
+      "encoder_ms": [
+        7.843,
+        10.835
+      ],
+      "end_to_end_ms": [
+        108,
+        127
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 40.106047504354656,
+      "capture_sequence": 1470,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.006,
+      "setting": "preset=p1",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            8,
+            9
+          ],
+          "encoder_percent": [
+            12,
+            15
+          ],
+          "memory_mib": [
+            399,
+            399
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "high",
+      "scene": "scroll",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 1,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 50.44955044955045,
+          "actual_kbps": 6053.946053946054,
+          "end_to_end_ms": [
+            113,
+            135
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        51.98330135212365,
+        54.976049958715855
+      ],
+      "rss_bytes": [
+        499392512,
+        499392512
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 50.44955044955045,
+      "actual_kbps": 6053.946053946054,
+      "delivered_fps": 50.44955044955045,
+      "readback_ms": [
+        2.564,
+        3.014
+      ],
+      "conversion_ms": [
+        6.132,
+        7.765
+      ],
+      "encode_only_ms": [
+        9.198,
+        9.419
+      ],
+      "encoder_ms": [
+        15.288,
+        17.026
+      ],
+      "end_to_end_ms": [
+        113,
+        135
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 40.10586214585389,
+      "capture_sequence": 2130,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.01,
+      "setting": "preset=p5",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            8,
+            9
+          ],
+          "encoder_percent": [
+            40,
+            44
+          ],
+          "memory_mib": [
+            399,
+            399
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "fast",
+      "scene": "motion",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 1,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 49.670197881271235,
+          "actual_kbps": 5941.127323605836,
+          "end_to_end_ms": [
+            105,
+            115
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        43.00759965789746,
+        47.99594127122248
+      ],
+      "rss_bytes": [
+        500011008,
+        500056064
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 49.670197881271235,
+      "actual_kbps": 5941.127323605836,
+      "delivered_fps": 49.670197881271235,
+      "readback_ms": [
+        2.642,
+        3.462
+      ],
+      "conversion_ms": [
+        4.111,
+        6.976
+      ],
+      "encode_only_ms": [
+        3.531,
+        3.767
+      ],
+      "encoder_ms": [
+        7.644,
+        10.669
+      ],
+      "end_to_end_ms": [
+        105,
+        115
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 22.724423257652045,
+      "capture_sequence": 2790,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.006,
+      "setting": "preset=p1",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            9,
+            9
+          ],
+          "encoder_percent": [
+            13,
+            14
+          ],
+          "memory_mib": [
+            399,
+            399
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "high",
+      "scene": "motion",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 1,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 50.77461269365317,
+          "actual_kbps": 6123.529435282358,
+          "end_to_end_ms": [
+            109,
+            119
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        46.021436416910966,
+        49.00362558224248
+      ],
+      "rss_bytes": [
+        537698304,
+        537698304
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 50.77461269365317,
+      "actual_kbps": 6123.529435282358,
+      "delivered_fps": 50.77461269365317,
+      "readback_ms": [
+        2.419,
+        2.872
+      ],
+      "conversion_ms": [
+        4.891,
+        7.152
+      ],
+      "encode_only_ms": [
+        9.054,
+        9.184
+      ],
+      "encoder_ms": [
+        13.913,
+        16.266
+      ],
+      "end_to_end_ms": [
+        109,
+        119
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 22.732069009639794,
+      "capture_sequence": 3450,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.005,
+      "setting": "preset=p5",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            9,
+            10
+          ],
+          "encoder_percent": [
+            40,
+            41
+          ],
+          "memory_mib": [
+            399,
+            399
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "fast",
+      "scene": "text",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 1,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 26.981113220745478,
+          "actual_kbps": 1220.3241730788448,
+          "end_to_end_ms": [
+            166,
+            170
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        60.99003575290887,
+        62.95307628780896
+      ],
+      "rss_bytes": [
+        364621824,
+        375435264
+      ],
+      "encoder": "libx264",
+      "compositor_hz": 30,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 26.981113220745478,
+      "actual_kbps": 1220.3241730788448,
+      "delivered_fps": 26.981113220745478,
+      "readback_ms": [
+        2.874,
+        3.677
+      ],
+      "conversion_ms": [
+        7.049,
+        8.091
+      ],
+      "encode_only_ms": [
+        3.864,
+        4.462
+      ],
+      "encoder_ms": [
+        10.882,
+        12.213
+      ],
+      "end_to_end_ms": [
+        166,
+        170
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 39.6467406530447,
+      "capture_sequence": 90,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.007,
+      "setting": "preset=superfast",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            3,
+            4
+          ],
+          "encoder_percent": [
+            0,
+            0
+          ],
+          "memory_mib": [
+            160,
+            161
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "high",
+      "scene": "text",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 1,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 23.083841311082242,
+          "actual_kbps": 42.835615069451386,
+          "end_to_end_ms": [
+            215,
+            223
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        79.95581098185626,
+        85.94082621757538
+      ],
+      "rss_bytes": [
+        398135296,
+        398139392
+      ],
+      "encoder": "libx264",
+      "compositor_hz": 30,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 23.083841311082242,
+      "actual_kbps": 42.835615069451386,
+      "delivered_fps": 23.083841311082242,
+      "readback_ms": [
+        9.966,
+        10.52
+      ],
+      "conversion_ms": [
+        5.227,
+        7.285
+      ],
+      "encode_only_ms": [
+        6.106,
+        7.899
+      ],
+      "encoder_ms": [
+        11.123,
+        14.645
+      ],
+      "end_to_end_ms": [
+        215,
+        223
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 39.702435856313784,
+      "capture_sequence": 450,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.007,
+      "setting": "preset=medium",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            21,
+            29
+          ],
+          "encoder_percent": [
+            0,
+            0
+          ],
+          "memory_mib": [
+            172,
+            172
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "fast",
+      "scene": "scroll",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 1,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 22.59096361455418,
+          "actual_kbps": 4548.026389444222,
+          "end_to_end_ms": [
+            217,
+            227
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        70.969036564192,
+        72.90256906995644
+      ],
+      "rss_bytes": [
+        408465408,
+        408465408
+      ],
+      "encoder": "libx264",
+      "compositor_hz": 30,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 22.59096361455418,
+      "actual_kbps": 4548.026389444222,
+      "delivered_fps": 22.59096361455418,
+      "readback_ms": [
+        10.187,
+        10.675
+      ],
+      "conversion_ms": [
+        4.58,
+        6.901
+      ],
+      "encode_only_ms": [
+        5.035,
+        7.643
+      ],
+      "encoder_ms": [
+        9.452,
+        13.91
+      ],
+      "end_to_end_ms": [
+        217,
+        227
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 41.64549781534079,
+      "capture_sequence": 750,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.004,
+      "setting": "preset=superfast",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            24,
+            30
+          ],
+          "encoder_percent": [
+            0,
+            0
+          ],
+          "memory_mib": [
+            182,
+            182
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "high",
+      "scene": "scroll",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 1,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 22.890843662534987,
+          "actual_kbps": 4054.2958816473415,
+          "end_to_end_ms": [
+            217,
+            226
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        102.94136480448992,
+        106.01224239976466
+      ],
+      "rss_bytes": [
+        448294912,
+        448294912
+      ],
+      "encoder": "libx264",
+      "compositor_hz": 30,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 22.890843662534987,
+      "actual_kbps": 4054.2958816473415,
+      "delivered_fps": 22.890843662534987,
+      "readback_ms": [
+        9.753,
+        10.111
+      ],
+      "conversion_ms": [
+        3.605,
+        6.38
+      ],
+      "encode_only_ms": [
+        9.662,
+        14.418
+      ],
+      "encoder_ms": [
+        13.158,
+        20.116
+      ],
+      "end_to_end_ms": [
+        217,
+        226
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 41.71594132796066,
+      "capture_sequence": 1050,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.004,
+      "setting": "preset=medium",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            22,
+            30
+          ],
+          "encoder_percent": [
+            0,
+            0
+          ],
+          "memory_mib": [
+            182,
+            182
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "fast",
+      "scene": "motion",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 1,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 22.586448131121326,
+          "actual_kbps": 4446.783130121927,
+          "end_to_end_ms": [
+            172,
+            180
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        65.01545456364249,
+        66.02565975022586
+      ],
+      "rss_bytes": [
+        412209152,
+        415612928
+      ],
+      "encoder": "libx264",
+      "compositor_hz": 30,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 22.586448131121326,
+      "actual_kbps": 4446.783130121927,
+      "delivered_fps": 22.586448131121326,
+      "readback_ms": [
+        10.24,
+        11.799
+      ],
+      "conversion_ms": [
+        3.9,
+        6.516
+      ],
+      "encode_only_ms": [
+        4.05,
+        6.104
+      ],
+      "encoder_ms": [
+        8.008,
+        11.991
+      ],
+      "end_to_end_ms": [
+        172,
+        180
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 22.71249896743042,
+      "capture_sequence": 1350,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.006,
+      "setting": "preset=superfast",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            23,
+            25
+          ],
+          "encoder_percent": [
+            0,
+            0
+          ],
+          "memory_mib": [
+            182,
+            182
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "high",
+      "scene": "motion",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 1,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 22.88855572213893,
+          "actual_kbps": 4405.165417291354,
+          "end_to_end_ms": [
+            214,
+            221
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        92.92875152620418,
+        97.98231458414672
+      ],
+      "rss_bytes": [
+        452169728,
+        452169728
+      ],
+      "encoder": "libx264",
+      "compositor_hz": 30,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 22.88855572213893,
+      "actual_kbps": 4405.165417291354,
+      "delivered_fps": 22.88855572213893,
+      "readback_ms": [
+        9.678,
+        10.03
+      ],
+      "conversion_ms": [
+        3.561,
+        5.754
+      ],
+      "encode_only_ms": [
+        7.491,
+        12.104
+      ],
+      "encoder_ms": [
+        11.168,
+        16.701
+      ],
+      "end_to_end_ms": [
+        214,
+        221
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 22.691102226383126,
+      "capture_sequence": 1650,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.005,
+      "setting": "preset=medium",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            21,
+            30
+          ],
+          "encoder_percent": [
+            0,
+            0
+          ],
+          "memory_mib": [
+            182,
+            182
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "fast",
+      "scene": "text",
+      "width": 3840,
+      "height": 2160,
+      "viewer_count": 1,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 33.579852088746755,
+          "actual_kbps": 12592.4269438337,
+          "end_to_end_ms": [
+            188,
+            204
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        102.95338291412341,
+        105.91374839759627
+      ],
+      "rss_bytes": [
+        768180224,
+        768368640
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 25000,
+      "stream_target_kbps": 25000,
+      "encoder_target_bps": 22500000,
+      "encoder_buffer_bits": 2250000,
+      "source_sequence_fps": 37.87727363581851,
+      "actual_kbps": 12592.4269438337,
+      "delivered_fps": 33.579852088746755,
+      "readback_ms": [
+        8.935,
+        11.958
+      ],
+      "conversion_ms": [
+        16.168,
+        22.388
+      ],
+      "encode_only_ms": [
+        12.796,
+        13.535
+      ],
+      "encoder_ms": [
+        29.041,
+        35.155
+      ],
+      "end_to_end_ms": [
+        188,
+        204
+      ],
+      "source_sequence_gaps": 43,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 40.62976901523706,
+      "capture_sequence": 150,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.006,
+      "setting": "preset=p1",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            18,
+            20
+          ],
+          "encoder_percent": [
+            31,
+            35
+          ],
+          "memory_mib": [
+            953,
+            954
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "high",
+      "scene": "text",
+      "width": 3840,
+      "height": 2160,
+      "viewer_count": 1,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 17.280990909999,
+          "actual_kbps": 6480.36280091899,
+          "end_to_end_ms": [
+            226,
+            242
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        83.96359976437576,
+        87.0143606760575
+      ],
+      "rss_bytes": [
+        771772416,
+        804794368
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 25000,
+      "stream_target_kbps": 25000,
+      "encoder_target_bps": 22500000,
+      "encoder_buffer_bits": 2250000,
+      "source_sequence_fps": 37.3589052042753,
+      "actual_kbps": 6480.36280091899,
+      "delivered_fps": 17.280990909999,
+      "readback_ms": [
+        9.226,
+        13.011
+      ],
+      "conversion_ms": [
+        22.116,
+        28.975
+      ],
+      "encode_only_ms": [
+        35.781,
+        36.53
+      ],
+      "encoder_ms": [
+        57.861,
+        64.349
+      ],
+      "end_to_end_ms": [
+        226,
+        242
+      ],
+      "source_sequence_gaps": 201,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 40.18631408195628,
+      "capture_sequence": 631,
+      "capture_phase": 31,
+      "capture_phase_skip": 1,
+      "seconds": 10.011,
+      "setting": "preset=p5",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            16,
+            17
+          ],
+          "encoder_percent": [
+            59,
+            62
+          ],
+          "memory_mib": [
+            1001,
+            1001
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "fast",
+      "scene": "scroll",
+      "width": 3840,
+      "height": 2160,
+      "viewer_count": 1,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 33.27670630558609,
+          "actual_kbps": 12478.746477465775,
+          "end_to_end_ms": [
+            192,
+            211
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        102.98415207778918,
+        105.88256860786902
+      ],
+      "rss_bytes": [
+        841957376,
+        854290432
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 25000,
+      "stream_target_kbps": 25000,
+      "encoder_target_bps": 22500000,
+      "encoder_buffer_bits": 2250000,
+      "source_sequence_fps": 37.573698411112225,
+      "actual_kbps": 12478.746477465775,
+      "delivered_fps": 33.27670630558609,
+      "readback_ms": [
+        8.863,
+        12.661
+      ],
+      "conversion_ms": [
+        16.413,
+        22.001
+      ],
+      "encode_only_ms": [
+        12.971,
+        14.093
+      ],
+      "encoder_ms": [
+        29.616,
+        35.463
+      ],
+      "end_to_end_ms": [
+        192,
+        211
+      ],
+      "source_sequence_gaps": 43,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 41.387214697065716,
+      "capture_sequence": 1170,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.007,
+      "setting": "preset=p1",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            20,
+            20
+          ],
+          "encoder_percent": [
+            30,
+            37
+          ],
+          "memory_mib": [
+            1001,
+            1001
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "high",
+      "scene": "scroll",
+      "width": 3840,
+      "height": 2160,
+      "viewer_count": 1,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 17.491254372813593,
+          "actual_kbps": 6596.692053973013,
+          "end_to_end_ms": [
+            228,
+            242
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        80.02912179713081,
+        84.97161132454303
+      ],
+      "rss_bytes": [
+        795639808,
+        795844608
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 25000,
+      "stream_target_kbps": 25000,
+      "encoder_target_bps": 22500000,
+      "encoder_buffer_bits": 2250000,
+      "source_sequence_fps": 37.38130934532733,
+      "actual_kbps": 6596.692053973013,
+      "delivered_fps": 17.491254372813593,
+      "readback_ms": [
+        8.982,
+        12.379
+      ],
+      "conversion_ms": [
+        21.543,
+        27.823
+      ],
+      "encode_only_ms": [
+        35.446,
+        36.364
+      ],
+      "encoder_ms": [
+        56.963,
+        63.236
+      ],
+      "end_to_end_ms": [
+        228,
+        242
+      ],
+      "source_sequence_gaps": 199,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 40.50944207656354,
+      "capture_sequence": 1651,
+      "capture_phase": 31,
+      "capture_phase_skip": 1,
+      "seconds": 10.005,
+      "setting": "preset=p5",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            17,
+            17
+          ],
+          "encoder_percent": [
+            57,
+            62
+          ],
+          "memory_mib": [
+            1001,
+            1001
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "fast",
+      "scene": "motion",
+      "width": 3840,
+      "height": 2160,
+      "viewer_count": 1,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 33.78310844577711,
+          "actual_kbps": 12550.908545727136,
+          "end_to_end_ms": [
+            200,
+            220
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        101.02909061943907,
+        102.97296485996883
+      ],
+      "rss_bytes": [
+        834121728,
+        846741504
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 25000,
+      "stream_target_kbps": 25000,
+      "encoder_target_bps": 22500000,
+      "encoder_buffer_bits": 2250000,
+      "source_sequence_fps": 37.78110944527736,
+      "actual_kbps": 12550.908545727136,
+      "delivered_fps": 33.78310844577711,
+      "readback_ms": [
+        8.929,
+        13.134
+      ],
+      "conversion_ms": [
+        16.031,
+        21.917
+      ],
+      "encode_only_ms": [
+        12.949,
+        14.173
+      ],
+      "encoder_ms": [
+        29.142,
+        34.931
+      ],
+      "end_to_end_ms": [
+        200,
+        220
+      ],
+      "source_sequence_gaps": 40,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 22.64490257098172,
+      "capture_sequence": 2130,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.005,
+      "setting": "preset=p1",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            20,
+            20
+          ],
+          "encoder_percent": [
+            31,
+            39
+          ],
+          "memory_mib": [
+            1003,
+            1003
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "high",
+      "scene": "motion",
+      "width": 3840,
+      "height": 2160,
+      "viewer_count": 1,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 19.10828025477707,
+          "actual_kbps": 7125.46974522293,
+          "end_to_end_ms": [
+            218,
+            239
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        74.99667329756593,
+        78.96334387339708
+      ],
+      "rss_bytes": [
+        799236096,
+        799522816
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 25000,
+      "stream_target_kbps": 25000,
+      "encoder_target_bps": 22500000,
+      "encoder_buffer_bits": 2250000,
+      "source_sequence_fps": 38.515127388535035,
+      "actual_kbps": 7125.46974522293,
+      "delivered_fps": 19.10828025477707,
+      "readback_ms": [
+        8.15,
+        12.235
+      ],
+      "conversion_ms": [
+        17.294,
+        23.184
+      ],
+      "encode_only_ms": [
+        34.666,
+        35.69
+      ],
+      "encoder_ms": [
+        52.011,
+        58.338
+      ],
+      "end_to_end_ms": [
+        218,
+        239
+      ],
+      "source_sequence_gaps": 195,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 22.65136833715676,
+      "capture_sequence": 2671,
+      "capture_phase": 31,
+      "capture_phase_skip": 1,
+      "seconds": 10.048,
+      "setting": "preset=p5",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            18,
+            19
+          ],
+          "encoder_percent": [
+            62,
+            64
+          ],
+          "memory_mib": [
+            1003,
+            1003
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "fast",
+      "scene": "text",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 3,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 49.49213304122685,
+          "actual_kbps": 5927.106154152559,
+          "end_to_end_ms": [
+            99,
+            120
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 1,
+          "delivered_fps": 49.52172180151455,
+          "actual_kbps": 5942.606616181746,
+          "end_to_end_ms": [
+            99,
+            117
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 2,
+          "delivered_fps": 49.417156520872766,
+          "actual_kbps": 5930.058782504731,
+          "end_to_end_ms": [
+            99,
+            114
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        114.97682963933748,
+        123.9503359512419
+      ],
+      "rss_bytes": [
+        876236800,
+        876240896
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 49.49213304122685,
+      "actual_kbps": 5927.106154152559,
+      "delivered_fps": 49.49213304122685,
+      "readback_ms": [
+        2.844,
+        3.947
+      ],
+      "conversion_ms": [
+        4.951,
+        8.622
+      ],
+      "encode_only_ms": [
+        5.581,
+        8.1
+      ],
+      "encoder_ms": [
+        10.784,
+        14.912
+      ],
+      "end_to_end_ms": [
+        99,
+        120
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 38.365816813273476,
+      "capture_sequence": 330,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.042,
+      "setting": "preset=p1",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            12,
+            12
+          ],
+          "encoder_percent": [
+            35,
+            36
+          ],
+          "memory_mib": [
+            806,
+            806
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "high",
+      "scene": "text",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 3,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 50.27376804380289,
+          "actual_kbps": 6032.852165256347,
+          "end_to_end_ms": [
+            113,
+            126
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 1,
+          "delivered_fps": 50.09461209042924,
+          "actual_kbps": 6011.353450851509,
+          "end_to_end_ms": [
+            113,
+            133
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 2,
+          "delivered_fps": 50.14955134596212,
+          "actual_kbps": 6017.946161515454,
+          "end_to_end_ms": [
+            112,
+            132
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        125.99243742993589,
+        134.0695021662008
+      ],
+      "rss_bytes": [
+        876216320,
+        876228608
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 50.27376804380289,
+      "actual_kbps": 6032.852165256347,
+      "delivered_fps": 50.27376804380289,
+      "readback_ms": [
+        2.669,
+        3.338
+      ],
+      "conversion_ms": [
+        5.55,
+        9.63
+      ],
+      "encode_only_ms": [
+        10.8,
+        15.277
+      ],
+      "encoder_ms": [
+        16.156,
+        22.203
+      ],
+      "end_to_end_ms": [
+        113,
+        126
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 38.3336843699996,
+      "capture_sequence": 1050,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.045,
+      "setting": "preset=p5",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            11,
+            12
+          ],
+          "encoder_percent": [
+            77,
+            79
+          ],
+          "memory_mib": [
+            828,
+            828
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "fast",
+      "scene": "scroll",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 3,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 50.26481462975917,
+          "actual_kbps": 6031.777755571101,
+          "end_to_end_ms": [
+            111,
+            132
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 1,
+          "delivered_fps": 50.359712230215834,
+          "actual_kbps": 6043.1654676259,
+          "end_to_end_ms": [
+            110,
+            132
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 2,
+          "delivered_fps": 50.359712230215834,
+          "actual_kbps": 6043.1654676259,
+          "end_to_end_ms": [
+            111,
+            132
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        119.99814590864766,
+        131.0128876067409
+      ],
+      "rss_bytes": [
+        944914432,
+        945963008
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 50.26481462975917,
+      "actual_kbps": 6031.777755571101,
+      "delivered_fps": 50.26481462975917,
+      "readback_ms": [
+        2.572,
+        3.489
+      ],
+      "conversion_ms": [
+        5.498,
+        10.014
+      ],
+      "encode_only_ms": [
+        5.329,
+        8.137
+      ],
+      "encoder_ms": [
+        11.215,
+        15.94
+      ],
+      "end_to_end_ms": [
+        111,
+        132
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 40.07134782865913,
+      "capture_sequence": 1770,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.007,
+      "setting": "preset=p1",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            12,
+            13
+          ],
+          "encoder_percent": [
+            36,
+            38
+          ],
+          "memory_mib": [
+            828,
+            828
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "high",
+      "scene": "scroll",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 3,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 50.92869982025165,
+          "actual_kbps": 6111.4439784301985,
+          "end_to_end_ms": [
+            116,
+            137
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 1,
+          "delivered_fps": 50.83899320815022,
+          "actual_kbps": 6127.940870954853,
+          "end_to_end_ms": [
+            116,
+            137
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 2,
+          "delivered_fps": 50.94905094905095,
+          "actual_kbps": 6113.886113886114,
+          "end_to_end_ms": [
+            116,
+            138
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        125.963570075898,
+        133.92656070080707
+      ],
+      "rss_bytes": [
+        820711424,
+        820711424
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 50.92869982025165,
+      "actual_kbps": 6111.4439784301985,
+      "delivered_fps": 50.92869982025165,
+      "readback_ms": [
+        2.365,
+        2.96
+      ],
+      "conversion_ms": [
+        5.964,
+        9.794
+      ],
+      "encode_only_ms": [
+        10.19,
+        14.928
+      ],
+      "encoder_ms": [
+        15.961,
+        22.236
+      ],
+      "end_to_end_ms": [
+        116,
+        137
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 40.1045673128828,
+      "capture_sequence": 2490,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.014,
+      "setting": "preset=p5",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            11,
+            12
+          ],
+          "encoder_percent": [
+            78,
+            81
+          ],
+          "memory_mib": [
+            828,
+            828
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "fast",
+      "scene": "motion",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 3,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 50.35899481451934,
+          "actual_kbps": 6034.89429597128,
+          "end_to_end_ms": [
+            106,
+            118
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 1,
+          "delivered_fps": 50.25426263834879,
+          "actual_kbps": 6035.287266925915,
+          "end_to_end_ms": [
+            106,
+            116
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 2,
+          "delivered_fps": 50.33389813615071,
+          "actual_kbps": 6034.630519286355,
+          "end_to_end_ms": [
+            106,
+            117
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        101.0379567271271,
+        120.0016595029479
+      ],
+      "rss_bytes": [
+        856838144,
+        856838144
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 50.35899481451934,
+      "actual_kbps": 6034.89429597128,
+      "delivered_fps": 50.35899481451934,
+      "readback_ms": [
+        2.624,
+        3.187
+      ],
+      "conversion_ms": [
+        4.492,
+        7.889
+      ],
+      "encode_only_ms": [
+        5.804,
+        8.594
+      ],
+      "encoder_ms": [
+        10.258,
+        14.035
+      ],
+      "end_to_end_ms": [
+        106,
+        118
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 22.71997745927074,
+      "capture_sequence": 3210,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.028,
+      "setting": "preset=p1",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            12,
+            13
+          ],
+          "encoder_percent": [
+            38,
+            40
+          ],
+          "memory_mib": [
+            828,
+            828
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "high",
+      "scene": "motion",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 3,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 51.14656031904288,
+          "actual_kbps": 6153.939780658026,
+          "end_to_end_ms": [
+            110,
+            121
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 1,
+          "delivered_fps": 51.24115242747482,
+          "actual_kbps": 6159.897118931312,
+          "end_to_end_ms": [
+            110,
+            119
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 2,
+          "delivered_fps": 51.24115242747482,
+          "actual_kbps": 6163.203668627256,
+          "end_to_end_ms": [
+            111,
+            122
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        116.03794522035264,
+        123.04339149809877
+      ],
+      "rss_bytes": [
+        839561216,
+        839561216
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 51.14656031904288,
+      "actual_kbps": 6153.939780658026,
+      "delivered_fps": 51.14656031904288,
+      "readback_ms": [
+        2.377,
+        2.824
+      ],
+      "conversion_ms": [
+        5.432,
+        8.524
+      ],
+      "encode_only_ms": [
+        10.342,
+        14.277
+      ],
+      "encoder_ms": [
+        15.468,
+        21.275
+      ],
+      "end_to_end_ms": [
+        110,
+        121
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 22.72590013870712,
+      "capture_sequence": 3930,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.03,
+      "setting": "preset=p5",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            11,
+            12
+          ],
+          "encoder_percent": [
+            77,
+            80
+          ],
+          "memory_mib": [
+            828,
+            828
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "fast",
+      "scene": "text",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 3,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 26.9165586681288,
+          "actual_kbps": 1455.9545409231382,
+          "end_to_end_ms": [
+            170,
+            177
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 1,
+          "delivered_fps": 26.9165586681288,
+          "actual_kbps": 1453.006878676104,
+          "end_to_end_ms": [
+            170,
+            176
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 2,
+          "delivered_fps": 26.9165586681288,
+          "actual_kbps": 1599.738410926129,
+          "end_to_end_ms": [
+            171,
+            177
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        227.1489936122312,
+        237.99657165938527
+      ],
+      "rss_bytes": [
+        589770752,
+        594976768
+      ],
+      "encoder": "libx264",
+      "compositor_hz": 30,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 26.9165586681288,
+      "actual_kbps": 1455.9545409231382,
+      "delivered_fps": 26.9165586681288,
+      "readback_ms": [
+        2.99,
+        3.655
+      ],
+      "conversion_ms": [
+        6.999,
+        10.473
+      ],
+      "encode_only_ms": [
+        5.966,
+        8.139
+      ],
+      "encoder_ms": [
+        13.031,
+        18.134
+      ],
+      "end_to_end_ms": [
+        170,
+        177
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 39.637037459230996,
+      "capture_sequence": 150,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.031,
+      "setting": "preset=superfast",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            4,
+            4
+          ],
+          "encoder_percent": [
+            0,
+            0
+          ],
+          "memory_mib": [
+            160,
+            160
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "high",
+      "scene": "text",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 3,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 22.886268239056566,
+          "actual_kbps": 77.30161902858285,
+          "end_to_end_ms": [
+            219,
+            227
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 1,
+          "delivered_fps": 22.972433080303635,
+          "actual_kbps": 69.81062724730323,
+          "end_to_end_ms": [
+            218,
+            225
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 2,
+          "delivered_fps": 22.972433080303635,
+          "actual_kbps": 50.36436276468238,
+          "end_to_end_ms": [
+            219,
+            226
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        295.19765372181655,
+        309.70354185921883
+      ],
+      "rss_bytes": [
+        665264128,
+        667394048
+      ],
+      "encoder": "libx264",
+      "compositor_hz": 30,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 22.886268239056566,
+      "actual_kbps": 77.30161902858285,
+      "delivered_fps": 22.886268239056566,
+      "readback_ms": [
+        9.537,
+        10.133
+      ],
+      "conversion_ms": [
+        3.936,
+        7.797
+      ],
+      "encode_only_ms": [
+        11.484,
+        14.273
+      ],
+      "encoder_ms": [
+        15.827,
+        21.27
+      ],
+      "end_to_end_ms": [
+        219,
+        227
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 39.69981547313229,
+      "capture_sequence": 510,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.006,
+      "setting": "preset=medium",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            23,
+            30
+          ],
+          "encoder_percent": [
+            0,
+            0
+          ],
+          "memory_mib": [
+            172,
+            172
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "fast",
+      "scene": "scroll",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 3,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 22.87940853232091,
+          "actual_kbps": 4644.941952242981,
+          "end_to_end_ms": [
+            218,
+            229
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 1,
+          "delivered_fps": 22.87940853232091,
+          "actual_kbps": 4653.453491857328,
+          "end_to_end_ms": [
+            218,
+            228
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 2,
+          "delivered_fps": 22.87940853232091,
+          "actual_kbps": 4614.407033669697,
+          "end_to_end_ms": [
+            218,
+            230
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        229.8555555509143,
+        241.89039003055254
+      ],
+      "rss_bytes": [
+        714977280,
+        714977280
+      ],
+      "encoder": "libx264",
+      "compositor_hz": 30,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 22.87940853232091,
+      "actual_kbps": 4644.941952242981,
+      "delivered_fps": 22.87940853232091,
+      "readback_ms": [
+        9.623,
+        10.289
+      ],
+      "conversion_ms": [
+        3.932,
+        7.835
+      ],
+      "encode_only_ms": [
+        7.651,
+        11.219
+      ],
+      "encoder_ms": [
+        11.862,
+        18.37
+      ],
+      "end_to_end_ms": [
+        218,
+        229
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 41.62075701531923,
+      "capture_sequence": 810,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.009,
+      "setting": "preset=superfast",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            22,
+            29
+          ],
+          "encoder_percent": [
+            0,
+            0
+          ],
+          "memory_mib": [
+            172,
+            172
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "high",
+      "scene": "scroll",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 3,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 22.820129546586944,
+          "actual_kbps": 4008.945490782262,
+          "end_to_end_ms": [
+            230,
+            244
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 1,
+          "delivered_fps": 22.820129546586944,
+          "actual_kbps": 4049.188639760837,
+          "end_to_end_ms": [
+            229,
+            241
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 2,
+          "delivered_fps": 22.903804023102968,
+          "actual_kbps": 4022.09759012149,
+          "end_to_end_ms": [
+            230,
+            243
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        499.13680191726,
+        537.2056041636783
+      ],
+      "rss_bytes": [
+        728297472,
+        731709440
+      ],
+      "encoder": "libx264",
+      "compositor_hz": 30,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 22.820129546586944,
+      "actual_kbps": 4008.945490782262,
+      "delivered_fps": 22.820129546586944,
+      "readback_ms": [
+        9.777,
+        10.325
+      ],
+      "conversion_ms": [
+        3.831,
+        7.028
+      ],
+      "encode_only_ms": [
+        20.513,
+        31.252
+      ],
+      "encoder_ms": [
+        24.906,
+        36.385
+      ],
+      "end_to_end_ms": [
+        230,
+        244
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 41.798266351739045,
+      "capture_sequence": 1110,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.035,
+      "setting": "preset=medium",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            25,
+            29
+          ],
+          "encoder_percent": [
+            0,
+            0
+          ],
+          "memory_mib": [
+            172,
+            172
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "fast",
+      "scene": "motion",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 3,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 22.977022977022976,
+          "actual_kbps": 4524.544255744256,
+          "end_to_end_ms": [
+            215,
+            225
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 1,
+          "delivered_fps": 22.979318613248076,
+          "actual_kbps": 4529.003097212509,
+          "end_to_end_ms": [
+            215,
+            224
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 2,
+          "delivered_fps": 22.974727799420638,
+          "actual_kbps": 4511.410248726402,
+          "end_to_end_ms": [
+            216,
+            225
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        206.0925233835408,
+        223.92185261696943
+      ],
+      "rss_bytes": [
+        745861120,
+        745861120
+      ],
+      "encoder": "libx264",
+      "compositor_hz": 30,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 22.977022977022976,
+      "actual_kbps": 4524.544255744256,
+      "delivered_fps": 22.977022977022976,
+      "readback_ms": [
+        9.481,
+        10.193
+      ],
+      "conversion_ms": [
+        3.732,
+        7.15
+      ],
+      "encode_only_ms": [
+        6.627,
+        9.497
+      ],
+      "encoder_ms": [
+        10.592,
+        15.803
+      ],
+      "end_to_end_ms": [
+        215,
+        225
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 22.716784145432698,
+      "capture_sequence": 1410,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.01,
+      "setting": "preset=superfast",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            27,
+            29
+          ],
+          "encoder_percent": [
+            0,
+            0
+          ],
+          "memory_mib": [
+            172,
+            172
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "high",
+      "scene": "motion",
+      "width": 1920,
+      "height": 1080,
+      "viewer_count": 3,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 22.974727799420638,
+          "actual_kbps": 4466.068125062431,
+          "end_to_end_ms": [
+            225,
+            239
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 1,
+          "delivered_fps": 22.974727799420638,
+          "actual_kbps": 4441.303366297074,
+          "end_to_end_ms": [
+            225,
+            243
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 2,
+          "delivered_fps": 22.977022977022976,
+          "actual_kbps": 4445.612787212787,
+          "end_to_end_ms": [
+            226,
+            242
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        450.8023646369234,
+        480.1431542012794
+      ],
+      "rss_bytes": [
+        764383232,
+        764383232
+      ],
+      "encoder": "libx264",
+      "compositor_hz": 30,
+      "ceiling_kbps": 8000,
+      "stream_target_kbps": 8000,
+      "encoder_target_bps": 7200000,
+      "encoder_buffer_bits": 720000,
+      "source_sequence_fps": 22.974727799420638,
+      "actual_kbps": 4466.068125062431,
+      "delivered_fps": 22.974727799420638,
+      "readback_ms": [
+        9.511,
+        10.033
+      ],
+      "conversion_ms": [
+        3.814,
+        7.233
+      ],
+      "encode_only_ms": [
+        16.923,
+        29.554
+      ],
+      "encoder_ms": [
+        20.947,
+        34.747
+      ],
+      "end_to_end_ms": [
+        225,
+        239
+      ],
+      "source_sequence_gaps": 0,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 22.691331570593913,
+      "capture_sequence": 1710,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.011,
+      "setting": "preset=medium",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            24,
+            26
+          ],
+          "encoder_percent": [
+            0,
+            0
+          ],
+          "memory_mib": [
+            172,
+            172
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "fast",
+      "scene": "text",
+      "width": 3840,
+      "height": 2160,
+      "viewer_count": 3,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 27.266394666135934,
+          "actual_kbps": 10224.883670016918,
+          "end_to_end_ms": [
+            223,
+            244
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 1,
+          "delivered_fps": 27.83300198807157,
+          "actual_kbps": 10437.360636182902,
+          "end_to_end_ms": [
+            219,
+            240
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 2,
+          "delivered_fps": 28.05970149253731,
+          "actual_kbps": 10522.373731343283,
+          "end_to_end_ms": [
+            220,
+            241
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        250.94300281388487,
+        256.0681148867639
+      ],
+      "rss_bytes": [
+        1450344448,
+        1483497472
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 25000,
+      "stream_target_kbps": 25000,
+      "encoder_target_bps": 22500000,
+      "encoder_buffer_bits": 2250000,
+      "source_sequence_fps": 34.431286695193556,
+      "actual_kbps": 10224.883670016918,
+      "delivered_fps": 27.266394666135934,
+      "readback_ms": [
+        11.271,
+        15.3
+      ],
+      "conversion_ms": [
+        19.926,
+        28.643
+      ],
+      "encode_only_ms": [
+        13.872,
+        20.876
+      ],
+      "encoder_ms": [
+        35.128,
+        46.98
+      ],
+      "end_to_end_ms": [
+        223,
+        244
+      ],
+      "source_sequence_gaps": 72,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 40.642143097536085,
+      "capture_sequence": 270,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.049,
+      "setting": "preset=p1",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            23,
+            26
+          ],
+          "encoder_percent": [
+            69,
+            74
+          ],
+          "memory_mib": [
+            1955,
+            1955
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "high",
+      "scene": "text",
+      "width": 3840,
+      "height": 2160,
+      "viewer_count": 3,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 16.842734702013153,
+          "actual_kbps": 6316.016743073549,
+          "end_to_end_ms": [
+            227,
+            241
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 1,
+          "delivered_fps": 16.920473773265652,
+          "actual_kbps": 6345.168109883547,
+          "end_to_end_ms": [
+            227,
+            243
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 2,
+          "delivered_fps": 16.825965750696934,
+          "actual_kbps": 6309.727598566307,
+          "end_to_end_ms": [
+            225,
+            239
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        154.98390058237504,
+        161.97513244384155
+      ],
+      "rss_bytes": [
+        1439780864,
+        1472851968
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 25000,
+      "stream_target_kbps": 25000,
+      "encoder_target_bps": 22500000,
+      "encoder_buffer_bits": 2250000,
+      "source_sequence_fps": 37.073948574845524,
+      "actual_kbps": 6316.016743073549,
+      "delivered_fps": 16.842734702013153,
+      "readback_ms": [
+        9.212,
+        12.968
+      ],
+      "conversion_ms": [
+        18.888,
+        26.363
+      ],
+      "encode_only_ms": [
+        40.348,
+        44.15
+      ],
+      "encoder_ms": [
+        59.19,
+        59.592
+      ],
+      "end_to_end_ms": [
+        227,
+        241
+      ],
+      "source_sequence_gaps": 203,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 40.18714841796176,
+      "capture_sequence": 750,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.034,
+      "setting": "preset=p5",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            19,
+            20
+          ],
+          "encoder_percent": [
+            100,
+            100
+          ],
+          "memory_mib": [
+            2003,
+            2003
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "fast",
+      "scene": "scroll",
+      "width": 3840,
+      "height": 2160,
+      "viewer_count": 3,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 27.902341803687094,
+          "actual_kbps": 10463.36302939711,
+          "end_to_end_ms": [
+            223,
+            246
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 1,
+          "delivered_fps": 28.54576305020461,
+          "actual_kbps": 10667.217087533687,
+          "end_to_end_ms": [
+            221,
+            241
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 2,
+          "delivered_fps": 28.582850289826105,
+          "actual_kbps": 10718.552868279032,
+          "end_to_end_ms": [
+            225,
+            243
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        250.79863327574486,
+        254.88229510124052
+      ],
+      "rss_bytes": [
+        1565913088,
+        1565913088
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 25000,
+      "stream_target_kbps": 25000,
+      "encoder_target_bps": 22500000,
+      "encoder_buffer_bits": 2250000,
+      "source_sequence_fps": 34.87792725460887,
+      "actual_kbps": 10463.36302939711,
+      "delivered_fps": 27.902341803687094,
+      "readback_ms": [
+        10.786,
+        15.594
+      ],
+      "conversion_ms": [
+        19.39,
+        27.38
+      ],
+      "encode_only_ms": [
+        13.734,
+        21.278
+      ],
+      "encoder_ms": [
+        34.302,
+        44.699
+      ],
+      "end_to_end_ms": [
+        223,
+        246
+      ],
+      "source_sequence_gaps": 70,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 41.30982743856026,
+      "capture_sequence": 1350,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.035,
+      "setting": "preset=p1",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            23,
+            26
+          ],
+          "encoder_percent": [
+            72,
+            79
+          ],
+          "memory_mib": [
+            2003,
+            2003
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "high",
+      "scene": "scroll",
+      "width": 3840,
+      "height": 2160,
+      "viewer_count": 3,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 17.04715382314824,
+          "actual_kbps": 6355.289004087329,
+          "end_to_end_ms": [
+            225,
+            242
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 1,
+          "delivered_fps": 16.952532907857996,
+          "actual_kbps": 6357.19106501795,
+          "end_to_end_ms": [
+            226,
+            241
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 2,
+          "delivered_fps": 16.952532907857996,
+          "actual_kbps": 6394.5855604307935,
+          "end_to_end_ms": [
+            223,
+            237
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        146.00651408062552,
+        151.9461144377608
+      ],
+      "rss_bytes": [
+        1490841600,
+        1490960384
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 25000,
+      "stream_target_kbps": 25000,
+      "encoder_target_bps": 22500000,
+      "encoder_buffer_bits": 2250000,
+      "source_sequence_fps": 37.98225500947064,
+      "actual_kbps": 6355.289004087329,
+      "delivered_fps": 17.04715382314824,
+      "readback_ms": [
+        8.889,
+        12.463
+      ],
+      "conversion_ms": [
+        17.409,
+        24.119
+      ],
+      "encode_only_ms": [
+        41.46,
+        44.669
+      ],
+      "encoder_ms": [
+        58.838,
+        59.404
+      ],
+      "end_to_end_ms": [
+        225,
+        242
+      ],
+      "source_sequence_gaps": 210,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 40.49412196386288,
+      "capture_sequence": 1831,
+      "capture_phase": 31,
+      "capture_phase_skip": 1,
+      "seconds": 10.031,
+      "setting": "preset=p5",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            20,
+            20
+          ],
+          "encoder_percent": [
+            100,
+            100
+          ],
+          "memory_mib": [
+            2003,
+            2003
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "fast",
+      "scene": "motion",
+      "width": 3840,
+      "height": 2160,
+      "viewer_count": 3,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 28.264331210191084,
+          "actual_kbps": 10623.210987261145,
+          "end_to_end_ms": [
+            245,
+            273
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 1,
+          "delivered_fps": 28.551532033426184,
+          "actual_kbps": 10669.189017111024,
+          "end_to_end_ms": [
+            253,
+            291
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 2,
+          "delivered_fps": 28.1480007957032,
+          "actual_kbps": 10516.10582852596,
+          "end_to_end_ms": [
+            251,
+            288
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        256.85142275339905,
+        259.0357958976005
+      ],
+      "rss_bytes": [
+        1523322880,
+        1556475904
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 25000,
+      "stream_target_kbps": 25000,
+      "encoder_target_bps": 22500000,
+      "encoder_buffer_bits": 2250000,
+      "source_sequence_fps": 33.638535031847134,
+      "actual_kbps": 10623.210987261145,
+      "delivered_fps": 28.264331210191084,
+      "readback_ms": [
+        11.844,
+        16.643
+      ],
+      "conversion_ms": [
+        20.17,
+        28.41
+      ],
+      "encode_only_ms": [
+        13.182,
+        20.004
+      ],
+      "encoder_ms": [
+        34.039,
+        45.45
+      ],
+      "end_to_end_ms": [
+        245,
+        273
+      ],
+      "source_sequence_gaps": 54,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 22.648302558656344,
+      "capture_sequence": 2430,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.048,
+      "setting": "preset=p1",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            22,
+            26
+          ],
+          "encoder_percent": [
+            71,
+            75
+          ],
+          "memory_mib": [
+            2005,
+            2005
+          ]
+        }
+      ]
+    },
+    {
+      "codec": "h264",
+      "effort": "high",
+      "scene": "motion",
+      "width": 3840,
+      "height": 2160,
+      "viewer_count": 3,
+      "per_viewer": [
+        {
+          "viewer": 0,
+          "delivered_fps": 16.981320547397864,
+          "actual_kbps": 6403.299570472481,
+          "end_to_end_ms": [
+            229,
+            255
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 1,
+          "delivered_fps": 16.886490807354118,
+          "actual_kbps": 6481.314948041568,
+          "end_to_end_ms": [
+            228,
+            253
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        },
+        {
+          "viewer": 2,
+          "delivered_fps": 16.97623327341722,
+          "actual_kbps": 6316.452166966247,
+          "end_to_end_ms": [
+            228,
+            249
+          ],
+          "lost": 0,
+          "dropped": 0,
+          "decode_errors": 0
+        }
+      ],
+      "cpu_percent": [
+        141.10857429919204,
+        146.03770007038662
+      ],
+      "rss_bytes": [
+        1648287744,
+        1660669952
+      ],
+      "encoder": "h264_nvenc",
+      "compositor_hz": 60,
+      "ceiling_kbps": 25000,
+      "stream_target_kbps": 25000,
+      "encoder_target_bps": 22500000,
+      "encoder_buffer_bits": 2250000,
+      "source_sequence_fps": 38.05813605034462,
+      "actual_kbps": 6403.299570472481,
+      "delivered_fps": 16.981320547397864,
+      "readback_ms": [
+        8.939,
+        11.837
+      ],
+      "conversion_ms": [
+        17.032,
+        24.702
+      ],
+      "encode_only_ms": [
+        41.977,
+        44.665
+      ],
+      "encoder_ms": [
+        58.938,
+        59.196
+      ],
+      "end_to_end_ms": [
+        229,
+        255
+      ],
+      "source_sequence_gaps": 211,
+      "repeated_source_frames": 0,
+      "sequence_regressions": 0,
+      "lost": 0,
+      "dropped": 0,
+      "decode_errors": 0,
+      "psnr_db": 22.639992294894135,
+      "capture_sequence": 2970,
+      "capture_phase": 30,
+      "capture_phase_skip": 0,
+      "seconds": 10.011,
+      "setting": "preset=p5",
+      "gpu_summary": [
+        {
+          "index": 0,
+          "utilization_percent": [
+            19,
+            21
+          ],
+          "encoder_percent": [
+            100,
+            100
+          ],
+          "memory_mib": [
+            2005,
+            2005
+          ]
+        }
+      ]
+    }
+  ]
+}

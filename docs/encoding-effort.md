@@ -84,8 +84,10 @@ actual bitrate. Browser counters distinguish protocol sequence gaps, delta-drop 
 errors. A delta-drop event starts keyframe recovery after a sequence gap or a decoder queue above four
 frames. Further deltas skipped while waiting for the key do not increase that counter.
 
-The worker's `ffmpeg encoded` trace reports conversion plus encoding time as `encode_us` and time
-from raw submission to packet as `submit_to_packet_us`. These are elapsed times, not CPU time.
+The worker's `ffmpeg encoded` trace reports conversion as `conversion_us`, encoding as
+`encode_only_us`, their combined packet-production time as `encode_us`, and time from raw submission
+to packet as `submit_to_packet_us`. The compositor's `readback_us` includes waiting for pending
+GPU compositing, framebuffer copy, mapping and copying rows into owned memory. These are elapsed times, not CPU time.
 The 30 Hz frame budget is 33.3 ms. The benchmark retains JSON results,
 traces, decoded screenshots and reference images in its printed temporary directory. Screenshot RGB
 PSNR excludes the clock stripe and compares against the scene drawn at the decoded timestamp. It is

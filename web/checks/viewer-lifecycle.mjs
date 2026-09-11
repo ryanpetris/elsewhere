@@ -1,6 +1,8 @@
 import { createToken } from './token-fixture.mjs';
 // Run in Docker with the release build, Chromium and Wayland development tools.
 // --colors checks decoded charts only; ELSEWHERE_SOFTWARE_ENCODING retains GPU rendering.
+// Memory checks use ten warmup cycles, then ELSEWHERE_LIFECYCLE_CYCLES measured cycles (default five).
+// --allocator records active/idle glibc allocation snapshots alongside process resources.
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, open, readFile, readdir, readlink, writeFile } from 'node:fs/promises';
@@ -10,6 +12,10 @@ const root = await mkdtemp('/tmp/elsewhere-viewer-lifecycle-');
 const renderNode = process.env.ELSEWHERE_RENDER_NODE ?? 'none';
 const codec = renderNode === 'none' || process.env.ELSEWHERE_SOFTWARE_ENCODING ? 'vp8' : 'h264';
 const colorsOnly = process.argv.includes('--colors');
+const measuredCycles = Number(process.env.ELSEWHERE_LIFECYCLE_CYCLES || 5);
+assert(Number.isSafeInteger(measuredCycles) && measuredCycles > 0);
+const warmupCycles = 10;
+const observeAllocator = process.argv.includes('--allocator');
 const origin = 'http://127.0.0.1:8850';
 await mkdir(root + '/runtime', { mode: 0o700 });
 const log = await open(root + '/server.log', 'w');
@@ -17,12 +23,20 @@ const xml = '/usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml';
 execFileSync('wayland-scanner', ['client-header', xml, root + '/xdg-shell-client-protocol.h']);
 execFileSync('wayland-scanner', ['private-code', xml, root + '/xdg-shell-protocol.c']);
 execFileSync('cc', ['-I' + root, '/src/crates/elsewhere-compositor/checks/thumbnail-client.c', root + '/xdg-shell-protocol.c', '-lwayland-client', '-o', root + '/source']);
-const environment = { ...process.env, XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime' };
+const environment = { ...process.env,
+  ...(renderNode === 'none' ? { __EGL_VENDOR_LIBRARY_FILENAMES: '/usr/share/glvnd/egl_vendor.d/50_mesa.json', LIBGL_ALWAYS_SOFTWARE: '1' } : {}),
+  XDG_CONFIG_HOME: root + '/config', XDG_RUNTIME_DIR: root + '/runtime' };
+const serverEnvironment = { ...environment };
+if (observeAllocator) {
+  execFileSync('cc', ['-shared', '-fPIC', '-O2', '-pthread', '/src/crates/elsewhere-compositor/checks/allocator-observe.c', '-o', root + '/allocator.so']);
+  serverEnvironment.LD_PRELOAD = root + '/allocator.so' + (environment.LD_PRELOAD ? ':' + environment.LD_PRELOAD : '');
+  serverEnvironment.ELSEWHERE_ALLOC_LOG = root + '/allocator.jsonl';
+}
 const server = spawn(process.env.ELSEWHERE_BINARY ?? '/src/target/release/elsewhere', [
   '--no-audio', '--no-rtc', '--no-tls', '--render-node', renderNode, '--codecs', codec,
   ...(process.env.ELSEWHERE_SOFTWARE_ENCODING ? ['--software-encoding'] : []),
   '--listen', '127.0.0.1:8850', '--socket-name', 'wayland-lifecycle',
-], { env: environment, stdio: ['ignore', log.fd, log.fd] });
+], { env: serverEnvironment, stdio: ['ignore', log.fd, log.fd] });
 const clients = new Set();
 const counters = async () => {
   const [fds, threads, status] = await Promise.all([
@@ -46,6 +60,20 @@ const wait = async predicate => {
   for (let n = 0; n < 200; n++) { if (await predicate()) return; await new Promise(resolve => setTimeout(resolve, 50)); }
   throw new Error('viewer lifecycle condition timed out');
 };
+const allocatorSnapshot = async () => {
+  const requestedAt = Date.now();
+  let sample;
+  await wait(async () => {
+    const text = await readFile(root + '/allocator.jsonl', 'utf8');
+    const line = text.slice(0, text.lastIndexOf('\n')).trim().split('\n').at(-1);
+    if (!line) return false;
+    sample = JSON.parse(line);
+    return sample.time * 1000 >= requestedAt;
+  });
+  sample.smaps = await readFile(`/proc/${server.pid}/smaps_rollup`, 'utf8');
+  try { sample.gpu_memory_mib = execFileSync('nvidia-smi', ['--query-gpu=memory.used', '--format=csv,noheader,nounits'], { encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] }).trim().split('\n').map(Number); } catch {}
+  return sample;
+};
 const stop = async child => {
   if (child.exitCode !== null || child.signalCode !== null) return;
   const exited = new Promise(resolve => child.once('exit', resolve));
@@ -59,6 +87,7 @@ let browser;
 const samples = [];
 try {
   await wait(async () => { try { return (await fetch(origin)).ok; } catch { return false; } });
+  if (renderNode === 'none') assert.match(await readFile(root + '/server.log', 'utf8'), /GL Renderer:[^\n]*(llvmpipe|softpipe)/i, 'CPU-only check uses Mesa software rendering');
   const token = await createToken(root);
   const viewerToken = await createToken(root, ['desktop.view', 'audio.listen', 'clipboard.read']);
   browser = await chromium.launch({ executablePath: '/usr/bin/chromium', args: ['--no-sandbox'] });
@@ -160,14 +189,15 @@ try {
       }
     };
     await checkPicture('chart', points);
+    await checkPicture('root ffe52a61', [{ x: 90, y: 90, expected: [229, 42, 97] }]);
     await checkPicture('root ffff0000', [{ x: 90, y: 90, expected: [255, 0, 0] }]);
     // Compare composition to the compositor's own PNG, without prescribing its blend transfer curve.
     await checkPicture('sub 80008000', [{ x: 90, y: 90 }, { x: 180, y: 180, expected: [255, 0, 0] }]);
     await windowPage.context().close(); await stop(child);
     console.log('desktop/window primary colors, gray ramp and transparent subsurface match compositor snapshots');
   }
-  let baseline, baselineResources, baselineDesktop, baselineDmaSizes;
-  for (let cycle = 0; cycle < (colorsOnly ? 0 : 5); cycle++) {
+  let baseline, baselineResources, baselineDesktop, baselineDmaSizes, memoryBaseline;
+  for (let cycle = 0; cycle < (colorsOnly ? 0 : warmupCycles + measuredCycles); cycle++) {
     const viewers = [];
     for (let index = 0; index < 3; index++) {
       const known = await main.evaluate(() => elsewhere.store.get().windows.map(window => window.id));
@@ -225,6 +255,7 @@ try {
       await paintedColor(page, painted, [32, 192, 128]);
       assert.equal(await page.evaluate(() => elsewhere.store.get().stats.decodeErrors), 0);
     }
+    const activeAllocator = observeAllocator ? await allocatorSnapshot() : undefined;
     const active = await counters();
     if (baseline) assert(active.threads >= baseline.threads + viewers.length + 1, 'each window viewer has a live media worker');
     // Close viewers and source windows together while teardown still has media work to cancel.
@@ -246,6 +277,7 @@ try {
       throw error;
     });
     else await new Promise(resolve => setTimeout(resolve, 1000));
+    const allocator = observeAllocator ? await allocatorSnapshot() : undefined;
     const idle = await counters();
     baseline ??= idle;
     const resources = await resourceDetails();
@@ -258,9 +290,12 @@ try {
     baselineDmaSizes ??= new Set(sizes);
     assert.deepEqual(desktop, baselineDesktop, 'the retained desktop allocation geometry stays fixed');
     assert(sizes.every(size => baselineDmaSizes.has(size)), 'retained DMA-bufs fit the warmed desktop allocation sizes');
-    const sample = { cycle, active, idle, readOnlyTarget, desktop, dmaBuffers }; samples.push(sample); console.log(JSON.stringify(sample));
+    // Repeated stream recreation warms allocator arenas before measuring retained RSS.
+    if (cycle === warmupCycles - 1) memoryBaseline = idle;
+    const sample = { cycle, warmup: cycle < warmupCycles, activeAllocator, allocator, active, idle, readOnlyTarget, desktop, dmaBuffers }; samples.push(sample); console.log(JSON.stringify(sample));
     await writeFile(root + '/results.json', JSON.stringify(samples, null, 2));
-    assert(idle.rssKiB <= baseline.rssKiB + 64 * 1024, 'retained RSS grew by more than 64 MiB after warmup: ' + JSON.stringify({ baseline, idle }));
+    assert(idle.rssKiB <= baseline.rssKiB + 192 * 1024, 'retained RSS grew by more than 192 MiB from the first idle checkpoint: ' + JSON.stringify({ baseline, idle }));
+    if (memoryBaseline) assert(idle.rssKiB <= memoryBaseline.rssKiB + 64 * 1024, 'retained RSS grew by more than 64 MiB after warmup: ' + JSON.stringify({ baseline: memoryBaseline, idle }));
   }
   assert.deepEqual(errors, []);
   if (!colorsOnly) console.log('viewer resize/effort storms, simultaneous 30fps/unlimited streams, read-only pressure feedback, static final pictures and teardown passed');

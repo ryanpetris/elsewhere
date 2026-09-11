@@ -55,8 +55,8 @@ and broadcast network I/O.
 
 VA-API zero-copy video path: client dmabuf → GLES composite into a GBM-allocated dmabuf → the VA-API
 post-processor and encoder import that same dmabuf → bitstream → browser GPU decode. No CPU pixel
-copies. Without a GPU (`--render-node none`, or no node) the renderer is llvmpipe on Mesa's surfaceless
-EGL platform, frames are rendered into one texture and read back (`gpu::Targets::Texture`,
+copies. Without a render node, surfaceless EGL supplies the renderer, typically Mesa's llvmpipe on a
+machine without a GPU. Frames are rendered into one texture and read back (`gpu::Targets::Texture`,
 `FrameBuffer::Memory`) for the software encoders, and there is no dmabuf or explicit-sync global: clients
 draw into shared memory.
 

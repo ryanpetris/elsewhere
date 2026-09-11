@@ -34,7 +34,7 @@ try {
   const target = await desktop('gpu-source', 8849, false);
   const sourceLog = await readFile(`${target}/server.log`, 'utf8');
   if (/verified video encoders.*Nvenc/.test(sourceLog)) {
-    assert.match(sourceLog, /GL Renderer:.*NVIDIA/, 'NVENC source must render on NVIDIA, not llvmpipe');
+    assert.match(sourceLog, /GL Vendor:[^\n]*NVIDIA/, 'NVENC source must use the NVIDIA GL vendor');
   }
   const token = await createToken(target);
   const xml = '/usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml';
