@@ -152,7 +152,7 @@ try {
   await main.evaluate(cmd => elsewhere.spawn(cmd), root + '/client ' + root + '/command');
   await main.waitForFunction(() => elsewhere.store.get().windows.some(w => w.app_id === 'thumbnail-surfaces'));
   const id = await main.evaluate(() => elsewhere.store.get().windows.find(w => w.app_id === 'thumbnail-surfaces').id);
-  async function capture(page, name, size = null) {
+  async function capture(page, name, size = null, solid = null) {
     await page.waitForFunction(() => window.elsewhere?.store.get().stats.frames > 0);
     const before = await page.evaluate(() => {
       const before = probe.outputs;
@@ -180,9 +180,9 @@ try {
     assert.deepEqual(result.paintedVisible, size ?? result.configured, name + ': normalized visible rectangle');
     // Normalization may crop padded decoder pictures before they reach either renderer.
     assert.deepEqual(result.painted, size ?? result.configured, name + ': normalized picture dimensions');
-    for (const [i, expected] of [[255, 0, 0], [0, 0, 255], [255, 0, 255], [255, 255, 0]].entries())
+    for (const [i, expected] of (solid ? Array(4).fill(solid) : [[255, 0, 0], [0, 0, 255], [255, 0, 255], [255, 255, 0]]).entries())
       assert(result.colors[i].slice(0, 3).every((v, c) => Math.abs(v - expected[c]) < 40), `${name}: edge ${i}: ${result.colors[i]}`);
-    assert(result.colors[4].slice(0, 3).every(v => Math.abs(v - 128) < 5), name + ': neutral gray value');
+    assert(result.colors[4].slice(0, 3).every((v, c) => Math.abs(v - (solid?.[c] ?? 128)) < (solid ? 40 : 5)), name + ': center color ' + result.colors[4]);
     console.log(JSON.stringify({ name, ...result }));
     return result;
   }
@@ -266,6 +266,24 @@ try {
   }
 
   await smallGpu.close();
+  execFileSync('cc', ['/src/crates/elsewhere-compositor/checks/x11-placement.c', '-lX11', '-o', root + '/x11-client']);
+  await writeFile(root + '/x11-command', '');
+  await main.evaluate(cmd => elsewhere.spawn(cmd), `${root}/x11-client managed 1 ${root}/x11-command ${root}/x11-report`);
+  await main.waitForFunction(() => elsewhere.store.get().windows.some(w => w.title === 'x11-placement-check'));
+  const x11 = await main.evaluate(() => elsewhere.store.get().windows.find(w => w.title === 'x11-placement-check').id);
+  for (const renderer of ['2d', 'webgpu']) {
+    const page = await context.newPage();
+    await page.goto(`${origin}/?window=${x11}&renderer=${renderer}#token=${token}`);
+    for (const size of [[380, 212], [420, 260], [280, 152]]) {
+      await main.evaluate(({ id, size }) => elsewhere.control({ id, op: 'resize', w: size[0], h: size[1] }), { id: x11, size });
+      await page.waitForFunction(size => elsewhere.store.get().stream?.width === size[0] && elsewhere.store.get().stream?.height === size[1], size);
+      assert.equal((await capture(page, 'x11-frame-extents-' + renderer, size, [229, 42, 97])).renderer, renderer);
+      const snapshot = Buffer.from(await (await fetch(`${origin}/api/windows/${x11}/snapshot.png`, { headers })).arrayBuffer());
+      assert.deepEqual([snapshot.readUInt32BE(16), snapshot.readUInt32BE(20)], size, 'X11 visible snapshot excludes frame extents');
+    }
+    await page.close();
+  }
+  await writeFile(root + '/x11-command', '1 quit');
   await main.evaluate(cmd => elsewhere.spawn(cmd), `glxinfo -B > ${root}/glx-info`);
   for (let i = 0; i < 100; i++) {
     if ((await readFile(root + '/glx-info', 'utf8').catch(() => '')).includes('OpenGL renderer string:')) break;

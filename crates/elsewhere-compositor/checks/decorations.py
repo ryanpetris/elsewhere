@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Docker: Wayland development tools, fetched Cargo sources, Pillow and the release binary."""
+"""Docker: Wayland development tools, fetched Cargo sources, Pillow and the release binary.
+ELSEWHERE_RENDER_NODE selects hardware.
+"""
 import io
 import json
 import os
@@ -50,7 +52,7 @@ with tempfile.TemporaryDirectory(prefix="elsewhere-decorations-") as directory:
             time.sleep(.03)
         raise AssertionError(label + " timed out")
     with (root / "server.log").open("w+") as log:
-        server = subprocess.Popen([binary, "--no-audio", "--no-rtc", "--no-tls", "--render-node", "none", "--codecs", "vp8",
+        server = subprocess.Popen([binary, "--no-audio", "--no-rtc", "--no-tls", "--render-node", os.environ.get("ELSEWHERE_RENDER_NODE", "none"), "--codecs", "h264,hevc,vp8",
             "--screen-size", "1920x1080", "--listen", "127.0.0.1:18515"], env=env, stdout=log, stderr=log)
         try:
             wait(lambda: request("/api/me"))

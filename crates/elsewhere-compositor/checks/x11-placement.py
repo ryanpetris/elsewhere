@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Docker: X11 development files, Pillow, and the release binary. Optional argument: managed or popup."""
+"""Docker: X11 development files, Pillow, and the release binary. ELSEWHERE_RENDER_NODE selects hardware.
+Optional argument: managed or popup.
+"""
 import io
 import json
 import os
@@ -41,7 +43,7 @@ with tempfile.TemporaryDirectory(prefix="elsewhere-x11-placement-") as directory
             time.sleep(.03)
         raise AssertionError("X11 placement condition timed out")
     with (root / "server.log").open("w+") as log:
-        server = subprocess.Popen([binary, "--no-audio", "--no-rtc", "--no-tls", "--render-node", "none", "--codecs", "vp8",
+        server = subprocess.Popen([binary, "--no-audio", "--no-rtc", "--no-tls", "--render-node", os.environ.get("ELSEWHERE_RENDER_NODE", "none"), "--codecs", "h264,hevc,vp8",
             "--screen-size", "1920x1080", "--listen", "127.0.0.1:18514"], env=env, stdout=log, stderr=log)
         try:
             wait(lambda: request("/api/me"))
