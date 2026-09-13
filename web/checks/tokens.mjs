@@ -126,7 +126,8 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(origin + '/#token=' + b.token);
   await page.waitForFunction(() => elsewhere.store.get().status === 'connected');
-  for (const selector of ['#apps-toggle', '#terminal-toggle', '#power-toggle', '#clipboard-toggle', '#session-mixer-toggle']) assert.equal(await page.locator(selector).count(), 0, selector);
+  for (const selector of ['#terminal-toggle', '#power-toggle', '#clipboard-toggle', '#session-mixer-toggle']) assert.equal(await page.locator(selector).count(), 0, selector);
+  assert.equal(await page.locator('#apps-toggle').count(), 1);
   const writable = await create(['desktop.view', 'clipboard.write', 'files.upload']);
   const writer = await browser.newPage();
   writer.on('pageerror', error => errors.push(error.message));

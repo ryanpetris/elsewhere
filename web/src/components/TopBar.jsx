@@ -99,8 +99,8 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, o
           <span id="about-window-title" title={windowMode ? title : undefined} className="hidden min-w-0 truncate text-sm font-semibold tracking-tight text-ink md:inline">{title}</span>
         </button>
       </div>
-      {acts('apps.launch') && <Divider className="hidden sm:block" />}
-      {acts('apps.launch') && <BarButton data-menu-trigger id="apps-toggle" icon={LayoutGrid} label="Applications" active={menu === 'apps'} onClick={() => onMenu('apps')} />}
+      {!['no-token', 'unauthorized'].includes(status) && <Divider className="hidden sm:block" />}
+      {!['no-token', 'unauthorized'].includes(status) && <BarButton data-menu-trigger id="apps-toggle" icon={LayoutGrid} label="Command Palette (Ctrl+Alt+Shift+P)" aria-haspopup="dialog" aria-expanded={menu === 'apps'} active={menu === 'apps'} onClick={() => onMenu('apps')} />}
       <div className="flex min-w-0 shrink items-center rounded-full px-1 py-1 text-xs text-ink-2 sm:ml-1 sm:gap-2 sm:border sm:border-line sm:bg-surface-2 sm:pr-3 sm:pl-2.5" title={stream && status === 'connected' ? `${text} · ${codecName(stream.codec)} ${stream.width}×${stream.height}` : text}>
         <span className={`size-2 shrink-0 rounded-full ${dot}`} />
         <span className="hidden truncate sm:inline">{text}</span>

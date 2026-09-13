@@ -69,7 +69,7 @@ export default function TerminalPanel({ viewer, onClose, hidden = false }) {
   }, [viewer, session]);
   const live = status === 'Connected' || status === 'Connecting…';
   return (
-    <section aria-label="Terminal" className="flex h-[38vh] max-h-[70vh] min-h-40 shrink-0 flex-col border-t border-line bg-canvas"
+    <section tabIndex={-1} aria-label="Terminal" className="flex h-[38vh] max-h-[70vh] min-h-40 shrink-0 flex-col border-t border-line bg-canvas"
       onKeyDown={event => event.stopPropagation()} onKeyUp={event => event.stopPropagation()} onFocusCapture={viewer.releaseInput}>
       <header className="flex h-9 shrink-0 items-center gap-3 border-b border-line bg-surface px-3 text-xs">
         <TerminalIcon className="size-3.5 text-ink-3" />

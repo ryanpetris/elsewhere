@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "check:command-palette-live": "node checks/command-palette-live.mjs",
+    "check:command-palette": "node checks/command-palette.mjs",
     "check:video-frame": "node checks/video-frame.mjs",
     "check:video-crop": "node checks/video-crop.mjs",
     "check:codec-recovery": "node checks/codec-recovery.mjs",

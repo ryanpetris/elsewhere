@@ -1,28 +1,21 @@
-// The application menu (the installed .desktop launchers, searchable, by category) and the power menu.
+// Search applications, windows and viewer actions, and confirm desktop shutdown.
 import { forwardRef, useEffect, useRef, useState } from 'react';
 import { AppWindow, Power, Search, TriangleAlert } from 'lucide-react';
-import { appIcon, applications } from '../api.js';
+import { appIcon, applications, WINDOW, PIP } from '../api.js';
+import { useStore } from '../store.js';
 import { cx } from './ui.jsx';
 
-// freedesktop main categories, as menus label them; the first match names the group
-const CATEGORIES = [
-  ['AudioVideo', 'Multimedia'], ['Audio', 'Multimedia'], ['Video', 'Multimedia'], ['Development', 'Development'],
-  ['Education', 'Education'], ['Game', 'Games'], ['Graphics', 'Graphics'], ['Network', 'Internet'], ['Office', 'Office'],
-  ['Science', 'Science'], ['Settings', 'Settings'], ['System', 'System'], ['Utility', 'Accessories'],
-];
-const groupOf = app => CATEGORIES.find(([c]) => app.categories.includes(c))?.[1] ?? 'Other';
-
 /// A popover under the top bar; a click outside or Escape closes it. `floating` places it by style instead.
-export const Popover = forwardRef(function Popover({ onClose, className = '', floating = false, children, ...props }, ref) {
+export const Popover = forwardRef(function Popover({ onClose, onKeyDown, className = '', floating = false, coverAll = false, children, ...props }, ref) {
   useEffect(() => {
-    const key = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(e); } };
+    const key = e => { if (e.key === 'Escape' && !e.isComposing) { e.preventDefault(); e.stopPropagation(); onClose(e); } };
     document.addEventListener('keydown', key, true);
     return () => document.removeEventListener('keydown', key, true);
   }, [onClose]);
   return (
     <>
-      <div className={floating ? 'fixed inset-0 z-20' : 'absolute inset-x-0 top-12 bottom-0 z-20'} onClick={onClose} />
-      <div ref={ref} tabIndex={-1} onKeyDown={event => event.stopPropagation()} onKeyUp={event => event.stopPropagation()} {...props}
+      <div className={floating ? 'fixed inset-0 z-20' : cx('absolute inset-x-0 bottom-0 z-20', coverAll ? 'top-0' : 'top-12')} onClick={onClose} />
+      <div ref={ref} tabIndex={-1} onKeyDown={event => { event.stopPropagation(); onKeyDown?.(event); }} onKeyUp={event => event.stopPropagation()} {...props}
         className={cx(floating ? 'fixed' : 'absolute top-[3.25rem]', 'z-30 flex animate-pop flex-col overflow-hidden rounded-xl border border-line-2 bg-surface shadow-pop', className)}>
         {children}
       </div>
@@ -30,72 +23,118 @@ export const Popover = forwardRef(function Popover({ onClose, className = '', fl
   );
 });
 
-export function Launcher({ viewer, onClose }) {
+export function Launcher({ viewer, actions, onClose }) {
+  const windows = useStore(viewer.store, s => s.windows);
+  const permissions = useStore(viewer.store, s => s.permissions);
+  const status = useStore(viewer.store, s => s.status);
   const [apps, setApps] = useState(null);
+  const [error, setError] = useState('');
   const [q, setQ] = useState('');
-  const [cursor, setCursor] = useState(0); // the entry Enter launches, moved by the arrow keys
+  const [selection, setSelection] = useState(null);
   const list = useRef(null);
-  useEffect(() => { applications().then(setApps, () => setApps([])); }, []);
+  const invoking = useRef(false);
+  const live = useRef(true);
+  useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
+  const composing = useRef(false);
+  const canLaunch = !WINDOW && !PIP && status === 'connected' && permissions.includes('apps.launch');
+  useEffect(() => {
+    setApps(null);
+    if (!canLaunch) return;
+    const abort = new AbortController();
+    applications(abort.signal).then(value => { if (!abort.signal.aborted) setApps(value); }, () => {
+      if (!abort.signal.aborted) { setApps([]); setError('Applications could not load. Close and reopen to retry.'); }
+    });
+    return () => abort.abort();
+  }, [canLaunch]);
   const needle = q.trim().toLowerCase();
-  const shown = (apps ?? []).filter(a => !needle || a.name.toLowerCase().includes(needle) || a.comment?.toLowerCase().includes(needle));
-  const groups = needle ? [['Results', shown]] : Object.entries(shown.reduce((g, a) => ((g[groupOf(a)] ??= []).push(a), g), {})).sort(([a], [b]) => a.localeCompare(b));
-  const ordered = groups.flatMap(([, l]) => l);
-  const selected = ordered[Math.min(cursor, ordered.length - 1)];
-  const launch = app => { viewer.launch(app.id); onClose(); };
+  const matches = entry => `${entry.label} ${entry.detail || ''}`.toLowerCase().includes(needle);
+  const groups = [
+    ['Applications', canLaunch ? (apps ?? []).slice().sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()) || a.id.localeCompare(b.id)).map(a => ({ key: `app:${a.id}`, kind: 'app', id: a.id, label: a.name, detail: [a.comment, a.id].filter(Boolean).join(' · '), permission: 'apps.launch' })) : []],
+    ['Windows', !WINDOW && !PIP && status === 'connected' && permissions.includes('desktop.control')
+      ? windows.slice().sort((a, b) => a.id - b.id).map(w => ({ key: `window:${w.id}`, kind: 'window', id: w.id, label: w.title || w.app_id || `Window ${w.id}`, detail: `${w.app_id || 'Window'} · #${w.id}${w.minimized ? ' · Minimized' : ''}`, permission: 'desktop.control' })) : []],
+    ['Viewer actions', actions.filter(a => a.available()).map(a => ({ ...a, key: `action:${a.id}`, kind: 'action' }))],
+  ].map(([label, entries]) => [label, entries.filter(matches)]);
+  const ordered = groups.flatMap(([, entries]) => entries);
+  // Keep the selected identity when the live list changes; Enter must never target its replacement.
+  const selected = selection === null ? ordered[0] : ordered.find(e => e.key === selection);
+  useEffect(() => { if (selection === null && selected) setSelection(selected.key); }, [selection, selected?.key]);
+  const invoke = async entry => {
+    if (invoking.current) return;
+    if (!entry) { setError('The selected result is no longer available. Select another result.'); return; }
+    const current = viewer.store.get();
+    if (entry.kind === 'action' ? !actions.find(a => a.id === entry.id)?.available()
+      : current.status !== 'connected' || !current.permissions.includes(entry.permission)
+        || entry.kind === 'window' && !current.windows.some(w => w.id === entry.id)) {
+      setError('This action is no longer available.'); return;
+    }
+    setError('');
+    invoking.current = true;
+    try {
+      if (entry.kind === 'app') {
+        const response = await viewer.launch(entry.id);
+        if (!response.ok) throw new Error(`Application launch failed (HTTP ${response.status}).`);
+      } else if (entry.kind === 'window') viewer.activate(entry.id);
+      else await entry.run(() => live.current && !!actions.find(a => a.id === entry.id)?.available());
+      if (live.current) onClose(null, entry.kind === 'action' ? entry.focus : 'canvas.stage');
+    } catch (error) { if (live.current) setError(error.message || 'Action failed.'); }
+    finally { invoking.current = false; }
+  };
   const move = delta => {
     if (!ordered.length) return;
-    const next = (Math.min(cursor, ordered.length - 1) + delta + ordered.length) % ordered.length;
-    setCursor(next);
-    list.current?.querySelector(`[data-app="${CSS.escape(ordered[next].id)}"]`)?.scrollIntoView({ block: 'nearest' });
+    const index = selected ? ordered.indexOf(selected) : -1;
+    const next = ordered[(index + delta + ordered.length) % ordered.length];
+    setSelection(next.key);
+    list.current?.querySelector(`[data-entry="${CSS.escape(next.key)}"]`)?.scrollIntoView({ block: 'nearest' });
   };
   return (
-    <Popover onClose={onClose} className="left-2 max-h-[75vh] w-[27rem] max-w-[calc(100vw-1rem)] sm:left-3">
+    <Popover onClose={onClose} coverAll={viewer.store.get().controlsHidden || viewer.isFullscreen()} role="dialog" aria-modal="true" aria-label="Command palette"
+      onKeyDown={e => {
+        e.stopPropagation();
+        if (e.key === 'Tab') { e.preventDefault(); e.currentTarget.querySelector('input')?.focus(); }
+      }} className="left-2 max-h-[75vh] w-[27rem] max-w-[calc(100vw-1rem)] sm:left-3">
       <label className="flex items-center gap-2.5 border-b border-line px-3 py-2.5">
         <Search className="size-4 shrink-0 text-ink-3" />
-        <input
-          autoFocus
-          value={q}
-          onChange={e => { setQ(e.target.value); setCursor(0); }}
+        <input autoFocus value={q} aria-label="Search commands" role="combobox" aria-expanded="true" aria-controls="command-results"
+          aria-activedescendant={selected ? `command-${selected.key}` : undefined}
+          onChange={e => { setQ(e.target.value); setSelection(null); setError(''); }}
           onFocus={viewer.releaseInput}
+          onCompositionStart={() => { composing.current = true; }}
+          onCompositionEnd={() => { composing.current = false; }}
           onKeyDown={e => {
-            if (e.key === 'Enter') e.preventDefault();
+            if (composing.current || e.nativeEvent.isComposing || e.keyCode === 229) return;
+            if (e.key === 'Enter') { e.preventDefault(); if (!e.repeat) { setSelection(selected?.key ?? selection); invoke(selected); } }
             if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
             if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
           }}
-          onKeyUp={e => { if (e.key === 'Enter' && needle && selected) launch(selected); }}
-          placeholder="Search Applications…"
-          spellCheck={false}
-          autoComplete="off"
-          className="min-w-0 flex-1 bg-transparent text-sm text-ink placeholder:text-ink-4 focus:outline-none"
-        />
+          placeholder="Search applications, windows, actions…" spellCheck={false} autoComplete="off"
+          className="min-w-0 flex-1 bg-transparent text-sm text-ink placeholder:text-ink-4 focus:outline-none" />
         <kbd className="kbd hidden sm:inline-flex">Esc</kbd>
       </label>
-      <div ref={list} className="min-h-0 flex-1 overflow-y-auto p-2">
-        {apps === null && <div className="px-2 py-8 text-center text-sm text-ink-4">Loading…</div>}
-        {apps !== null && shown.length === 0 && <div className="px-2 py-8 text-center text-sm text-ink-4">{apps.length ? 'Nothing matches.' : 'No applications found.'}</div>}
-        {groups.map(([label, items]) => (
-          <section key={label} className="mb-1.5">
+      {error && <p role="alert" className="px-3 py-2 text-sm text-warn">{error}</p>}
+      {canLaunch && apps === null && <p role="status" className="px-3 py-2 text-sm text-ink-4">Loading applications…</p>}
+      <div ref={list} id="command-results" role="listbox" aria-label="Commands" className="min-h-0 flex-1 overflow-y-auto p-2">
+        {!ordered.length && <p className="px-2 py-8 text-center text-sm text-ink-4">Nothing matches.</p>}
+        {groups.filter(([, entries]) => entries.length).map(([label, entries]) => (
+          <section key={label} role="group" aria-label={label} className="mb-1.5">
             <h3 className="eyebrow px-2 pt-2 pb-1">{label}</h3>
-            {items.map(app => (
-              <button key={app.id} type="button" data-app={app.id} onClick={() => launch(app)}
-                onMouseMove={() => { const i = ordered.indexOf(app); if (i !== cursor) setCursor(i); }}
-                onKeyDown={e => { if (e.key === 'Enter') e.preventDefault(); }}
-                onKeyUp={e => { if (e.key === 'Enter') launch(app); }} title={app.comment}
-                className={cx('flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors', selected === app ? 'bg-surface-3' : 'hover:bg-surface-2')}>
-                <AppIcon id={app.id} />
+            {entries.map(entry => (
+              <button key={entry.key} id={`command-${entry.key}`} role="option" aria-selected={selected?.key === entry.key}
+                type="button" tabIndex={-1} data-entry={entry.key} onClick={() => invoke(entry)}
+                onMouseMove={() => setSelection(entry.key)}
+                className={cx('flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors', selected?.key === entry.key ? 'bg-surface-3' : 'hover:bg-surface-2')}>
+                {entry.kind === 'app' ? <AppIcon id={entry.id} /> : <AppWindow className="size-5 shrink-0 text-ink-3" />}
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm text-ink">{app.name}</span>
-                  {app.comment && <span className="block truncate text-[11px] text-ink-3">{app.comment}</span>}
+                  <span className="block truncate text-sm text-ink">{entry.label}</span>
+                  {entry.detail && <span className="block truncate text-[11px] text-ink-3">{entry.detail}</span>}
                 </span>
-                {selected === app && needle && <kbd className="kbd">↵</kbd>}
               </button>
             ))}
           </section>
         ))}
       </div>
       <div className="flex items-center gap-3 border-t border-line px-3 py-1.5 text-[11px] text-ink-4">
-        <span>{apps ? `${shown.length} ${shown.length === 1 ? 'application' : 'applications'}` : ''}</span>
-        <span className="ml-auto hidden items-center gap-1.5 sm:flex"><kbd className="kbd">↑</kbd><kbd className="kbd">↓</kbd> Select <kbd className="kbd ml-1">↵</kbd> Launch</span>
+        <span>{ordered.length} results</span>
+        <span className="ml-auto hidden items-center gap-1.5 sm:flex"><kbd className="kbd">↑</kbd><kbd className="kbd">↓</kbd> Select <kbd className="kbd ml-1">↵</kbd> Invoke</span>
       </div>
     </Popover>
   );

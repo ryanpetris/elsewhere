@@ -34,7 +34,11 @@ export const snapshot = async (id, sizing = {}, signal) => {
   return response.blob();
 };
 export const elementsOf = async id => (await api(`/api/windows/${id}/elements`)).json();
-export const applications = async () => (await api('/api/applications')).json();
+export const applications = async signal => {
+  const response = await api('/api/applications', { signal });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+};
 export const control = body => api('/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
 // An application's icon as a blob URL (<img> can't send the bearer header), fetched once per page; null when it has none.

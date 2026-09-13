@@ -652,14 +652,14 @@ read it with `useSyncExternalStore` and send actions back through the engine.
   through viewer.type, composition waits for compositionend, and line breaks and deletions use
   viewer.key. Both methods send Input (0x91), the InputMsg of POST /api/input, through the WebSocket
   and the compositor's keymap in order with pointer input. View-only sessions have no keyboard control.
-- **Application menu** (`Launcher.jsx`): the installed launchers from `GET /api/applications`, grouped by
-  their freedesktop main category (`Network` shows as Internet, `Utility` as Accessories, and so on), with
-  a search box that filters by name and comment and launches the first match on Enter; a click sends
-  `launch`. Icons come through `fetch()` and blob URLs like thumbnails, cached per page, with a generic
-  glyph for entries without one. The **power menu** confirms, then sends `quit`; once the server accepts
-  it, the page shows "shut down" instead of reconnecting when the socket ends. Both are for sessions that
-  act (not the token without `desktop.control`, not a window popup); together with the window list they cover what a panel
-  provides, so the desktop can run without one.
+- **Command palette** (`Launcher.jsx`): applications from `GET /api/applications`, live windows and
+  viewer actions in separate groups. Ctrl+Alt+Shift+P opens it with controls visible, hidden or fullscreen.
+  Substring search matches names, descriptions and application IDs. Arrow keys select and Enter invokes;
+  Escape restores the invoking control. IDs distinguish duplicate names. Launch and activation use their
+  existing grants; local controls remain available without `apps.launch`. Window popups offer fullscreen
+  and control visibility actions. Opening the palette releases desktop input and pointer capture.
+  Icons use authenticated fetches and cached blob URLs. The **power menu** requires `server.manage`,
+  confirms, then sends `quit`; an accepted shutdown ends reconnection.
 - **Windows tab**: one row per window, top-most first, minimized last: a thumbnail, a colour dot, the
   title, the app id and size, state badges, and (on hover) buttons to open the window in its own popup
   (a window stream), snapshot, maximize/restore, minimize/restore (restore uses `activate`, so the window

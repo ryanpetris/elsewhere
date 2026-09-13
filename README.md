@@ -83,6 +83,15 @@ controls. Use the highlighted **Show Controls** button at the left of the status
 mode belongs to this viewer and resets on reload; hidden terminal sessions stay open. Browser tabs and
 the address bar stay visible in windowed mode.
 
+Open the command palette from the toolbar or with **Ctrl+Alt+Shift+P**, including while controls
+are hidden or the viewer is fullscreen. Search Applications, Windows, and Viewer actions by name,
+application description or window application ID. Arrow keys select, Enter invokes, and Escape
+returns focus. Window IDs distinguish matching titles. Applications launch a new instance; Windows
+activate an existing window, including a minimized one. Viewer actions open Files, Terminal,
+Settings, Windows and Statistics, toggle Fullscreen, or Show/Hide Controls. Results follow live
+windows and permissions. Window popups offer Fullscreen and Show/Hide Controls only. Opening the
+palette releases held desktop input and mouse capture; search and composition stay in the viewer.
+
 Any number of people can watch at once, each with a stream scaled to their own window. The first to
 connect with `desktop.control` drives the pointer and keyboard; other eligible sessions can use
 "Take control". Each token grants explicit feature access. Desktop viewing, clipboard, files, audio,

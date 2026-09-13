@@ -1,0 +1,96 @@
+// Docker: current release binary, Chromium, foot, xmessage and wev.
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { mkdtemp, mkdir, open, readFile, writeFile, rm } from 'node:fs/promises';
+import { chromium } from 'playwright-core';
+import { createToken } from './token-fixture.mjs';
+const root = await mkdtemp('/tmp/elsewhere-palette-live-');
+await mkdir(root + '/runtime', { mode: 0o700 });
+await mkdir(root + '/data/applications', { recursive: true });
+await writeFile(root + '/data/applications/palette.desktop', '[Desktop Entry]\nType=Application\nName=Palette fixture\nComment=Open a Wayland window\nExec=foot --title=PaletteLaunched sleep 600\n');
+const log = await open(root + '/server.log', 'w');
+const origin = 'http://127.0.0.1:18449';
+const server = spawn(process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere',
+  ['--no-audio', '--no-rtc', '--no-tls', '--render-node', 'none', '--codecs', 'vp8', '--listen', '127.0.0.1:18449', '--screen-size', '800x600'],
+  { cwd: root, env: { ...process.env, HOME: root, SHELL: '/bin/bash', XDG_CONFIG_HOME: root + '/config', XDG_DATA_HOME: root + '/data', XDG_RUNTIME_DIR: root + '/runtime' }, stdio: ['ignore', log.fd, log.fd] });
+const wait = async (label, condition) => { for (let i = 0; i < 300; i++) { if (await condition()) return; await new Promise(r => setTimeout(r, 30)); } throw Error(label + ' timed out'); };
+let browser, token;
+const api = (path, method = 'GET', body) => fetch(origin + path, { method, headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, ...(body && { body: JSON.stringify(body) }) });
+const control = async body => assert((await api('/api/control', 'POST', body)).ok);
+const windows = async () => (await api('/api/windows')).json();
+try {
+  await wait('server', async () => { try { return (await fetch(origin)).ok; } catch { return false; } });
+  token = await createToken(root);
+  await control({ op: 'spawn', cmd: 'foot --title=Duplicate sh -c \"sleep 600\" & xmessage -title Duplicate -buttons OK:0 hello & stdbuf -oL wev > input.log' });
+  await wait('fixtures', async () => (await windows()).filter(w => w.title === 'Duplicate').length === 2);
+  const duplicates = (await windows()).filter(w => w.title === 'Duplicate');
+  assert(duplicates.some(w => w.x11) && duplicates.some(w => !w.x11));
+  browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: true, args: ['--no-sandbox'] });
+  const page = await browser.newPage();
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.goto(origin + '/#token=' + token);
+  await page.waitForFunction(() => elsewhere.store.get().status === 'connected');
+  const input = page.getByRole('combobox', { name: 'Search commands' });
+  const openPalette = async query => { await page.keyboard.press('Control+Alt+Shift+P'); await input.waitFor(); await input.fill(query); };
+  await openPalette('Duplicate');
+  assert.equal(await page.getByRole('option').count(), 2);
+  for (const w of duplicates) assert.match(await page.locator(`[data-entry="window:${w.id}"]`).innerText(), new RegExp(`#${w.id}`));
+  await input.press('Escape');
+  const minimized = duplicates[0];
+  await control({ id: minimized.id, op: 'minimize' });
+  await wait('minimized', async () => (await windows()).find(w => w.id === minimized.id)?.minimized);
+  await openPalette('Duplicate');
+  await page.locator(`[data-entry="window:${minimized.id}"]`).click();
+  await wait('activation', async () => (await windows()).some(w => w.id === minimized.id && w.focused && !w.minimized));
+  assert((await api(`/api/windows/${minimized.id}/snapshot.png`)).ok);
+  await openPalette('Palette fixture');
+  await page.locator('[data-entry="app:palette"]').click();
+  await wait('launch', async () => (await windows()).some(w => w.title === 'PaletteLaunched'));
+  const observer = (await windows()).find(w => w.app_id === 'wev');
+  assert(observer);
+  await control({ id: observer.id, op: 'activate' });
+  await page.locator('canvas.stage').focus();
+  await page.keyboard.down('a');
+  const inputLog = () => readFile(root + '/input.log', 'utf8');
+  await wait('held a', async () => (await inputLog()).includes('sym: a'));
+  await openPalette('');
+  await page.keyboard.type('unmistakable');
+  await page.keyboard.up('a');
+  await input.press('Escape');
+  await wait('released a', async () => (await inputLog()).includes('state: 0 (released)'));
+  assert(!(await inputLog()).includes('sym: u'), 'palette text cannot enter Wayland client');
+  await openPalette('Terminal'); await page.locator('[data-entry="action:terminal"]').click();
+  await input.waitFor({ state: 'hidden' });
+  await page.waitForFunction(() => document.activeElement?.classList.contains('xterm-helper-textarea'));
+  await page.getByRole('region', { name: 'Terminal' }).getByText('Connected', { exact: true }).waitFor();
+  await page.keyboard.type('export PALETTE_MARK=retained'); await page.keyboard.press('Enter');
+  await openPalette('Terminal'); await page.locator('[data-entry="action:terminal"]').click();
+  await input.waitFor({ state: 'hidden' });
+  await page.waitForFunction(() => document.activeElement?.classList.contains('xterm-helper-textarea'));
+  await page.keyboard.type('printf "%s" "$PALETTE_MARK" > terminal-marker'); await page.keyboard.press('Enter');
+  await wait('same terminal', async () => { try { return (await readFile(root + '/terminal-marker', 'utf8')) === 'retained'; } catch { return false; } });
+  await openPalette('Fullscreen'); await input.press('Enter');
+  await page.waitForFunction(() => elsewhere.isFullscreen());
+  await openPalette('Files'); await input.press('Enter');
+  await page.waitForFunction(() => !elsewhere.isFullscreen() && document.activeElement?.getAttribute('aria-label') === 'Files');
+  const limited = await (await api('/api/tokens', 'POST', { label: 'Palette fixture', permissions: ['desktop.view', 'apps.launch'] })).json();
+  const reader = await browser.newPage();
+  await reader.goto(origin + '/#token=' + limited.token);
+  await reader.waitForFunction(() => elsewhere.store.get().status === 'connected');
+  await reader.locator('#apps-toggle').click();
+  const search = reader.getByRole('combobox');
+  await search.fill('Palette fixture');
+  await reader.locator('[data-entry="app:palette"]').waitFor();
+  assert.equal((await api('/api/tokens/' + limited.metadata.id, 'DELETE')).status, 204);
+  await reader.waitForFunction(() => elsewhere.store.get().status === 'unauthorized');
+  assert.equal(await reader.locator('[data-entry^="app:"]').count(), 0);
+  assert.equal(await reader.locator('[data-entry^="window:"]').count(), 0);
+  assert.deepEqual(errors, []);
+  console.log('Live Wayland/Xwayland duplicate windows, minimize/activate, app launch, snapshot, input release/isolation, terminal preservation, fullscreen Files focus and revocation passed');
+} catch (error) { console.error('Windows:', await windows().catch(() => [])); console.error((await readFile(root + '/server.log', 'utf8')).split('\n').slice(-10).join('\n')); throw error; }
+finally {
+  await browser?.close();
+  if (server.exitCode === null) { server.kill('SIGTERM'); await new Promise(r => server.once('exit', r)); }
+  await log.close(); await rm(root, { recursive: true, force: true });
+}

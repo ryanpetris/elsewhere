@@ -1,5 +1,5 @@
 // The viewer: chrome around the stage. State comes from the engine (viewer.js) through its store.
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Loader2, Terminal as TerminalIcon, X } from 'lucide-react';
 import { useStore } from './store.js';
 import { WINDOW, PIP, pref } from './api.js';
@@ -44,14 +44,14 @@ export function App({ viewer }) {
   const [terminal, setTerminal] = useState(false);
   const [TerminalPanel, setTerminalPanel] = useState(null);
   const [terminalError, setTerminalError] = useState(null);
-  const toggleTerminal = () => {
+  const openTerminal = () => {
     viewer.setControlsHidden(false);
-    if (terminal && !hidden) { setTerminal(false); return; }
     setTerminal(true); setTerminalError(null);
     if (!TerminalPanel) import('./components/TerminalPanel.jsx')
       .then(module => setTerminalPanel(() => module.default))
       .catch(() => setTerminalError('Terminal could not load. Reload the page to retry.'));
   };
+  const toggleTerminal = () => { if (terminal && !hidden) setTerminal(false); else openTerminal(); };
   const closeTerminal = () => { setTerminal(false); document.getElementById('terminal-toggle')?.focus(); };
   const [borders, setBorders] = usePref('borders', false);
   const [elements, setElements] = usePref('elements', false);
@@ -59,8 +59,21 @@ export function App({ viewer }) {
   const filesOpen = useStore(viewer.store, s => s.filesOpen);
   useEffect(() => { if (filesOpen) { viewer.setControlsHidden(false); setSidebar(true); setTab('files'); } }, [filesOpen]);
   const [menu, setMenu] = useState(null); // One top-bar menu at a time.
-  const closeMenu = event => {
-    setMenu(null);
+  const paletteInvoker = useRef(null);
+  const [focusAfterClose, setFocusAfterClose] = useState(null);
+  useLayoutEffect(() => {
+    if (!focusAfterClose) return;
+    const target = typeof focusAfterClose.target === 'string' ? document.querySelector(focusAfterClose.target) : focusAfterClose.target;
+    const fallback = focusAfterClose.target === '.xterm-helper-textarea' ? document.querySelector('section[aria-label="Terminal"]') : document.querySelector('canvas.stage');
+    (target?.isConnected && target.getClientRects().length ? target : fallback)?.focus({ preventScroll: true });
+    setFocusAfterClose(null);
+  }, [focusAfterClose]);
+  const closeMenu = (event, focus) => {
+    setMenu(current => current === menu ? null : current);
+    if (menu === 'apps') {
+      setFocusAfterClose({ target: focus || (event?.type === 'keydown' || event?.detail === 0 ? paletteInvoker.current : 'canvas.stage') });
+      return;
+    }
     if (event?.type === 'keydown' || event?.detail === 0) document.getElementById(`${menu}-toggle`)?.focus();
   };
   const [fullscreen, setFullscreen] = useState(false); // the chrome is gone then, so nothing is collected for it
@@ -73,6 +86,41 @@ export function App({ viewer }) {
     return () => document.removeEventListener('fullscreenchange', on);
   }, [viewer]);
   useEffect(() => viewer.setElementsOn(elements && !windowMode && !PIP), [viewer, elements, windowMode]);
+  const openPalette = () => {
+    if (['no-token', 'unauthorized'].includes(viewer.store.get().status)) return;
+    if (menu === 'apps') { closeMenu({ type: 'keydown' }); return; }
+    paletteInvoker.current = document.activeElement;
+    viewer.releaseInput();
+    if (document.pointerLockElement) document.exitPointerLock();
+    setMenu('apps');
+  };
+  useEffect(() => {
+    viewer.openPalette = openPalette;
+    return () => { viewer.openPalette = null; };
+  }, [viewer, menu]);
+  const revealControls = async current => {
+    if (viewer.isFullscreen()) await document.exitFullscreen();
+    if (!current()) return false;
+    viewer.setControlsHidden(false);
+    return true;
+  };
+  const showPanel = async (panel, current) => { if (await revealControls(current)) { setSidebar(true); setTab(panel); } };
+  const available = permission => {
+    const state = viewer.store.get();
+    return !windowMode && !PIP && state.status === 'connected' && state.permissions.includes(permission);
+  };
+  const paletteActions = [
+    { id: 'files', label: 'Files', available: () => available('files.browse'), run: current => showPanel('files', current), focus: 'aside button[aria-label="Files"]' },
+    { id: 'terminal', label: 'Terminal', available: () => available('commands.execute'), run: async current => {
+      const module = await import('./components/TerminalPanel.jsx');
+      if (!current() || !await revealControls(current)) return;
+      setTerminalPanel(() => module.default); setTerminal(true);
+    }, focus: '.xterm-helper-textarea' },
+    { id: 'settings', label: 'Settings', available: () => available('desktop.view'), run: async current => { if (await revealControls(current)) setMenu('settings'); }, focus: '#viewer-settings input' },
+    { id: 'windows', label: 'Windows and Statistics', available: () => available('desktop.view'), run: current => showPanel('windows', current), focus: 'aside button[aria-label="Windows"]' },
+    { id: 'fullscreen', label: fullscreen ? 'Exit Fullscreen' : 'Fullscreen', available: () => !PIP, run: () => viewer.isFullscreen() ? document.exitFullscreen() : viewer.fullscreen(), focus: 'canvas.stage' },
+    { id: 'controls', label: hidden ? 'Show Controls' : 'Hide Controls', available: () => !PIP, run: () => viewer.setControlsHidden(!hidden), focus: 'canvas.stage' },
+  ];
   const canType = status === 'connected' && permissions.includes('desktop.control') && (windowMode || role === 'controller');
   useEffect(() => { if (!canType) setKeyboard(false); }, [canType]);
   useEffect(() => viewer.setStatsOn(!PIP && sidebar && tab === 'stats' && !hidden), [viewer, sidebar, tab, hidden]);
@@ -85,11 +133,11 @@ export function App({ viewer }) {
         sidebar={sidebar} onSidebar={() => setSidebar(!sidebar)}
         onFullscreen={viewer.fullscreen}
         onHideControls={() => viewer.setControlsHidden(true)}
-        menu={menu} onMenu={m => setMenu(menu === m ? null : m)}
+        menu={menu} onMenu={m => { if (m === 'apps' && menu !== 'apps') openPalette(); else if (m === null || menu === m) closeMenu({ type: 'click', detail: 1 }); else setMenu(m); }}
         keyboard={keyboard} onKeyboard={toggleKeyboard} canType={canType}
       /></div>
       {menu === 'about' && !fullscreen && <About viewer={viewer} onClose={closeMenu} />}
-      {menu === 'apps' && <Launcher viewer={viewer} onClose={closeMenu} />}
+      {menu === 'apps' && <Launcher viewer={viewer} actions={paletteActions} onClose={closeMenu} />}
       {menu === 'power' && <PowerMenu viewer={viewer} onClose={closeMenu} />}
       {menu === 'settings' && !windowMode && !fullscreen && <Settings viewer={viewer} borders={borders} onBorders={setBorders} elements={elements} onElements={setElements} onClose={closeMenu} />}
       <div className="relative flex min-h-0 flex-1">

@@ -137,11 +137,11 @@ try {
   await page.keyboard.press('Control+Alt+Shift+h');
   assert.deepEqual(await page.evaluate(() => sent.filter(p => [0x87, 0x89].includes(p[0]))), [[0x87, 29, 0, 1], [0x87, 56, 0, 1], [0x87, 42, 0, 1], [0x89]], 'hide shortcut releases modifiers through BLUR');
   await page.keyboard.press('Control+Alt+Shift+h');
-  for (const name of ['Settings', 'About Elsewhere', 'Applications']) {
+  for (const name of ['Settings', 'About Elsewhere', 'Command Palette (Ctrl+Alt+Shift+P)']) {
     const button = page.getByRole('button', { name, exact: true });
     await button.focus(); await resetPackets();
     await page.keyboard.press('Enter');
-    await (name === 'Applications' ? page.getByPlaceholder('Search Applications…') : page.getByRole('dialog')).waitFor();
+    await (name === 'Command Palette (Ctrl+Alt+Shift+P)' ? page.getByPlaceholder('Search applications, windows, actions…') : page.getByRole('dialog')).waitFor();
     await page.keyboard.press('Escape');
     assert(await button.evaluate(el => el === document.activeElement), `${name} keyboard close restores trigger focus`);
     assert.deepEqual(await keyPackets(), [], `${name} keyboard open and close stay local`);
@@ -186,26 +186,26 @@ try {
   assert.equal(await panel.count(), 0); assert(await trigger.evaluate(el => el === document.activeElement));
   assert(await page.evaluate(() => elsewhere.store.get().elementsOn && elsewhere.store.get().elements !== null));
   await trigger.click(); assert(await borders.isChecked() && await elements.isChecked());
-  await page.getByRole('button', { name: 'Applications', exact: true }).click();
+  await page.getByRole('button', { name: 'Command Palette (Ctrl+Alt+Shift+P)', exact: true }).click();
   assert.equal(await panel.count(), 0);
-  await page.getByPlaceholder('Search Applications…').waitFor();
+  await page.getByPlaceholder('Search applications, windows, actions…').waitFor();
   await trigger.click(); await panel.waitFor();
-  assert.equal(await page.getByPlaceholder('Search Applications…').count(), 0);
+  assert.equal(await page.getByPlaceholder('Search applications, windows, actions…').count(), 0);
   await page.locator('header').click({ position: { x: 3, y: 3 } });
   assert.equal(await panel.count(), 0, 'header outside click dismisses settings');
   await trigger.click();
   await page.mouse.click(5, 500); assert.equal(await panel.count(), 0);
-  const apps = page.getByRole('button', { name: 'Applications', exact: true });
+  const apps = page.getByRole('button', { name: 'Command Palette (Ctrl+Alt+Shift+P)', exact: true });
   await apps.click();
-  await page.getByRole('heading', { name: 'Accessories', exact: true }).click();
+  await page.getByRole('heading', { name: 'Applications', exact: true }).click();
   await page.keyboard.press('a');
   await page.keyboard.press('Escape');
   assert(await apps.evaluate(el => el === document.activeElement));
-  assert.equal(await page.getByPlaceholder('Search Applications…').count(), 0);
+  assert.equal(await page.getByPlaceholder('Search applications, windows, actions…').count(), 0);
   await apps.click();
-  const search = page.getByPlaceholder('Search Applications…');
+  const search = page.getByPlaceholder('Search applications, windows, actions…');
   await search.fill('Local Test');
-  await page.locator('[data-app="local-test.desktop"]').waitFor();
+  await page.locator('[data-entry="app:local-test.desktop"]').waitFor();
   await search.press('Enter');
   await search.waitFor({ state: 'detached' });
   assert.equal(await search.count(), 0);
@@ -226,7 +226,7 @@ try {
   assert.equal(await page.evaluate(() => sent.filter(p => p[0] === 0x87).length), 2, 'outside dismissal restores desktop typing');
   await apps.click();
   await search.fill('Local Test');
-  await page.locator('[data-app="local-test.desktop"]').waitFor();
+  await page.locator('[data-entry="app:local-test.desktop"]').waitFor();
   await page.evaluate(() => { window.sent = []; });
   await search.press('Enter');
   await search.waitFor({ state: 'detached' });
@@ -236,7 +236,7 @@ try {
   for (const key of ['Enter', 'Space']) {
     await apps.click();
     await page.evaluate(() => { window.sent = []; window.controlRequests = []; });
-    await page.getByRole('button', { name: 'Local Test', exact: true }).press(key);
+    await page.locator('[data-entry="app:local-test.desktop"]').press(key);
     await search.waitFor({ state: 'detached' });
     assert.equal(await page.evaluate(() => controlRequests.filter(p => p.op === 'launch').length), 1, `result ${key} launches once`);
     assert.equal(await page.evaluate(() => sent.filter(p => p[0] === 0x87).length), 0, `result ${key} stays local`);
