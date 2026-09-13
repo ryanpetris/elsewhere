@@ -279,6 +279,8 @@ impl Button {
 pub enum Event {
     /// The pointer image changed; `None` hides it. Drawn by the browser, not composited.
     Cursor(Option<CursorImage>),
+    /// Logical pointer coordinates and the desktop extent, independent of video encoding.
+    PointerPosition { x: f64, y: f64, width: f64, height: f64 },
     /// A client locked (or released) the pointer; the browser should mirror it with the Pointer Lock API.
     PointerLock(bool),
     /// The window list changed (full list, bottom to top, minimized last).

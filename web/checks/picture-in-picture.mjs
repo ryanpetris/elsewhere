@@ -1,3 +1,4 @@
+import { approveControl } from './control-fixture.mjs';
 import { createToken, revokeToken } from './token-fixture.mjs';
 // Run in the Docker rig with a headed display at :95 and the release binary.
 // Chromium check also needs wev; Firefox check needs geckodriver listening on port 4445.
@@ -83,7 +84,7 @@ try {
   const page = await context.newPage();
   await page.goto(origin + '/#token=' + token);
   await page.waitForFunction(() => !!window.elsewhere?.store.get().stream);
-  await page.evaluate(() => elsewhere.takeControl());
+  await page.evaluate(() => elsewhere.claimControl());
   await page.evaluate(command => elsewhere.spawn(command), toneCommand());
   await page.waitForFunction(() => !!elsewhere.store.get().playback);
   await page.evaluate(() => elsewhere.mic.start());
@@ -137,7 +138,7 @@ try {
                                                                hidden: document.hidden,
                                                                frames: elsewhere().videoSeq
                                                              })));
-  await other.evaluate(() => elsewhere.takeControl());
+  await approveControl(frame, other);
   await other.waitForFunction(() => window.elsewhere?.store.get().role === 'controller');
   await frame.getByRole('button', {name: 'Return to Viewer'}).click();
   await wait(() => Promise.resolve(pipPage.isClosed()));
@@ -150,13 +151,19 @@ try {
   const claimPip = await mainClaimNext;
   await claimPip.waitForTimeout(300);
   await page.bringToFront();
-  await page.getByRole('button', {name: 'Take Control', exact: true}).click();
+  const claimFrame = claimPip.frames().find(f => f.parentFrame());
+  await claimFrame.waitForFunction(() => window.elsewhere?.store.get().role === 'participant');
+  await claimFrame.getByRole('button', {name: 'Request Control', exact: true}).click();
+  await page.waitForTimeout(150);
+  assert.equal(await other.evaluate(() => elsewhere.store.get().role), 'controller');
+  await approveControl(other, claimFrame);
+  await claimFrame.getByRole('button', {name: 'Return to Viewer'}).click();
   await wait(() => Promise.resolve(claimPip.isClosed()));
   await page.waitForFunction(() => window.elsewhere?.store.get().role === 'controller');
-  console.log('opener Take Control returns desktop presentation');
+  console.log('PiP requests approval and returns control to its opener');
 
   await page.bringToFront();
-  await page.evaluate(() => elsewhere.takeControl());
+  await page.evaluate(() => elsewhere.claimControl());
   await page.waitForFunction(() => window.elsewhere?.store.get().role === 'controller');
   const next = context.waitForEvent('page');
   await page.getByRole('button', {name: 'Picture-in-Picture', exact: true}).first().click();
@@ -302,13 +309,13 @@ try {
   const roFrame = roPip.frames().find(f => f.parentFrame());
   await roFrame.waitForFunction(() => window.elsewhere?.store.get().role === 'viewer');
   await roFrame.evaluate(() => {
-    elsewhere.takeControl();
+    elsewhere.requestControl();
     elsewhere.handoff(1n)
   });
   await page.waitForTimeout(300);
   assert.equal(await roFrame.evaluate(() => window.elsewhere?.store.get().role), 'viewer');
   assert.equal(await page.evaluate(() => window.elsewhere?.store.get().role), 'controller');
-  assert.equal(await roFrame.getByRole('button', {name: 'Take Control', exact: true}).count(), 0);
+  assert.equal(await roFrame.getByRole('button', {name: 'Request Control', exact: true}).count(), 0);
   await readOnly.evaluate(() => elsewhere.pip.close());
   console.log('read-only PiP stays read-only');
   await page.evaluate(() => {

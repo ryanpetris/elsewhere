@@ -17,3 +17,7 @@ export const BTN = [0x110, 0x112, 0x111, 0x113, 0x114];
 export const DISPLAY = 0x14;
 // Full grants from the authenticated socket, before session initialization.
 export const PERMISSIONS = 0x15;
+
+// Coalesced desktop membership and logical observer pointer coordinates.
+export const ROSTER = 0x16, POINTER_POSITION = 0x17;
+export const REQUEST_CONTROL = 0x9B, CANCEL_CONTROL = 0x9C, APPROVE_CONTROL = 0x9D, DECLINE_CONTROL = 0x9E;

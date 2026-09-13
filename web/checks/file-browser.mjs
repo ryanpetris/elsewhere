@@ -389,7 +389,7 @@ try {
   releaseList();
   await p.waitForTimeout(200);
   assert.equal(await p.evaluate(() => elsewhere.store.get().filesPath), root + '/b');
-  await p.evaluate(() => elsewhere.takeControl());
+  await p.evaluate(() => elsewhere.claimControl());
   await p.waitForFunction(() => elsewhere.store.get().role === 'controller');
   await navigate(p, root + '/Downloads');
   await p.locator('canvas.stage').evaluate(el => {

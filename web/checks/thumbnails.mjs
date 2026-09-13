@@ -49,7 +49,7 @@ server = spawn((process.env.ELSEWHERE_BINARY || '/src/target/release/elsewhere')
   page.on('request', request => { if (request.url().includes('/snapshot.png')) requests.push({ at: Date.now(), url: request.url() }); });
   await page.goto(origin + '/#token=' + token);
   await page.waitForFunction(() => !!elsewhere.store.get().stream);
-  await page.evaluate(() => elsewhere.takeControl());
+  await page.evaluate(() => elsewhere.claimControl());
   await page.evaluate(cmd => elsewhere.spawn(cmd), root + '/client ' + root + '/command');
   await page.waitForFunction(() => elsewhere.store.get().windows.some(w => w.app_id === 'thumbnail-surfaces'));
   const id = await page.evaluate(() => elsewhere.store.get().windows.find(w => w.app_id === 'thumbnail-surfaces').id);

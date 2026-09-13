@@ -106,7 +106,7 @@ export function MixerPanel({ viewer, hidden = false, onClose, onPopOut, poppedOu
         <h2 className="text-xs font-medium text-ink">Audio Mixer</h2>
         {role !== 'controller' && <Badge tone="warn" className="ml-2">Read Only</Badge>}
         <span className="ml-auto flex items-center gap-1">
-          {role === 'participant' && <button type="button" className="btn btn-primary btn-xs" onClick={viewer.takeControl}><MousePointer2 className="size-3" /> Take Control</button>}
+          {role === 'participant' && <button type="button" className="btn btn-primary btn-xs" onClick={viewer.requestControl}><MousePointer2 className="size-3" /> Request Control</button>}
           {onPopOut && <IconButton icon={ExternalLink} label="Pop Out Mixer" size="sm" onClick={onPopOut} />}
           <IconButton ref={close} icon={X} label="Close Mixer" size="sm" onClick={onClose} />
         </span>

@@ -195,6 +195,7 @@ pub struct State {
     pub seat_state: SeatState<State>,
     pub seat: Seat<State>,
     pub pointer_location: Point<f64, Logical>,
+    last_pointer: Option<(f64, f64, f64, f64)>,
     pub pressed_buttons: std::collections::HashSet<u32>,
     /// A client holds an active pointer lock (mirrored to the browser).
     pub pointer_locked: bool,
@@ -373,6 +374,7 @@ impl State {
             seat_state,
             seat,
             pointer_location: (0.0, 0.0).into(),
+            last_pointer: None,
             pressed_buttons: Default::default(),
             pointer_locked: false,
             lock_suppressed: false,
@@ -466,6 +468,16 @@ impl State {
                 channel::Event::Closed => state.running = false,
             })
             .unwrap();
+        handle.insert_source(Timer::from_duration(Duration::from_millis(34)), |_, _, state| {
+            let geo = state.output_geometry();
+            let position = (state.pointer_location.x, state.pointer_location.y, geo.width_px as f64 / geo.scale, geo.height_px as f64 / geo.scale);
+            if state.last_pointer != Some(position) {
+                state.last_pointer = Some(position);
+                let (x, y, width, height) = position;
+                let _ = state.events.send(elsewhere_core::Event::PointerPosition { x, y, width, height });
+            }
+            TimeoutAction::ToDuration(Duration::from_millis(34))
+        }).unwrap();
         let interval = self.frame_interval;
         handle
             .insert_source(Timer::from_duration(interval), move |_, _, state| {

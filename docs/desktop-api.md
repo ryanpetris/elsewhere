@@ -466,7 +466,7 @@ session's `Resize` only sets its own encoder's size (`fit`: the output's aspect 
 enlarged, even-sized). `set_size` on a `FfmpegSink` changes the worker's conversion target, scaling on
 the GPU to NV12 or on the CPU to YUV420P. The stream's `scale` becomes `output scale × target / output width`, so
 the page's logical mapping still holds; the controller's encoder has no target and takes the output as
-it is, so a resize reopens its encoder once, through the compositor. `TakeControl` from a desktop.control session, or the controller
+it is, so a resize reopens its encoder once, through the compositor. An approved request, an owner-initiated handoff, a claim of an unowned desktop, or the controller
 leaving (the oldest remaining desktop.control session inherits), goes through `set_controller`: release
 all input and the pointer lock, re-fit, resize the output to the new controller's size, tell both
 sessions their `Role`. An encoder that fails is rebuilt by the next full frame; one that fails again
@@ -519,8 +519,8 @@ Fullscreen remains available in the normal viewer.
 
 Desktop control transfers only from its current owner to a live desktop.control connection, using the
 server's conditional `Handoff` message. A participant opening PiP keeps watching until explicitly
-claiming control. Closing PiP conditionally returns control to the opener; a third party's intervening
-claim is preserved. Taking control in the opener closes its desktop PiP first. If the opener is
+requesting and receiving approval. Closing PiP conditionally returns control to the opener; a third party's intervening
+control is preserved. The opener and PiP both expose the participant request flow. If the opener is
 disconnected when PiP closes, the server uses its normal oldest-session election. Only the controller sizes the desktop; other presentations scale their stream to
 their actual viewport and DPR. Each presentation has its own decoder.
 

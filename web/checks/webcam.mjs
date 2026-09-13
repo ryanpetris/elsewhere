@@ -34,7 +34,7 @@ try {
   const page = await browser.newPage();
   await page.goto(origin + '/#token=' + token);
   await page.waitForFunction(() => elsewhere.store.get().camAvailable && !!elsewhere.store.get().stream);
-  await page.evaluate(() => elsewhere.takeControl());
+  await page.evaluate(() => elsewhere.claimControl());
   await page.waitForFunction(() => elsewhere.store.get().role === 'controller');
   await page.evaluate(() => elsewhere.cam.start());
   await wait(() => { try { return probe().includes('Video Capture'); } catch { return false; } });

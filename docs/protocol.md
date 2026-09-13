@@ -83,7 +83,7 @@ Config on WebSocket before video if that stream has not been configured on the s
 | `0x8A` | PointerLockLost | none. The browser lost its lock (Escape): the client's lock is released and not re-taken until the next click or successful browser capture. |
 | `0x8B` | Control | JSON control message (below). |
 | `0x8C` | SetClipboard | UTF-8 text the browser pasted; it becomes the desktop clipboard, offered to Wayland and X11 clients. `clipboard.write` required. Images and staged file selections use `PasteClipboard`. |
-| `0x8D` | TakeControl | none. A desktop.control session becomes the controller; the desktop takes its size. |
+| `0x8D` | TakeControl | none. A desktop.control session claims an unowned desktop; the desktop takes its size. |
 | `0x8E` | Notify | JSON `{"id": N, "action": "default" \| "<key>"}`: the viewer clicked a notification or one of its actions; without `action` it dismissed it. `desktop.control` required. |
 | `0x8F` | Stream | JSON `{"codecs":["hevc","h264"],"quality":"medium","effort":"fast"}`, all fields optional. A codec list starts selection over in its given order, including failure counts. Quality or effort alone preserves codec failure history. Any session, its own stream only. |
 | `0x90` | Drag | JSON `{"op": "start"}`, `{"op": "drop", "batch": "…", "names": ["a.txt", …]}` or `{"op": "cancel"}` (with `"batch"` when files were staged for it): the browser drags local files over the desktop. `start` begins a drag on the desktop where the pointer is (offering `text/uri-list`, to copy or to move); the pointer messages move it; `drop` names the batch the files were staged in (`PUT /api/drop/{batch}/{name}` first, not the transfer folder) and their names, and drops their `file://` URIs on the application under the pointer; a drop nothing took, or a cancel naming a batch, sends the files to the transfer folder; `cancel` lets go over nothing. Controlling session only. |
@@ -114,7 +114,7 @@ it reconnects after a second.
 Any number of sessions may watch the desktop at once; each has its own encoder, so each gets the
 codec its browser decodes best and a stream scaled to fit its own window. One session at a time is the
 **controller**: the first desktop.control session to connect, until it leaves (then the oldest
-remaining desktop.control session) or another desktop.control session sends `TakeControl`. The
+remaining desktop.control session), approves a pending request, or hands control to another eligible session. The
 controller's pointer and keyboard messages drive the desktop, and its `Resize` sizes the output; the
 others' pointer and keyboard messages are ignored and their `Resize` only sets the size their own
 stream is scaled to (the output's aspect, never enlarged; the page letterboxes it). A desktop.control
@@ -123,6 +123,30 @@ a desktop-view-only session can't. Control changes send `Role` to the two sessio
 whatever the old controller held. `Session` identifies each desktop connection. `Handoff` uses the
 same control-change path but checks ownership and the target under the session lock. PiP uses this
 conditional transfer so a late presentation callback cannot displace another controller.
+
+Desktop membership uses `Roster` (`0x16`, UTF-8 JSON). It contains `controller` and `epoch`
+as decimal strings, and sorted `sessions` with `id`, connection `label`, `can_control`, `request`
+and `result`. Labels such as "Session 3" identify connections, not verified people. No token IDs,
+secrets or permission lists are included. A request contains decimal-string `id` and `epoch` plus
+`expires_at_ms`, a Unix timestamp. Results are `approved`, `declined`, `cancelled`, `expired` or
+`controller_changed`, otherwise null.
+
+`RequestControl` (`0x9B`, no payload) creates an eligible participant's request, expiring after
+30 seconds. Repeating it preserves the deadline. With no controller it claims control immediately.
+`CancelControl` (`0x9C`) carries the request ID and epoch as two little-endian u64 values.
+`ApproveControl` (`0x9D`) and `DeclineControl` (`0x9E`) carry target session ID, request ID and
+epoch as three little-endian u64 values. Only the current controller can decide a live matching
+request in the current control epoch. Disconnect, revocation and controller changes invalidate
+pending requests. Approval does not grant permissions. HTTP, MCP and window input retain their
+permission checks independently of desktop approval.
+
+`PointerPosition` (`0x17`) carries four little-endian f64 values: compositor logical x, y,
+output width and output height. Changed positions are sampled every 34 ms independently of video,
+including moves caused by API input. Observers combine this with `Cursor` shape, hotspot and
+visibility, scaled into the letterboxed desktop. Controllers keep browser-local cursor feedback.
+Roster, pointer and desktop cursor updates retain only the latest value per connection and replay
+on connection. Control changes also refresh `Role`, release held input and pointer lock, and stop
+the old controller's microphone and camera capture. Playback can continue.
 
 ### Window streams (`/ws/window/{id}`)
 

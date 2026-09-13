@@ -14,6 +14,7 @@ pub use mixer::{Mixer, MixerAudience};
 pub mod files;
 mod notify;
 mod paste;
+mod participants;
 pub mod rtc;
 mod protocol;
 #[cfg(test)]
@@ -150,11 +151,14 @@ pub(crate) struct Viewers {
     sessions: HashMap<u64, ViewerSession>,
     controller: Option<u64>,
     control_epoch: u64,
+    next_request: u64,
+    roster: tokio::sync::watch::Sender<Bytes>,
     /// The output as the controller last sized it.
     output: OutputGeometry,
     display: display::Settings,
     /// Last cursor message, replayed to a new viewer.
-    cursor: Option<Bytes>,
+    cursor: tokio::sync::watch::Sender<Option<Bytes>>,
+    pointer: tokio::sync::watch::Sender<Option<Bytes>>,
     /// Whether a client currently holds a pointer lock, replayed to a new viewer.
     locked: bool,
     /// Last WINDOWS message, replayed to a new viewer, and the list it encodes (the API's view).
@@ -169,7 +173,7 @@ pub(crate) struct Viewers {
 
 impl Default for Viewers {
     fn default() -> Self {
-        Viewers { sessions: HashMap::new(), controller: None, control_epoch: 0, display: display::Settings::default(), output: elsewhere_core::INITIAL_OUTPUT, cursor: None, locked: false, windows: None, window_list: Vec::new(), clipboard: Clipboard::default(), clipboard_scope: random_hex(16), next_clipboard_write: 1, next_id: 1 }
+        Viewers { sessions: HashMap::new(), controller: None, control_epoch: 0, next_request: 1, roster: tokio::sync::watch::channel(Bytes::new()).0, display: display::Settings::default(), output: elsewhere_core::INITIAL_OUTPUT, cursor: tokio::sync::watch::channel(None).0, pointer: tokio::sync::watch::channel(None).0, locked: false, windows: None, window_list: Vec::new(), clipboard: Clipboard::default(), clipboard_scope: random_hex(16), next_clipboard_write: 1, next_id: 1 }
     }
 }
 
@@ -218,6 +222,8 @@ pub(crate) struct ViewerSession {
     /// without its reference would corrupt the picture until the next one anyway).
     cam_wait_key: bool,
     mixer_subscribed: bool,
+    request: Option<participants::ControlRequest>,
+    request_result: Option<&'static str>,
 }
 
 /// `audio_rx` carries the clients' Opus packets, for every viewer.

@@ -1,5 +1,6 @@
 // The top bar: brand and context, the launchers, the connection state, and the viewer's own controls.
 import { PanelTopClose, PictureInPicture2, CornerUpLeft, Expand, Eye, Hand, Keyboard, LayoutGrid, MousePointer2, PanelRightClose, PanelRightOpen, Power, Settings } from 'lucide-react';
+import { Participants } from './Participants.jsx';
 import { useStore } from '../store.js';
 import { WINDOW, PIP } from '../api.js';
 import { Badge, Divider, IconButton, Logo, codecName, cx } from './ui.jsx';
@@ -39,18 +40,13 @@ function BarButton({ icon: Icon, label, active = false, onClick, className = '',
   );
 }
 
-function Role({ viewer, role, windowMode }) {
-  if (!windowMode && role === 'participant') return (
-    <button type="button" aria-label="Take Control" onClick={e => { viewer.takeControl(); e.currentTarget.blur(); }} className="btn btn-primary btn-sm mr-1 max-sm:mr-0 max-sm:p-0">
-      <MousePointer2 className="size-3.5" /> <span className="hidden sm:inline">Take Control</span>
-    </button>
-  );
+function Role({ role, windowMode }) {
   if (role === 'viewer') return <Badge className="mr-1" title="This token does not allow desktop control"><Eye className="size-3" /> <span className="hidden sm:inline">View Only</span></Badge>;
   if (!windowMode && role === 'controller') return <Badge tone="ok" dot className="mr-1 max-sm:hidden" title="Desktop Control">Controlling</Badge>;
   return null;
 }
 
-/// The popup's role, in the badges the main bar uses. Its own Take Control button stands beside this.
+/// The popup's role, in the badges the main bar uses. Its participant controls stand beside this.
 function PopupRole({ status, role, text }) {
   if (status !== 'connected') return <span className="shrink-0 text-ink-3">{text}</span>;
   if (role === 'viewer') return <Badge title="This token does not allow desktop control"><Eye className="size-3" /> View Only</Badge>;
@@ -83,13 +79,13 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, o
       <span className="min-w-0 flex-1 truncate font-medium text-ink">{windowMode ? windowTitle || `Window ${WINDOW}` : 'Remote Desktop'}</span>
       <PopupRole status={status} role={role} text={text} />
       {locked && <MousePointer2 data-mouse-capture className="size-3.5 shrink-0 text-warn" role="img" aria-label="Mouse Captured" />}
-      {!windowMode && role === 'participant' && <button type="button" className="btn btn-primary btn-xs" onClick={() => viewer.takeControl()}>Take Control</button>}
+      {!windowMode && <Participants viewer={viewer} menu={menu} onMenu={onMenu} />}
       {canType && <IconButton icon={Keyboard} label="On-Screen Keyboard" size="sm" active={keyboard} onClick={onKeyboard} />}
       <IconButton icon={CornerUpLeft} label="Return to Viewer" size="sm" onClick={() => window.parent.elsewhereReturn?.()} />
     </header>
   );
   return (
-    <header onClick={event => { if (!event.target.closest('[data-menu-trigger]')) onMenu(null); }} className="flex h-12 shrink-0 items-center border-b border-line bg-surface px-1 max-sm:[&_button]:size-7 max-sm:[&_button]:px-0 sm:gap-2 sm:px-3">
+    <header onClick={event => { if (!event.target.closest('[data-menu-trigger]')) onMenu(null); }} className="flex h-12 shrink-0 items-center border-b border-line bg-surface px-1 max-sm:[&_button:not([role=dialog]_button)]:size-7 max-sm:[&_button:not([role=dialog]_button)]:px-0 sm:gap-2 sm:px-3">
       <div className="flex min-w-0 shrink items-center pr-1">
         <button type="button" data-menu-trigger id="about-toggle" aria-label="About Elsewhere" title="About Elsewhere"
           aria-describedby={windowMode ? 'about-window-title' : undefined}
@@ -112,7 +108,8 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, o
       </div>
       <div className="ml-auto flex shrink-0 items-center sm:gap-0.5">
         {locked && <Capture />}
-        <Role viewer={viewer} role={role} windowMode={windowMode} />
+        <Role role={role} windowMode={windowMode} />
+        {!windowMode && <Participants viewer={viewer} menu={menu} onMenu={onMenu} />}
         {canType && <IconButton icon={Keyboard} label="On-Screen Keyboard" active={keyboard} onClick={onKeyboard} />}
         {!windowMode && viewer.touch && <IconButton icon={Hand} label="Touch as Mouse" active={touchMouse} onClick={() => viewer.setTouchMouse(!touchMouse)} />}
         {!windowMode && (

@@ -7,6 +7,7 @@ import { hue, windowColor, codecName } from './ui.jsx';
 import { Notifications } from './Notifications.jsx';
 
 export function Stage({ viewer, windowMode, borders, elements, children }) {
+  const observer = useStore(viewer.store, s => !windowMode && s.role !== 'controller');
   const releasedMouse = useStore(viewer.store, s => s.captureOnClick && !s.locked);
   const el = useRef(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -31,14 +32,33 @@ export function Stage({ viewer, windowMode, borders, elements, children }) {
   }, [viewer]);
   return (
     <div ref={el} className="viewer-stage relative flex min-w-0 flex-1 items-center justify-center overflow-hidden bg-black">
-      <canvas ref={viewer.attach} tabIndex={-1} className={`stage block outline-none ${windowMode ? '' : 'h-full w-full'} ${!windowMode && releasedMouse ? 'cursor-default!' : ''}`} />
+      <canvas ref={viewer.attach} tabIndex={-1} className={`stage block outline-none ${windowMode ? '' : 'h-full w-full'} ${observer || !windowMode && releasedMouse ? 'cursor-default!' : ''}`} />
       {(borders || elements) && <Overlay viewer={viewer} size={size} borders={borders} elements={elements} />}
+      {!windowMode && <ObserverPointer viewer={viewer} size={size} />}
       <Banner viewer={viewer} />
       <Notice viewer={viewer} />
       <Notifications viewer={viewer} />
       {children}
     </div>
   );
+}
+
+function ObserverPointer({ viewer, size }) {
+  const stream = useStore(viewer.store, s => s.stream);
+  const pointer = useStore(viewer.store, s => s.observerPointer);
+  const image = useStore(viewer.store, s => s.cursorImage);
+  const role = useStore(viewer.store, s => s.role);
+  const status = useStore(viewer.store, s => s.status);
+  if (status !== 'connected' || role === 'controller' || !pointer || !image || !stream || !(pointer.width > 0 && pointer.height > 0)) return null;
+  const k = Math.min(size.w / stream.width, size.h / stream.height);
+  const width = stream.width * k, height = stream.height * k;
+  const kx = width / pointer.width, ky = height / pointer.height;
+  const left = (size.w - width) / 2, top = (size.h - height) / 2;
+  return <div className="pointer-events-none absolute overflow-hidden" style={{ left, top, width, height, transform: 'var(--desktop-transform, none)', transformOrigin: '0 0' }}>
+    <img data-observer-pointer alt="" src={image.url} className="absolute max-w-none" style={{
+      left: (pointer.x - image.hx) * kx, top: (pointer.y - image.hy) * ky, width: image.width * kx, height: image.height * ky,
+    }} />
+  </div>;
 }
 
 // One rectangle per visible window (the same hue as its row) and one per element of the focused
@@ -84,7 +104,7 @@ function Notice({ viewer }) {
   if (!notice) return null;
   const good = notice.kind === 'success';
   return (
-    <div className={`pointer-events-none absolute bottom-3 left-1/2 flex max-w-[90%] -translate-x-1/2 animate-rise items-center gap-2.5 rounded-lg border bg-surface/95 px-3 py-2 text-xs shadow-pop backdrop-blur ${good ? 'border-ok/30 text-ink' : 'border-warn/30 text-ink'}`}>
+    <div role="status" className={`pointer-events-none absolute bottom-3 left-1/2 flex max-w-[90%] -translate-x-1/2 animate-rise items-center gap-2.5 rounded-lg border bg-surface/95 px-3 py-2 text-xs shadow-pop backdrop-blur ${good ? 'border-ok/30 text-ink' : 'border-warn/30 text-ink'}`}>
       {good ? <CheckCircle2 className="size-4 shrink-0 text-ok" /> : <TriangleAlert className="size-4 shrink-0 text-warn" />} {notice.text}
       {notice.path && <button className="btn btn-outline btn-xs pointer-events-auto shrink-0" onClick={() => viewer.openFiles(notice.path)}><FolderOpen className="size-3" /> Open Folder</button>}
     </div>

@@ -43,6 +43,10 @@ pub const FILE_RESULT: u8 = 0x13;
 pub const DISPLAY: u8 = 0x14;
 /// JSON array of the authenticated token grants, before session initialization.
 pub const PERMISSIONS: u8 = 0x15;
+/// Latest desktop membership and pending control requests, as JSON.
+pub const ROSTER: u8 = 0x16;
+/// `[f64 x][f64 y][f64 logical width][f64 logical height]`.
+pub const POINTER_POSITION: u8 = 0x17;
 // client -> server
 /// `[AUTH][token as UTF-8]`: must be the first message on a new socket; nothing else is processed before it.
 pub const AUTH: u8 = 0x80;
@@ -64,7 +68,7 @@ pub const PASTE_CLIPBOARD: u8 = 0x9A;
 pub const CONTROL: u8 = 0x8B;
 /// UTF-8 text the browser pasted: becomes the desktop clipboard.
 pub const SET_CLIPBOARD: u8 = 0x8C;
-/// A session with a token with `desktop.control` asks to become the controller.
+/// Claim an unowned desktop. Requires `desktop.control`.
 pub const TAKE_CONTROL: u8 = 0x8D;
 /// JSON `{"id":N,"action":"key"}`: the viewer clicked a notification (`default`) or one of its actions; without `action` it dismissed it. `desktop.control` required.
 pub const NOTIFY: u8 = 0x8E;
@@ -102,6 +106,13 @@ pub const REPORT: u8 = 0x96;
 pub const MIXER_CLIENT: u8 = 0x97;
 /// `[HANDOFF][u64 target]`: only the current controller may transfer to a live control session.
 pub const HANDOFF: u8 = 0x98;
+/// Request approval from the current controller; no payload.
+pub const REQUEST_CONTROL: u8 = 0x9B;
+/// `[u64 request][u64 epoch]`: cancel this connection's request.
+pub const CANCEL_CONTROL: u8 = 0x9C;
+/// `[u64 target][u64 request][u64 epoch]`: decide a live request in this control tenure.
+pub const APPROVE_CONTROL: u8 = 0x9D;
+pub const DECLINE_CONTROL: u8 = 0x9E;
 
 /// What a session may do, as sent in `ROLE`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -313,6 +324,9 @@ pub enum ClientMsg {
     PasteClipboard(PasteMsg),
     TakeControl,
     Handoff(u64),
+    RequestControl,
+    CancelControl { request: u64, epoch: u64 },
+    DecideControl { target: u64, request: u64, epoch: u64, approve: bool },
     Notify(NotifyMsg),
     Stream(StreamChoice),
     Drag(DragMsg),
@@ -405,7 +419,13 @@ pub fn decode(b: &[u8]) -> Option<ClientMsg> {
             };
             ClientMsg::PasteClipboard(PasteMsg { paste: flags & 1 != 0, shift_insert: flags & 2 != 0, epoch, request, selection })
         },
-        TAKE_CONTROL => ClientMsg::TakeControl,
+        TAKE_CONTROL if b.len() == 1 => ClientMsg::TakeControl,
+        REQUEST_CONTROL if b.len() == 1 => ClientMsg::RequestControl,
+        CANCEL_CONTROL if b.len() == 17 => ClientMsg::CancelControl { request: u64::from_le_bytes(b[1..9].try_into().ok()?), epoch: u64::from_le_bytes(b[9..17].try_into().ok()?) },
+        APPROVE_CONTROL | DECLINE_CONTROL if b.len() == 25 => ClientMsg::DecideControl {
+            target: u64::from_le_bytes(b[1..9].try_into().ok()?), request: u64::from_le_bytes(b[9..17].try_into().ok()?),
+            epoch: u64::from_le_bytes(b[17..25].try_into().ok()?), approve: b[0] == APPROVE_CONTROL,
+        },
         HANDOFF if b.len() == 9 => ClientMsg::Handoff(u64::from_le_bytes(b[1..].try_into().ok()?)),
         NOTIFY => ClientMsg::Notify(serde_json::from_slice(&b[1..]).ok()?),
         STREAM => ClientMsg::Stream(serde_json::from_slice(&b[1..]).ok()?),
@@ -428,6 +448,22 @@ pub fn decode(b: &[u8]) -> Option<ClientMsg> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn control_request_payload_boundaries() {
+        assert_eq!(decode(&[REQUEST_CONTROL]), Some(ClientMsg::RequestControl));
+        assert_eq!(decode(&[REQUEST_CONTROL, 0]), None);
+        let cancel = [&[CANCEL_CONTROL][..], &42u64.to_le_bytes(), &7u64.to_le_bytes()].concat();
+        assert_eq!(decode(&cancel), Some(ClientMsg::CancelControl { request: 42, epoch: 7 }));
+        for tag in [APPROVE_CONTROL, DECLINE_CONTROL] {
+            let packet = [&[tag][..], &3u64.to_le_bytes(), &42u64.to_le_bytes(), &7u64.to_le_bytes()].concat();
+            assert_eq!(decode(&packet), Some(ClientMsg::DecideControl { target: 3, request: 42, epoch: 7, approve: tag == APPROVE_CONTROL }));
+            for end in 0..packet.len() { assert_eq!(decode(&packet[..end]), None); }
+            assert_eq!(decode(&[packet, vec![0]].concat()), None);
+        }
+        for end in 0..cancel.len() { assert_eq!(decode(&cancel[..end]), None); }
+        assert_eq!(decode(&[cancel, vec![0]].concat()), None);
+    }
 
     #[test]
     fn compound_paste_payload_boundaries() {

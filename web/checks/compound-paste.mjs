@@ -82,10 +82,19 @@ try {
   }
   const image = await owner.evaluate(() => { const canvas = document.createElement('canvas'); canvas.width = 2; canvas.height = 3; return canvas.toDataURL('image/png').split(',')[1]; });
   const imageHash = createHash('sha256').update(Buffer.from(image, 'base64')).digest('hex');
+  let controller = owner;
   const activate = async (page, backend = 'wayland') => {
     await page.bringToFront();
     if (!new URL(page.url()).searchParams.has('window')) {
-      await page.evaluate(() => elsewhere.takeControl());
+      if (controller.isClosed()) {
+        await owner.waitForFunction(() => elsewhere.store.get().role === 'controller');
+        controller = owner;
+      }
+      if (page !== controller) {
+        const id = await page.evaluate(() => String(elsewhere.store.get().sessionId));
+        await controller.evaluate(id => elsewhere.handoff(id), id);
+        controller = page;
+      }
       await page.waitForFunction(() => elsewhere.store.get().role === 'controller');
     }
     await api('/api/control', { id: windows[backend].id, op: 'activate' });
@@ -170,7 +179,8 @@ try {
       await owner.waitForFunction(() => elsewhere.store.get().role === 'participant');
       await owner.evaluate(() => { pasteTest.dropRole = true; });
     }
-    await owner.evaluate(() => elsewhere.takeControl()); await delay(150);
+    const ownerId = await owner.evaluate(() => String(elsewhere.store.get().sessionId));
+    await participant.evaluate(id => elsewhere.handoff(id), ownerId); controller = owner; await delay(150);
     await owner.evaluate(() => { pasteTest.dropRole = false; });
     await clipboardOnly(() => paste(owner));
     await owner.waitForFunction(() => elsewhere.store.get().role === 'controller');

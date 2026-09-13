@@ -1,3 +1,4 @@
+import { approveControl } from './control-fixture.mjs';
 // Docker: built binary and viewer, Chromium, Python GI and GTK 3. Exercises the real compositor and streams.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -229,7 +230,7 @@ try {
       await other.setViewportSize({ width: 800, height: 650 });
       await other.goto(origin + '/#token=' + token);
       await other.waitForFunction(() => elsewhere.store.get().display?.resolution.width === 1280 && elsewhere.store.get().role === 'participant');
-      await other.getByRole('button', { name: 'Take Control', exact: true }).click();
+      await approveControl(page, other);
       await other.waitForFunction(() => elsewhere.store.get().role === 'controller' && elsewhere.store.get().stream?.width === 1280);
       await settings({ resolution: { mode: 'auto' } });
       await other.waitForFunction(() => {
@@ -239,7 +240,7 @@ try {
       await page.waitForFunction(() => elsewhere.store.get().display?.resolution.mode === 'auto');
       await settings({ resolution: { mode: 'fixed', width: 1024, height: 768 } });
       await other.waitForFunction(() => elsewhere.store.get().stream?.width === 1024);
-      await page.getByRole('button', { name: 'Take Control', exact: true }).click();
+      await approveControl(other, page);
       await page.waitForFunction(() => elsewhere.store.get().role === 'controller' && elsewhere.store.get().stream?.width === 1024);
       await Promise.all(Array.from({ length: 96 }, () => settings({ kiosk: false })));
       await settings({ resolution: { mode: 'fixed', width: 1024, height: 770 } });

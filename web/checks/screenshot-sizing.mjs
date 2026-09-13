@@ -48,7 +48,7 @@ try {
     page.on('request', request => { if (request.url().includes('/snapshot.png')) previews.push(new URL(request.url()).searchParams); });
     await page.goto(origin + '/#token=' + token);
     await page.waitForFunction(() => !!elsewhere.store.get().stream);
-    await page.evaluate(() => elsewhere.takeControl());
+    await page.evaluate(() => elsewhere.claimControl());
     for (const [name, size] of [['landscape', '640x360'], ['portrait', '300x600']]) {
       await page.evaluate(({ name, size }) => elsewhere.spawn(`foot --app-id=sizing-${name} --window-size-pixels=${size}`), { name, size });
       await page.waitForFunction(name => elsewhere.store.get().windows.some(w => w.app_id === `sizing-${name}`), name);

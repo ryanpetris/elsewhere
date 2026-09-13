@@ -87,6 +87,7 @@ impl App {
                 let _ = self.commands.send(Command::Drag(elsewhere_core::Drag::Cancel));
             }
             self.mixer_audience(&viewers);
+            viewers.publish_roster();
         }
         {
             let mut windows = self.window_viewers.lock().unwrap();
@@ -173,5 +174,6 @@ pub async fn sweep(app: std::sync::Weak<App>) {
         let Some(app) = app.upgrade() else { return; };
         let expired: Vec<_> = app.active_tokens.lock().unwrap().values().filter_map(std::sync::Weak::upgrade).filter(|k| !k.metadata.live()).collect();
         for key in expired { key.cancel(); app.active_tokens.lock().unwrap().remove(&key.metadata.id); app.cancel_token(key.metadata.id).await; }
+        app.viewers.lock().unwrap().expire_requests();
     }
 }

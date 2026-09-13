@@ -117,8 +117,17 @@ pub async fn forward_events(app: Arc<App>, mut rx: mpsc::UnboundedReceiver<Event
         let msg = match ev {
             Event::Cursor(img) => {
                 let msg = protocol::cursor(img.as_ref());
-                v.cursor = Some(msg.clone());
-                msg
+                v.cursor.send_replace(Some(msg.clone()));
+                for s in app.window_viewers.lock().unwrap().values() {
+                    if s.key.event_allowed(&msg) { let _ = s.events.try_send(msg.clone()); }
+                }
+                continue;
+            }
+            Event::PointerPosition { x, y, width, height } => {
+                let mut message = vec![protocol::POINTER_POSITION];
+                for value in [x, y, width, height] { message.extend_from_slice(&value.to_le_bytes()); }
+                v.pointer.send_replace(Some(message.into()));
+                continue;
             }
             Event::PointerLock(locked) => {
                 v.locked = locked;
@@ -217,7 +226,7 @@ async fn send_message(socket: &mut WebSocket, key: &Key, msg: Message) -> bool {
 }
 
 /// A viewer of the desktop. The first one with a token with desktop.control controls; the rest watch the same
-/// desktop scaled to their own window, and one with a token with desktop.control may take control.
+/// desktop scaled to their own window and may request a controller-approved handoff.
 pub async fn session(mut socket: WebSocket, app: Arc<App>) {
     let Some(key) = authenticate(&mut socket, &app).await else { return };
     if !key.live() { return close(&mut socket, UNAUTHORIZED, "token revoked or expired").await; }
@@ -240,7 +249,7 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
     let (etx, mut erx) = mpsc::channel::<Bytes>(32);
     let (atx, mut arx) = mpsc::channel::<Bytes>(4);
     let notifications = protocol::notifications(&app.notifications()); // its own lock: never inside the viewers'
-    let (id, replay) = {
+    let (id, replay, mut roster, mut cursor, mut pointer) = {
         // registered under the lock a revocation clears, so a session that came in with an old token is
         // either cleared by it or refused here
         let mut v = app.viewers.lock().unwrap();
@@ -250,14 +259,19 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
         }
         let id = v.next_id;
         v.next_id += 1;
-        v.sessions.insert(id, ViewerSession { key: key.clone(), events: etx.clone(), audio: atx, audio_seq: 0, size: None, control, selection, quality, preset, cam_wait_key: false, mixer_subscribed: false });
+        v.sessions.insert(id, ViewerSession { key: key.clone(), events: etx.clone(), audio: atx, audio_seq: 0, size: None, control, selection, quality, preset, cam_wait_key: false, mixer_subscribed: false, request: None, request_result: None });
         if key.has(P::DesktopControl) && v.controller.is_none() {
-            v.controller = Some(id);
-            v.control_epoch = v.control_epoch.wrapping_add(1);
+            app.set_controller(&mut v, Some(id));
         }
         app.mixer_audience(&v);
-        let replay: Vec<Bytes> = [Some(protocol::session(id)), key.has(P::AudioListen).then(|| protocol::mixer_state(&app.mixer_state())), v.cursor.clone(), v.windows.clone(), v.locked.then(|| Bytes::from(vec![protocol::POINTER_LOCK, 1])), Some(protocol::role(v.role_of(id), app.features(&key), v.control_epoch)), Some(notifications.clone())].into_iter().flatten().collect();
-        (id, replay)
+        let replay: Vec<Bytes> = [Some(protocol::session(id)), key.has(P::AudioListen).then(|| protocol::mixer_state(&app.mixer_state())), v.cursor.borrow().clone(), v.windows.clone(), v.locked.then(|| Bytes::from(vec![protocol::POINTER_LOCK, 1])), Some(protocol::role(v.role_of(id), app.features(&key), v.control_epoch)), Some(notifications.clone())].into_iter().flatten().collect();
+        v.publish_roster();
+        let mut roster = v.roster.subscribe();
+        roster.mark_changed();
+        let cursor = v.cursor.subscribe();
+        let mut pointer = v.pointer.subscribe();
+        pointer.mark_changed();
+        (id, replay, roster, cursor, pointer)
     };
     for msg in replay {
         let _ = send(&mut socket, &key, msg).await;
@@ -278,8 +292,26 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
     display_updates.mark_changed();
     let ended = loop {
         tokio::select! {
-            biased;
             _ = key.ended() => break Some((UNAUTHORIZED, "token revoked or expired")),
+            changed = cursor.changed() => {
+                if changed.is_err() { break None; }
+                let message = cursor.borrow_and_update().clone();
+                if let Some(message) = message { if !send(&mut socket, &key, message).await { break None; } }
+            },
+            changed = pointer.changed() => {
+                if changed.is_err() { break None; }
+                let message = pointer.borrow_and_update().clone();
+                if let Some(message) = message { if !send(&mut socket, &key, message).await { break None; } }
+            },
+            changed = roster.changed() => {
+                if changed.is_err() { break None; }
+                let (message, role) = {
+                    let v = app.viewers.lock().unwrap();
+                    let Some(session) = v.sessions.get(&id) else { break Some((UNAUTHORIZED, "token revoked or expired")); };
+                    (roster.borrow_and_update().clone(), protocol::role(v.role_of(id), app.features(&session.key), v.control_epoch))
+                };
+                if !send(&mut socket, &key, role).await || !send(&mut socket, &key, message).await { break None; }
+            },
             changed = display_updates.changed() => {
                 if changed.is_err() { break None; }
                 let message = display_updates.borrow_and_update().message();
@@ -417,6 +449,7 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
             app.set_controller(&mut v, next);
         }
         app.mixer_audience(&v);
+        v.publish_roster();
     }
     app.release_input(&key, id);
     let _ = app.commands.send(Command::ViewerStream { key: id, sink: None });
@@ -470,7 +503,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
     let replay: Vec<Bytes> = {
         let v = app.viewers.lock().unwrap();
         let role = if key.has(P::DesktopControl) { Role::Controller } else { Role::Viewer };
-        [Some(protocol::session(stream | 1 << 63)), v.cursor.clone(), v.windows.clone(), v.locked.then(|| Bytes::from(vec![protocol::POINTER_LOCK, 1])), Some(protocol::role(role, 0, 0))].into_iter().flatten().collect()
+        [Some(protocol::session(stream | 1 << 63)), v.cursor.borrow().clone(), v.windows.clone(), v.locked.then(|| Bytes::from(vec![protocol::POINTER_LOCK, 1])), Some(protocol::role(role, 0, 0))].into_iter().flatten().collect()
     };
     for msg in replay {
         let _ = send(&mut socket, &key, msg).await;
@@ -795,11 +828,16 @@ impl App {
                 }
             }
             ClientMsg::TakeControl => {
-                if key.has(P::DesktopControl) {
+                if key.has(P::DesktopControl) && v.controller.is_none() {
                     self.set_controller(&mut v, Some(id));
+                } else if !controls {
+                    let _ = v.sessions[&id].events.try_send(protocol::notice(if key.has(P::DesktopControl) { "Request control from the current controller." } else { "This token does not allow desktop control." }));
                 }
                 None
             }
+            ClientMsg::RequestControl => { self.request_control(&mut v, id); None }
+            ClientMsg::CancelControl { request, epoch } => { self.cancel_control(&mut v, id, request, epoch); None }
+            ClientMsg::DecideControl { target, request, epoch, approve } => { self.decide_control(&mut v, id, target, request, epoch, approve); None }
             ClientMsg::Handoff(target) => {
                 if controls && key.has(P::DesktopControl) && v.sessions.get(&target).is_some_and(|s| s.key.has(P::DesktopControl)) {
                     self.set_controller(&mut v, Some(target));
@@ -859,6 +897,7 @@ impl App {
         if old == next {
             return;
         }
+        v.end_requests();
         v.controller = next;
         v.control_epoch = v.control_epoch.wrapping_add(1);
         self.mixer_audience(v);
@@ -884,6 +923,7 @@ impl App {
                 let _ = s.events.try_send(protocol::role(v.role_of(id), self.features(&s.key), v.control_epoch));
             }
         }
+        v.publish_roster();
     }
 
     /// Viewers' encoders scale the output to their windows. The controller receives native frames

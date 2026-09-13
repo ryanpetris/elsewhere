@@ -12,7 +12,7 @@ import { visibleVideoFrame } from './video-frame.js';
 import { startMic, stopMic } from './mic.js';
 import { startCam, stopCam } from './cam.js';
 import { openRtc, rtcEndpoint, RTC_TIMING } from './rtc.js';
-import { PASTE_CLIPBOARD, PERMISSIONS, DISPLAY, CONFIG, VIDEO, CURSOR, POINTER_LOCK, AUDIO, WINDOWS, CLIPBOARD, ROLE, NOTICE, NOTIFICATIONS, STREAM_STATE, RTC, ROLES, CODEC_FAMILIES, EFFORTS, PRESETS, AUTH, HELLO, RESIZE, MOTION_ABS, MOTION_REL, BUTTON, AXIS, KEY, REQUEST_KEYFRAME, BLUR, POINTER_LOCK_LOST, POINTER_LOCK_GAINED, CONTROL, SET_CLIPBOARD, TAKE_CONTROL, NOTIFY, STREAM, DRAG, INPUT, TOUCH, MIC, CAM, RTC_CLIENT, REPORT, BTN, MIXER_STATE, MIXER_LEVELS, MIXER_ERROR, MIXER_CLIENT, SESSION, HANDOFF, FILE_RESULT } from './protocol.js';
+import { ROSTER, POINTER_POSITION, REQUEST_CONTROL, CANCEL_CONTROL, APPROVE_CONTROL, DECLINE_CONTROL, PASTE_CLIPBOARD, PERMISSIONS, DISPLAY, CONFIG, VIDEO, CURSOR, POINTER_LOCK, AUDIO, WINDOWS, CLIPBOARD, ROLE, NOTICE, NOTIFICATIONS, STREAM_STATE, RTC, ROLES, CODEC_FAMILIES, EFFORTS, PRESETS, AUTH, HELLO, RESIZE, MOTION_ABS, MOTION_REL, BUTTON, AXIS, KEY, REQUEST_KEYFRAME, BLUR, POINTER_LOCK_LOST, POINTER_LOCK_GAINED, CONTROL, SET_CLIPBOARD, TAKE_CONTROL, NOTIFY, STREAM, DRAG, INPUT, TOUCH, MIC, CAM, RTC_CLIENT, REPORT, BTN, MIXER_STATE, MIXER_LEVELS, MIXER_ERROR, MIXER_CLIENT, SESSION, HANDOFF, FILE_RESULT } from './protocol.js';
 
 const AUDIO_LEAD = 0.06;
 const qualityName = name => PRESETS.includes(name) ? name : 'medium';
@@ -30,6 +30,9 @@ export function createViewer() {
     display: null,
     permissions: [],
     sessionId: null,
+    roster: null,
+    observerPointer: null,
+    cursorImage: null,
     stream: null, // the last Config: {streamId, codec, width, height, scale}
     renderer: '2d',
     windows: [],
@@ -200,7 +203,8 @@ export function createViewer() {
     if (disposed) return;
     clearTimeout(reconnectTimer);
     if (!TOKEN) { store.set({ status: 'no-token' }); return; }
-    store.set({ permissions: [] });
+    controlEpoch = 0n;
+    store.set({ permissions: [], roster: null, observerPointer: null, cursorImage: null });
     let capabilities;
     try {
       capabilities = await discoverCodecs();
@@ -237,7 +241,7 @@ export function createViewer() {
       rtcConfig = null;
       recovery('unavailable', 'WebSocket disconnected');
       uploadAbort?.abort();
-      store.set({ display: null, permissions: [], sessionId: null, role: null, playback: null, audioAvailable: false, micAvailable: false, camAvailable: false, rtcAvailable: false, videoVia: 'websocket' });
+      store.set({ display: null, permissions: [], sessionId: null, role: null, roster: null, observerPointer: null, cursorImage: null, playback: null, audioAvailable: false, micAvailable: false, camAvailable: false, rtcAvailable: false, videoVia: 'websocket' });
       if (e.code === 4001 || e.code === 4004) {
         if (e.code === 4001) forgetToken();
         if (document.fullscreenElement) document.exitFullscreen(); // restore the viewer controls for authentication
@@ -456,13 +460,14 @@ export function createViewer() {
       case CURSOR: {
         // The compositor doesn't draw the pointer; the browser does, with zero latency.
         const w = dv.getUint16(1, true), h = dv.getUint16(3, true);
-        if (!w || !h) { canvas.style.cursor = 'none'; cursorImage = null; drawCapturedCursor(); break; }
+        if (!w || !h) { canvas.style.cursor = 'none'; cursorImage = null; store.set({ cursorImage: null }); drawCapturedCursor(); break; }
         const hx = dv.getInt16(5, true), hy = dv.getInt16(7, true), lw = dv.getUint16(9, true) || w, lh = dv.getUint16(11, true) || h;
         const c = document.createElement('canvas');
         c.width = w; c.height = h;
         c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(buf, 13, w * h * 4), w, h), 0, 0);
         // A HiDPI cursor bitmap is shown at lw×lh logical px; image-set() tells the browser its density.
         cursorImage = { url: c.toDataURL(), hx, hy, width: lw, height: lh };
+        store.set({ cursorImage });
         drawCapturedCursor();
         const density = w / lw;
         canvas.style.cursor = density !== 1 ? `image-set(url("${c.toDataURL()}") ${density}x) ${hx} ${hy}, default` : `url(${c.toDataURL()}) ${hx} ${hy}, default`;
@@ -557,8 +562,25 @@ export function createViewer() {
         notice(new TextDecoder().decode(new Uint8Array(buf, 2)), dv.getUint8(1) ? 'success' : 'warning');
         break;
       case DISPLAY: store.set({ display: JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 1))) }); break;
+      case POINTER_POSITION:
+        store.set({ observerPointer: { x: dv.getFloat64(1, true), y: dv.getFloat64(9, true), width: dv.getFloat64(17, true), height: dv.getFloat64(25, true) } });
+        break;
+      case ROSTER: {
+        const roster = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 1)));
+        if (BigInt(roster.epoch) < controlEpoch) break;
+        const own = roster.sessions.find(s => s.id === String(state().sessionId));
+        const previous = state().roster?.sessions.find(s => s.id === String(state().sessionId));
+        store.set({ roster });
+        if (own?.result && own.result !== previous?.result) {
+          const message = { approved: 'Control request approved.', declined: 'Control request declined.', cancelled: 'Control request cancelled.', expired: 'Control request expired.', controller_changed: 'Control request cleared because the controller changed.' }[own.result];
+          if (message) notice(message, own.result === 'approved' ? 'success' : 'warning');
+        }
+        break;
+      }
       case SESSION: store.set({ sessionId: dv.getBigUint64(1, true) }); break;
       case ROLE: {
+        const epoch = dv.getBigUint64(3, true);
+        if (!WINDOW && epoch < controlEpoch) break;
         const role = ROLES[dv.getUint8(1)] ?? 'viewer';
         const features = dv.getUint8(2);
         controlEpoch = dv.getBigUint64(3, true);
@@ -878,7 +900,7 @@ export function createViewer() {
     clearTimeout(reconnectTimer); clearInterval(statsTimer);
     closeRtc(false);
     ws?.close();
-    store.set({ status: 'closed', permissions: [], sessionId: null, role: null, stream: null, windows: [] });
+    store.set({ status: 'closed', permissions: [], sessionId: null, role: null, stream: null, windows: [], roster: null, observerPointer: null, cursorImage: null });
     recovery('unavailable', 'Viewer closed');
   }
 
@@ -1010,6 +1032,7 @@ export function createViewer() {
   const rebase = () => { const c = touches.size === 2 ? centroid() : null; pinch = c && { ...c, start: c.dist, zooming: false }; };
   function applyZoom() {
     canvas.style.transform = zoom.k === 1 ? '' : `translate(${zoom.tx}px, ${zoom.ty}px) scale(${zoom.k})`;
+    canvas.parentElement?.style.setProperty('--desktop-transform', canvas.style.transform || 'none');
   }
   unzoom = () => { if (zoom.k !== 1) { zoom = { k: 1, tx: 0, ty: 0 }; applyZoom(); } };
   // The one-finger gesture ends: a tap clicks (a hold's timer already right-clicked), a drag lets go.
@@ -1422,7 +1445,16 @@ export function createViewer() {
       if (touch) { clearTimeout(touch.timer); touch = null; }
       pref.set('touchmouse', on); store.set({ touchMouse: on });
     },
-    takeControl: () => { viewer.pip.closeDesktop(); send(TAKE_CONTROL, 0); },
+    claimControl: () => send(TAKE_CONTROL, 0),
+    requestControl: () => send(REQUEST_CONTROL, 0),
+    cancelControl(request) {
+      if (request) send(CANCEL_CONTROL, 16, dv => { dv.setBigUint64(1, BigInt(request.id), true); dv.setBigUint64(9, BigInt(request.epoch), true); });
+    },
+    decideControl(target, request, approve) {
+      if (request) send(approve ? APPROVE_CONTROL : DECLINE_CONTROL, 24, dv => {
+        dv.setBigUint64(1, BigInt(target), true); dv.setBigUint64(9, BigInt(request.id), true); dv.setBigUint64(17, BigInt(request.epoch), true);
+      });
+    },
     setChoice,
     setTransport,
     uploadFiles,

@@ -123,7 +123,10 @@ try {
       const other = (await wd(route + '/window/new', { type: 'tab' })).handle;
       await wd(route + '/window', { handle: other });
       await load(token);
-      await js('elsewhere.takeControl()');
+      const target = await js('return String(elsewhere.store.get().sessionId)');
+      await wd(route + '/window', { handle: main });
+      await js('elsewhere.handoff(' + JSON.stringify(target) + ')');
+      await wd(route + '/window', { handle: other });
       await wait(() => js('return elsewhere.store.get().role === "controller"'));
       await wd(route + '/window', { handle: main });
       await wait(() => js('return elsewhere.store.get().role === "participant"'));

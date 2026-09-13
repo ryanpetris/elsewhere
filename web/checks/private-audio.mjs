@@ -1,3 +1,4 @@
+import { approveControl } from './control-fixture.mjs';
 import { createToken } from './token-fixture.mjs';
 // Run inside the Docker rig with the mounted release binary.
 import assert from 'node:assert/strict';
@@ -245,11 +246,12 @@ try {
   const participant = await browser.newPage();
   await participant.goto('http://127.0.0.1:8088/#token=' + token);
   await participant.waitForFunction(() => window.elsewhere?.store.get().role === 'participant');
-  await page.evaluate(() => elsewhere.mic.start());
-  await participant.evaluate(() => elsewhere.takeControl());
-  await page.waitForFunction(() => elsewhere.store.get().role === 'participant' && !elsewhere.store.get().mic);
-  assert(await page.evaluate(() => micTracks.every(t => t.readyState === 'ended')), 'handover stops tracks');
-  await page.evaluate(() => elsewhere.takeControl());
+  await page.evaluate(async () => { await elsewhere.mic.start(); await elsewhere.cam.start(); });
+  assert(await page.evaluate(() => micTracks.some(t => t.kind === 'video' && t.readyState === 'live')), 'browser camera track is active before handoff');
+  await approveControl(page, participant);
+  await page.waitForFunction(() => elsewhere.store.get().role === 'participant' && !elsewhere.store.get().mic && !elsewhere.store.get().cam);
+  assert(await page.evaluate(() => micTracks.every(t => t.readyState === 'ended')), 'handover stops microphone and camera tracks');
+  await approveControl(participant, page);
   await page.waitForFunction(() => elsewhere.store.get().role === 'controller');
   await participant.close();
   await page.evaluate(async () => { await elsewhere.mic.start(); checkSocket.close(); });
@@ -269,7 +271,10 @@ try {
   }
   assert(daemon, 'owned PipeWire process found');
   process.kill(daemon, 'SIGKILL');
-  await page.waitForFunction(() => !elsewhere.store.get().audioAvailable && !elsewhere.store.get().micAvailable && !elsewhere.store.get().mic && !elsewhere.store.get().playback);
+  await page.waitForFunction(() => !elsewhere.store.get().audioAvailable && !elsewhere.store.get().micAvailable && !elsewhere.store.get().mic && !elsewhere.store.get().playback).catch(async error => {
+    console.error('Audio shutdown state', await page.evaluate(() => { const { audioAvailable, micAvailable, mic, playback, role, status } = elsewhere.store.get(); return { audioAvailable, micAvailable, mic, playback: !!playback, role, status }; }));
+    throw error;
+  });
   assert.equal(await page.evaluate(() => elsewhere.store.get().status), 'connected');
   console.log('service failure withdraws live playback and microphone while desktop stays connected');
 } catch (error) {

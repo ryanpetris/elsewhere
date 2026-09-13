@@ -94,7 +94,8 @@ palette releases held desktop input and mouse capture; search and composition st
 
 Any number of people can watch at once, each with a stream scaled to their own window. The first to
 connect with `desktop.control` drives the pointer and keyboard; other eligible sessions can use
-"Take control". Each token grants explicit feature access. Desktop viewing, clipboard, files, audio,
+request control for the current controller to approve. The Participants menu lists live connections,
+and observers see the desktop pointer. Each token grants explicit feature access. Desktop viewing, clipboard, files, audio,
 camera, microphone and program execution have separate permissions.
 
 Use `--screen-size 1920x1080` to set a fixed desktop resolution from startup. Browser resizes and

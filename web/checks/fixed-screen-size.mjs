@@ -1,3 +1,4 @@
+import { approveControl } from './control-fixture.mjs';
 import { createToken } from './token-fixture.mjs';
 // Run in the Docker rig after building the release binary.
 import assert from 'node:assert/strict';
@@ -79,7 +80,7 @@ for (const fixed of [true, false]) {
     await pages[0].setViewportSize({ width: 1500, height: 1000 });
     await checkController(pages[0]);
     if (!fixed) assert.notDeepEqual(await nativeSize(), before);
-    await pages[1].evaluate(() => elsewhere.takeControl());
+    await approveControl(pages[0], pages[1]);
     await checkController(pages[1]);
     const id = await pages[0].evaluate(() => elsewhere.store.get().sessionId.toString());
     await pages[1].evaluate(id => elsewhere.handoff(id), id);

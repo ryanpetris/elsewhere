@@ -108,5 +108,5 @@ export function createPip(viewer) {
     window.addEventListener('pagehide', hide);
     window.addEventListener('pageshow', show);
   }
-  return { supported, open, close, closeDesktop: () => { if (owned?.desktop) close(); }, dispose };
+  return { supported, open, close, dispose };
 }

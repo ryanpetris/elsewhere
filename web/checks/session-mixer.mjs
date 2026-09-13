@@ -1,3 +1,4 @@
+import { approveControl } from './control-fixture.mjs';
 import { createToken, revokeToken } from './token-fixture.mjs';
 // Run inside the Docker rig with the mounted release binary.
 import assert from 'node:assert/strict';
@@ -103,7 +104,7 @@ try {
     await target.waitForFunction(() => elsewhere.store.get().mixerError.includes('controlling'));
   }
   assert.equal(await page.evaluate(id => elsewhere.store.get().mixer.nodes.find(n => n.id === id).volume, nativeId), 50);
-  await participant.evaluate(() => elsewhere.takeControl());
+  await approveControl(page, participant);
   await participant.waitForFunction(() => elsewhere.store.get().role === 'controller');
   await page.waitForFunction(() => elsewhere.store.get().role === 'participant');
   assert(await row.getByRole('slider').isDisabled());
