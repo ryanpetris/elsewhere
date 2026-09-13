@@ -166,6 +166,7 @@ pub(crate) struct Viewers {
     /// Last WINDOWS message, replayed to a new viewer, and the list it encodes (the API's view).
     windows: Option<Bytes>,
     window_list: Vec<WindowInfo>,
+    workspaces: elsewhere_core::WorkspaceState,
     /// The current clipboard observation, served on the API without replaying a browser copy event.
     clipboard: Clipboard,
     clipboard_scope: String,
@@ -175,7 +176,7 @@ pub(crate) struct Viewers {
 
 impl Default for Viewers {
     fn default() -> Self {
-        Viewers { sessions: HashMap::new(), controller: None, control_epoch: 0, next_request: 1, roster: tokio::sync::watch::channel(Bytes::new()).0, display: display::Settings::default(), output: elsewhere_core::INITIAL_OUTPUT, cursor: tokio::sync::watch::channel(None).0, pointer: tokio::sync::watch::channel(None).0, locked: false, windows: None, window_list: Vec::new(), clipboard: Clipboard::default(), clipboard_scope: random_hex(16), next_clipboard_write: 1, next_id: 1 }
+        Viewers { sessions: HashMap::new(), controller: None, control_epoch: 0, next_request: 1, roster: tokio::sync::watch::channel(Bytes::new()).0, display: display::Settings::default(), output: elsewhere_core::INITIAL_OUTPUT, cursor: tokio::sync::watch::channel(None).0, pointer: tokio::sync::watch::channel(None).0, locked: false, windows: None, window_list: Vec::new(), workspaces: Default::default(), clipboard: Clipboard::default(), clipboard_scope: random_hex(16), next_clipboard_write: 1, next_id: 1 }
     }
 }
 
@@ -306,6 +307,7 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
         .merge(
             Router::new()
                 .route("/api/windows", get(api_windows))
+                .route("/api/workspaces", get(api_workspaces))
                 .route("/api/codecs", get(api_codecs))
                 .route("/api/applications", get(api_applications))
                 .route("/api/applications/{id}/icon", get(api_application_icon))
@@ -466,6 +468,11 @@ async fn api_codecs(Extension(key): Extension<Key>, State(app): State<Arc<App>>)
     if let Err(e) = key.require(P::DesktopView) { return e.into_response(); }
     let list: Vec<serde_json::Value> = app.codecs.iter().map(|&c| serde_json::json!({ "codec": protocol::codec_name(c), "hardware": !app.software })).collect();
     (NO_STORE, Json(list)).into_response()
+}
+
+async fn api_workspaces(Extension(key): Extension<Key>, State(app): State<Arc<App>>) -> Response {
+    if let Err(e) = key.require(P::DesktopView) { return e.into_response(); }
+    (NO_STORE, Json(app.workspaces())).into_response()
 }
 
 async fn api_windows(Extension(key): Extension<Key>, State(app): State<Arc<App>>) -> Response {

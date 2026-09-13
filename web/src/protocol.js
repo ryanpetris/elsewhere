@@ -21,3 +21,5 @@ export const PERMISSIONS = 0x15;
 // Coalesced desktop membership and logical observer pointer coordinates.
 export const ROSTER = 0x16, POINTER_POSITION = 0x17;
 export const REQUEST_CONTROL = 0x9B, CANCEL_CONTROL = 0x9C, APPROVE_CONTROL = 0x9D, DECLINE_CONTROL = 0x9E;
+
+export const WORKSPACES = 0x18;

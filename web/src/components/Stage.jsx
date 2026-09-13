@@ -2,6 +2,7 @@
 // the overlays and status banners on top.
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, FolderOpen, Loader2, MonitorX, TriangleAlert } from 'lucide-react';
+import { WINDOW } from '../api.js';
 import { useStore } from '../store.js';
 import { hue, windowColor, codecName } from './ui.jsx';
 import { Notifications } from './Notifications.jsx';
@@ -35,12 +36,23 @@ export function Stage({ viewer, windowMode, borders, elements, children }) {
       <canvas ref={viewer.attach} tabIndex={-1} className={`stage block outline-none ${windowMode ? '' : 'h-full w-full'} ${observer || !windowMode && releasedMouse ? 'cursor-default!' : ''}`} />
       {(borders || elements) && <Overlay viewer={viewer} size={size} borders={borders} elements={elements} />}
       {!windowMode && <ObserverPointer viewer={viewer} size={size} />}
+      {windowMode && <InactiveWindow viewer={viewer} />}
       <Banner viewer={viewer} />
       <Notice viewer={viewer} />
       <Notifications viewer={viewer} />
       {children}
     </div>
   );
+}
+
+function InactiveWindow({ viewer }) {
+  const inactive = useStore(viewer.store, s => s.windows.some(w => w.id === Number(WINDOW) && w.workspace !== s.workspaces.active));
+  const controls = useStore(viewer.store, s => s.status === 'connected' && s.permissions.includes('desktop.control'));
+  if (!inactive) return null;
+  return <div className="absolute top-3 rounded border border-line bg-surface px-3 py-2 text-xs text-ink" role="status">
+    This window is on another workspace.
+    {controls && <button className="ml-3 rounded bg-accent px-2 py-1 text-canvas" onClick={() => viewer.control({ id: Number(WINDOW), op: 'activate' })}>Activate on Desktop</button>}
+  </div>;
 }
 
 function ObserverPointer({ viewer, size }) {
@@ -67,6 +79,7 @@ function ObserverPointer({ viewer, size }) {
 function Overlay({ viewer, size, borders, elements }) {
   const windows = useStore(viewer.store, s => s.windows);
   const stream = useStore(viewer.store, s => s.stream);
+  const activeWorkspace = useStore(viewer.store, s => s.workspaces.active);
   const els = useStore(viewer.store, s => s.elements);
   if (!stream || !size.w) return null;
   const sw = stream.width / stream.scale, sh = stream.height / stream.scale;
@@ -78,7 +91,7 @@ function Overlay({ viewer, size, borders, elements }) {
   const why = page && (page.status !== 200 ? page.page.error || `HTTP ${page.status}` : page.page.level !== 'full' && `no elements: ${page.page.level}${page.page.toolkit ? ` (${page.page.toolkit})` : ''}`);
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
-      {borders && windows.filter(w => !w.minimized).map(w => (
+      {borders && windows.filter(w => !w.minimized && w.workspace === activeWorkspace).map(w => (
         // the compositor's title bar, when it draws one, is part of the window
         <div key={w.id} className={`absolute box-border rounded-sm ${w.focused ? 'border-[3px]' : 'border-2'}`} style={{ ...box(w.x, w.y - w.decoration, w.w, w.h + w.decoration), borderColor: windowColor(w) }}>
           <span className="absolute -top-0.5 -left-0.5 rounded-br px-1.5 font-mono text-[11px] leading-4 font-medium text-canvas" style={{ background: windowColor(w) }}>

@@ -188,6 +188,7 @@ pub struct State {
     pub window_streams: Vec<window_stream::WindowStream>,
     /// The window `focus_window` last activated.
     pub active: Option<Window>,
+    pub pending_initial_focus: Option<Window>,
     /// What the viewer was last told (desktop API).
     pub last_windows: Vec<WindowInfo>,
     pub last_windows_sent: Instant,
@@ -239,7 +240,9 @@ pub struct State {
     /// once it is known, what the target under the pointer accepts and which action it chose, the deadline
     /// for letting go once the list is there, and whether the drop was taken.
     /// The browser's fingers down (`State::touch`), by slot; `release_all` lifts them.
-    pub touch_down: std::collections::HashSet<u32>,
+    pub touch_down: std::collections::HashMap<u32, Option<focus::PointerFocus>>,
+    pub pointer_grab_window: Option<Window>,
+    pub touch_grab_window: Option<Window>,
     pub drag_active: bool,
     /// What the drag's data source shares with us: the list, and the target's accept and action.
     pub drag_shared: Arc<clipboard::DragShared>,
@@ -349,6 +352,8 @@ impl State {
             last_render: Instant::now(),
             refine_due: None,
             touch_down: Default::default(),
+            pointer_grab_window: None,
+            touch_grab_window: None,
             drag_active: false,
             drag_shared: Default::default(),
             drag_ping,
@@ -369,6 +374,7 @@ impl State {
             surfaces: Vec::new(),
             window_streams: Vec::new(),
             active: None,
+            pending_initial_focus: None,
             last_windows: Vec::new(),
             last_windows_sent: Instant::now(),
             seat_state,
@@ -493,6 +499,7 @@ impl State {
                     state.forget_window(&w); // before refresh drops it from the space, while its position is known
                 }
                 state.space.refresh();
+                state.sync_workspace_parents(false);
                 // Smithay only re-evaluates pointer focus on motion: when the panel hides or returns under a
                 // resting pointer, replay the position so enter/leave go to the right surface
                 let hidden = state.fullscreen_window_mapped();
@@ -536,6 +543,8 @@ impl State {
 
     /// A window is going away (closed, unmapped, Xwayland gone): minimized windows above it move down one.
     pub fn forget_window(&mut self, window: &Window) {
+        if self.pending_initial_focus.as_ref() == Some(window) { self.pending_initial_focus = None; }
+        self.workspaces.forget(window);
         self.decor_press.take_if(|(w, _)| w == window);
         self.bar_click.take_if(|(w, _)| w == window);
         if let Some(i) = self.full_stack().iter().position(|w| w == window) {
@@ -550,7 +559,7 @@ impl State {
 
     /// The top-most window that isn't an X11 menu or tooltip: what gets the focus when its holder goes.
     pub fn top_window(&self) -> Option<Window> {
-        self.space.elements().rev().find(|w| w.x11_surface().is_none_or(|x| !x.is_override_redirect())).cloned()
+        self.space.elements().rev().filter(|w| self.on_active_workspace(w)).find(|w| w.x11_surface().is_none_or(|x| !x.is_override_redirect())).cloned()
     }
 
     /// Hide a window until a taskbar (or its own client) asks for it back; focus moves to the top-most window left.
@@ -563,8 +572,10 @@ impl State {
         if let Some(t) = window.toplevel() {
             t.send_pending_configure();
         }
-        let next = self.top_window();
-        self.focus_window(next.as_ref(), SERIAL_COUNTER.next_serial());
+        if self.active.as_ref() == Some(window) {
+            let next = self.top_window();
+            self.focus_window(next.as_ref(), SERIAL_COUNTER.next_serial());
+        }
         self.dirty = true;
     }
 

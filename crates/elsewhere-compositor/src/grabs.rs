@@ -61,7 +61,6 @@ macro_rules! forward {
         fn start_data(&self) -> &GrabStartData<State> {
             &self.start_data
         }
-        fn unset(&mut self, _data: &mut State) {}
     };
 }
 
@@ -96,6 +95,7 @@ impl PointerGrab<State> for MoveGrab {
             handle.unset_grab(self, data, event.serial, event.time, true);
         }
     }
+    fn unset(&mut self, data: &mut State) { data.pointer_grab_window = None; }
     forward!();
 }
 
@@ -181,9 +181,9 @@ impl PointerGrab<State> for ResizeGrab {
         handle.button(data, event);
         if !handle.current_pressed().contains(&self.start_data.button) {
             handle.unset_grab(self, data, event.serial, event.time, true);
-            self.finish();
         }
     }
+    fn unset(&mut self, data: &mut State) { data.pointer_grab_window = None; self.finish(); }
     forward!();
 }
 
@@ -206,14 +206,10 @@ macro_rules! touch_grab {
                 if event.slot == self.start_data.slot {
                     handle.up(data, event); // a client whose own request began this got the down: it gets the up
                     handle.unset_grab(self, data);
-                    let $g = &self.grab;
-                    $finish;
                 }
             }
             fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
                 handle.unset_grab(self, data);
-                let $g = &self.grab;
-                $finish;
             }
             fn frame(&mut self, _data: &mut State, _handle: &mut TouchInnerHandle<'_, State>) {}
             fn shape(&mut self, _data: &mut State, _handle: &mut TouchInnerHandle<'_, State>, _event: &ShapeEvent) {}
@@ -221,7 +217,7 @@ macro_rules! touch_grab {
             fn start_data(&self) -> &TouchGrabStartData<State> {
                 &self.start_data
             }
-            fn unset(&mut self, _data: &mut State) {}
+            fn unset(&mut self, data: &mut State) { data.touch_grab_window = None; let $g = &self.grab; $finish; }
         }
     };
 }
@@ -247,16 +243,26 @@ impl Start {
 impl State {
     /// Move `window` with the pointer or finger from `start`.
     pub fn start_move(&mut self, start: Start, window: Window, serial: Serial) {
+        if !self.on_active_workspace(&window) { return; }
         let initial_location = self.space.element_location(&window).unwrap();
         let grab = MoveGrab { start_data: start.pointer(), window, initial_location };
         match start {
-            Start::Pointer(_) => self.seat.get_pointer().unwrap().set_grab(self, grab, serial, Focus::Clear),
-            Start::Touch(start_data) => self.seat.get_touch().unwrap().set_grab(self, TouchMoveGrab { start_data, grab }, serial),
+            Start::Pointer(_) => {
+                let window = grab.window.clone();
+                self.seat.get_pointer().unwrap().set_grab(self, grab, serial, Focus::Clear);
+                self.pointer_grab_window = Some(window);
+            }
+            Start::Touch(start_data) => {
+                let window = grab.window.clone();
+                self.seat.get_touch().unwrap().set_grab(self, TouchMoveGrab { start_data, grab }, serial);
+                self.touch_grab_window = Some(window);
+            }
         }
     }
 
     /// Resize `window` from `edges` with the pointer or finger from `start`; the client is told it is being resized.
     pub fn start_resize(&mut self, start: Start, window: &Window, edges: ResizeEdge, serial: Serial) {
+        if !self.on_active_workspace(window) { return; }
         // A drag starts at the geometry currently displayed to the user.
         let mut initial_rect = window.geometry();
         initial_rect.loc = self.space.element_location(window).unwrap();
@@ -267,8 +273,14 @@ impl State {
         }
         let grab = ResizeGrab { start_data: start.pointer(), window: window.clone(), edges, initial_rect, last_size: initial_rect.size };
         match start {
-            Start::Pointer(_) => self.seat.get_pointer().unwrap().set_grab(self, grab, serial, Focus::Clear),
-            Start::Touch(start_data) => self.seat.get_touch().unwrap().set_grab(self, TouchResizeGrab { start_data, grab }, serial),
+            Start::Pointer(_) => {
+                self.seat.get_pointer().unwrap().set_grab(self, grab, serial, Focus::Clear);
+                self.pointer_grab_window = Some(window.clone());
+            }
+            Start::Touch(start_data) => {
+                self.seat.get_touch().unwrap().set_grab(self, TouchResizeGrab { start_data, grab }, serial);
+                self.touch_grab_window = Some(window.clone());
+            }
         }
     }
 }

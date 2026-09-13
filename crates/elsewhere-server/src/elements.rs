@@ -567,6 +567,7 @@ mod tests {
 
     fn win(w: i32, h: i32, geo_x: i32, geo_y: i32) -> WindowInfo {
         WindowInfo {
+            workspace: 1,
             id: 1, title: String::new(), app_id: String::new(), x11: false, pid: None,
             icon: None, content: None,
             x: 0, y: 0, w, h, geo_x, geo_y, popups: vec![], decoration: 0, z: Some(0), maximized: false, fullscreen: false, minimized: false, focused: true, updated_ms: 0, content_revision: 0,

@@ -41,7 +41,7 @@ pub(crate) struct SlotId(pub u32);
 impl State {
     /// A mapped window is fullscreen: it covers the panels (Top layer), only the Overlay layer stays above.
     pub fn fullscreen_window_mapped(&self) -> bool {
-        self.space.elements().any(|w| match w.underlying_surface() {
+        self.space.elements().filter(|w| self.on_active_workspace(w)).any(|w| match w.underlying_surface() {
             // a toplevel that unmapped with a null buffer stays in the space until destroyed, with no committed state
             WindowSurface::Wayland(t) => t.with_committed_state(|s| s.is_some_and(|s| s.states.contains(xdg_toplevel::State::Fullscreen))),
             WindowSurface::X11(x) => x.is_fullscreen(),
@@ -71,7 +71,7 @@ impl State {
             let top = layer_elements(if fullscreen { |l| l == Layer::Overlay } else { |l| matches!(l, Layer::Top | Layer::Overlay) });
             (top, layer_elements(|l| matches!(l, Layer::Bottom | Layer::Background)))
         };
-        let windows: Vec<(Window, Point<i32, Logical>)> = self.space.elements().rev().filter_map(|w| Some((w.clone(), self.space.element_location(w)?))).collect();
+        let windows: Vec<(Window, Point<i32, Logical>)> = self.space.elements().rev().filter(|w| self.on_active_workspace(w)).filter_map(|w| Some((w.clone(), self.space.element_location(w)?))).collect();
         for (w, loc) in windows {
             // the space places the geometry; render_elements wants the surface origin
             let origin = loc - w.geometry().loc - output_loc;
@@ -164,7 +164,9 @@ impl State {
         for layer in layer_map_for_output(&self.output).layers() {
             layer.take_presentation_feedback(&mut feedback, drawn, flags);
         }
-        for window in self.space.elements() {
+        for window in self.space.elements().chain(self.minimized.iter().map(|(w, ..)| w))
+            .filter(|w| self.on_active_workspace(w) && self.space.element_location(w).is_some() || self.window_streams.iter().any(|stream| stream.window == **w))
+        {
             window.send_frame(&self.output, now, Some(Duration::ZERO), |_, _| Some(self.output.clone()));
             if let Some(feedback) = &self.dmabuf_feedback {
                 window.send_dmabuf_feedback(&self.output, |_, _| Some(self.output.clone()), |_, _| feedback);

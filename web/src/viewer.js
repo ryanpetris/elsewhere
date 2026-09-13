@@ -12,7 +12,7 @@ import { visibleVideoFrame } from './video-frame.js';
 import { startMic, stopMic } from './mic.js';
 import { startCam, stopCam } from './cam.js';
 import { openRtc, rtcEndpoint, RTC_TIMING } from './rtc.js';
-import { ROSTER, POINTER_POSITION, REQUEST_CONTROL, CANCEL_CONTROL, APPROVE_CONTROL, DECLINE_CONTROL, PASTE_CLIPBOARD, PERMISSIONS, DISPLAY, CONFIG, VIDEO, CURSOR, POINTER_LOCK, AUDIO, WINDOWS, CLIPBOARD, ROLE, NOTICE, NOTIFICATIONS, STREAM_STATE, RTC, ROLES, CODEC_FAMILIES, EFFORTS, PRESETS, AUTH, HELLO, RESIZE, MOTION_ABS, MOTION_REL, BUTTON, AXIS, KEY, REQUEST_KEYFRAME, BLUR, POINTER_LOCK_LOST, POINTER_LOCK_GAINED, CONTROL, SET_CLIPBOARD, TAKE_CONTROL, NOTIFY, STREAM, DRAG, INPUT, TOUCH, MIC, CAM, RTC_CLIENT, REPORT, BTN, MIXER_STATE, MIXER_LEVELS, MIXER_ERROR, MIXER_CLIENT, SESSION, HANDOFF, FILE_RESULT } from './protocol.js';
+import { WORKSPACES, ROSTER, POINTER_POSITION, REQUEST_CONTROL, CANCEL_CONTROL, APPROVE_CONTROL, DECLINE_CONTROL, PASTE_CLIPBOARD, PERMISSIONS, DISPLAY, CONFIG, VIDEO, CURSOR, POINTER_LOCK, AUDIO, WINDOWS, CLIPBOARD, ROLE, NOTICE, NOTIFICATIONS, STREAM_STATE, RTC, ROLES, CODEC_FAMILIES, EFFORTS, PRESETS, AUTH, HELLO, RESIZE, MOTION_ABS, MOTION_REL, BUTTON, AXIS, KEY, REQUEST_KEYFRAME, BLUR, POINTER_LOCK_LOST, POINTER_LOCK_GAINED, CONTROL, SET_CLIPBOARD, TAKE_CONTROL, NOTIFY, STREAM, DRAG, INPUT, TOUCH, MIC, CAM, RTC_CLIENT, REPORT, BTN, MIXER_STATE, MIXER_LEVELS, MIXER_ERROR, MIXER_CLIENT, SESSION, HANDOFF, FILE_RESULT } from './protocol.js';
 
 const AUDIO_LEAD = 0.06;
 const qualityName = name => PRESETS.includes(name) ? name : 'medium';
@@ -36,6 +36,7 @@ export function createViewer() {
     stream: null, // the last Config: {streamId, codec, width, height, scale}
     renderer: '2d',
     windows: [],
+    workspaces: { active: 1, count: 4 },
     windowTitle: '', // window mode: the streamed window's title
     notice: null, // { text, kind: 'warning' | 'success' }: a word about our last action, shown for a few seconds
     notifications: [], // open desktop notifications, oldest first
@@ -434,7 +435,7 @@ export function createViewer() {
         store.set({ permissions: JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 1))) });
         if (mixerSubscribed && can('audio.listen')) sendText(MIXER_CLIENT, JSON.stringify({ op: 'subscribe', enabled: true }));
         if (!WINDOW) sendResize();
-        else if (document.hasFocus()) sendControl({ id: +WINDOW, op: 'activate' });
+        else if (document.hasFocus()) sendControl({ id: +WINDOW, op: 'focus' });
         break;
       }
       case CONFIG: {
@@ -492,14 +493,17 @@ export function createViewer() {
       case AUDIO:
         onAudio(buf);
         break;
+      case WORKSPACES:
+        store.set({ workspaces: JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 1))) });
+        break;
       case WINDOWS: {
         const list = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 1)));
+        store.set({ windows: list });
         if (WINDOW) {
           const w = list.find(w => w.id === +WINDOW);
           if (w) { document.title = w.title || w.app_id; store.set({ windowTitle: w.title || w.app_id }); }
           break;
         }
-        store.set({ windows: list });
         fetchElements();
         break;
       }
@@ -942,7 +946,8 @@ export function createViewer() {
 
   // --- input -----------------------------------------------------------------------------
   // Only the controller's pointer and keyboard are the desktop's (a window popup drives with any token with `desktop.control`).
-  const driving = () => can('desktop.control') && (WINDOW ? state().role !== 'viewer' : state().role === 'controller');
+  const windowOnDesktop = () => state().windows.some(w => w.id === Number(WINDOW) && w.workspace === state().workspaces.active && !w.minimized);
+  const driving = () => can('desktop.control') && (WINDOW ? state().role !== 'viewer' && windowOnDesktop() : state().role === 'controller');
   // A pointer position in the desktop's logical px, through the canvas's on-screen rectangle (which
   // follows the touch zoom); the stream's size is the desktop's, except while a resize is in flight.
   function toDesktop(e) {
@@ -1301,7 +1306,7 @@ export function createViewer() {
   const blur = () => { controlsKey = false; paletteKey = false; if (keyboardPending) releaseKeyboard(); pendingPaste = null; if (!dragging) releaseInput(); };
   window.addEventListener('blur', blur);
   document.addEventListener('visibilitychange', () => { if (document.hidden) blur(); });
-  if (WINDOW) window.addEventListener('focus', () => sendControl({ id: +WINDOW, op: 'activate' })); // keyboard focus follows the tab
+  if (WINDOW) window.addEventListener('focus', () => sendControl({ id: +WINDOW, op: 'focus' }));
 
   // --- fullscreen ------------------------------------------------------------------------------
   // Fullscreen includes the display and status bar. Keyboard Lock: Ctrl+W, Ctrl+T, Alt+Tab… reach the Wayland clients instead of the browser.

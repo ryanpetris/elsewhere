@@ -82,7 +82,7 @@ For example, `/elsewhere/alice/api/windows` and `/elsewhere/alice/mcp` address t
 
 ## Windows and programs
 
-- `activate` raises and focuses a window (and restores it if minimized); `close`, `minimize`,
+- `activate` switches to the window’s workspace, raises and focuses it (and restores it if minimized); `close`, `minimize`,
   `unminimize`, `maximize`, `unmaximize`, `fullscreen`, `unfullscreen` do what they say; `move` and
   `resize` work on floating windows. These requests are fire-and-forget: check the window list
   afterwards.
@@ -104,6 +104,7 @@ For example, `/elsewhere/alice/api/windows` and `/elsewhere/alice/mcp` address t
 | 401 | missing or wrong bearer token | check `Authorization: Bearer` |
 | 403 | permission denied | obtain a token with the grants required by this operation |
 | 404 | no such window | the window closed; list again |
+| 409 | window is on an inactive workspace | explicitly activate it before coordinate input |
 | 429 | another snapshot is in flight | one at a time; retry after it returns |
 | 500 | the snapshot render failed | retry after checking the error |
 | 501 | the server runs without `--elements` | use snapshots instead |
@@ -153,3 +154,14 @@ Broadcasts continue without browser viewers. Up to four independent H.264/AAC ou
 Silent audio does not require the private audio service. Settings are not saved on the host;
 browser presets belong to that browser and cannot be retrieved through MCP. Supply connection
 settings yourself when using MCP. See the generated reference for the matching HTTP routes.
+
+## Workspaces
+
+Read `GET /api/workspaces` (MCP `workspaces`) for the shared active number and fixed count of four.
+Each window reports `workspace`, separate from `minimized`. `POST /api/control` accepts
+`{"op":"switchworkspace","workspace":2}` and `{"op":"movetoworkspace","id":7,"workspace":2}`;
+MCP provides `switch_workspace` and `move_to_workspace`. Reads require `desktop.view`, mutations
+`desktop.control`. Moving a dialog moves its parent/transient family without switching desktops.
+Explicitly activate a window to switch to its workspace and focus it. Ordinary coordinate input to
+an inactive window fails with 409; do not retry without activation. Snapshots remain available.
+Workspaces share access and state across viewers; they are not separate security domains.

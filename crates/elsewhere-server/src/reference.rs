@@ -10,7 +10,8 @@ use crate::{apps::AppInfo, elements::Page, mcp::Mcp};
 const ROUTES: &str = "\
 | Method and path | Body or query | Result |
 |---|---|---|
-| `GET /api/windows` | | JSON array of **Window** |
+| `GET /api/windows` | | JSON array of **Window**, including workspace membership |
+| `GET /api/workspaces` | | desktop.view; **Workspaces** with active number and fixed count |
 | `GET /api/broadcasts/capabilities` | | broadcast encoder availability and limits |
 | `POST /api/broadcasts/start` | **BroadcastStart** | broadcasts.manage + desktop.view, plus audio.listen for desktop audio; runtime status without connection credentials |
 | `GET /api/broadcasts` | | runtime statuses; no saved configurations or credentials |
@@ -35,8 +36,8 @@ const ROUTES: &str = "\
 | `POST /api/windows/{id}/elements/wait` | **ElementWait** | desktop.view; **ElementWaitResult**, including matched=false on timeout; same error statuses as action |
 | `GET /api/windows/{id}/snapshot.png` | one optional `width`, `height`, or `percentage`; default native | PNG of the window; `404`, `429` another snapshot in flight, `500` render failed, `503` |
 | `GET /api/screenshot.png` | same sizing as window snapshots; default native | PNG of the whole output; `429`, `500`, `503` as for a window |
-| `POST /api/control` | **Control** | `202`; fire-and-forget; `404` unknown application (`launch`); `503` compositor gone |
-| `POST /api/input` | **Input** | `202`, with `{\"warning\": …}` when a click aims past the desktop's edge at an X11 window (Xwayland pins it to the edge); `404` unknown window; `503` compositor gone |
+| `POST /api/control` | **Control** | `400` for an out-of-range workspace; `202`; fire-and-forget; `404` unknown application (`launch`); `503` compositor gone |
+| `POST /api/input` | **Input** | `202`, with `{\"warning\": …}` when a click aims past the desktop's edge at an X11 window (Xwayland pins it to the edge); `404` unknown window; `409` inactive workspace (activate explicitly); `503` compositor gone |
 | `GET /api/clipboard/state` | | metadata: `observation`, `operation`, `present`, `mime`, `size`, `preview`; preview is empty, loading, available, unavailable or restricted; opaque identifiers are scoped to this server process |
 | `GET /api/clipboard` | optional `If-Match` with quoted observation | current bytes with Content-Type and ETag; `clipboard.read` and `files.download` required for file lists; `204` no selection, `409` bytes unavailable, `412` observation changed |
 | `PUT /api/clipboard` | UTF-8 text body, a PNG with `Content-Type: image/png`, or `file://` URIs with `text/uri-list` | queues a desktop clipboard change; `202` with an opaque `operation` confirmed by matching metadata after installation; `413` over 1 MiB (text) or 16 MiB (PNG) |
@@ -60,7 +61,7 @@ pub fn markdown() -> String {
     out.push_str("Generated from the code (`UPDATE_REFERENCE=1 cargo test -p elsewhere-server reference`); do not edit.\n\n");
     out.push_str("## HTTP API\n\nEvery `/api` request carries `Authorization: Bearer <token>`; `401` otherwise. Each operation requires explicit token permissions; missing grants return `403` permission denied.\nThe statuses in the table come with a JSON body `{\"error\": \"...\"}`. A request body the server can't read is\nrejected before that with a plain-text message: `400` invalid JSON, `415` missing\n`Content-Type: application/json`, `422` wrong shape. Coordinates are logical pixels.\n\n");
     out.push_str(ROUTES);
-    for (name, s) in [("BroadcastStart", schema::<elsewhere_core::broadcast::Start>()), ("Window", schema::<WindowInfo>()), ("Application", schema::<AppInfo>()), ("Notification", schema::<crate::notify::Notification>()), ("FileQuery", schema::<crate::files::FileQuery>()), ("FileListing", schema::<crate::files::FileListing>()), ("FileAction", schema::<crate::files::FileAction>()), ("SavedFile", schema::<crate::files::SavedFile>()), ("Control", schema::<ControlMsg>()), ("Input", schema::<InputMsg>()), ("Elements", schema::<Page>()), ("Element", schema::<crate::elements::Element>()), ("ElementAction", schema::<crate::elements::ElementAction>()), ("ElementText", schema::<crate::elements::ElementText>()), ("ElementWait", schema::<crate::elements::ElementWait>()), ("ElementWaitResult", schema::<crate::elements::WaitResult>())] {
+    for (name, s) in [("Workspaces", schema::<elsewhere_core::WorkspaceState>()), ("BroadcastStart", schema::<elsewhere_core::broadcast::Start>()), ("Window", schema::<WindowInfo>()), ("Application", schema::<AppInfo>()), ("Notification", schema::<crate::notify::Notification>()), ("FileQuery", schema::<crate::files::FileQuery>()), ("FileListing", schema::<crate::files::FileListing>()), ("FileAction", schema::<crate::files::FileAction>()), ("SavedFile", schema::<crate::files::SavedFile>()), ("Control", schema::<ControlMsg>()), ("Input", schema::<InputMsg>()), ("Elements", schema::<Page>()), ("Element", schema::<crate::elements::Element>()), ("ElementAction", schema::<crate::elements::ElementAction>()), ("ElementText", schema::<crate::elements::ElementText>()), ("ElementWait", schema::<crate::elements::ElementWait>()), ("ElementWaitResult", schema::<crate::elements::WaitResult>())] {
         out.push_str(&format!("\n## {name}\n\n```json\n{s}\n```\n"));
     }
     out.push_str("\n## MCP tools\n\nStreamable HTTP at `/mcp`, same bearer token. Failures come back as tool errors with the same text as the API.\n");

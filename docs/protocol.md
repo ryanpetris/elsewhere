@@ -160,7 +160,7 @@ the viewer's panel opens one, sized to the window). The same messages as `/ws`, 
 - Pointer positions are relative to the window's geometry, as in the input message (they are forwarded
   as one, resolved against the live geometry). Keys and buttons go where they always go (the focused
   window, the pointer). Any desktop.control session drives its popup, whoever controls the desktop; a
-  desktop-view-only session only watches. Focusing the tab activates the window.
+  desktop-view-only session only watches. Focusing the tab focuses the window only if it is already mapped on the active workspace.
 - `Cursor`, `PointerLock`, `Windows` and `Clipboard` arrive as on `/ws`; there is no audio. The page
   uses the window list only for the tab title. `Notice` arrives only here: a press on the part of an
   X11 window that hangs past the desktop's edge, which Xwayland pins to the edge.
@@ -293,11 +293,14 @@ Wait results include `matched`, `elapsed_ms`, `attempts`, the last observed `ele
 
 ### Control message
 
-`{"id": <window id>, "op": "<op>", ...}`; `id` is omitted for `spawn`, `launch` and `quit`.
+`{"id": <window id>, "op": "<op>", ...}`; `id` is omitted for `switchworkspace`, `spawn`, `launch` and `quit`.
 
 | `op` | Effect |
 |---|---|
-| `activate` | unminimize if needed, raise, focus |
+| `activate` | switch to the window’s workspace, unminimize if needed, raise, focus |
+| `focus` | focus only if mapped on the active workspace; never switch or restore |
+| `switchworkspace` (`workspace`) | switch the shared desktop to 1–4 |
+| `movetoworkspace` (`workspace`) | move the window’s parent/transient family to 1–4 without switching |
 | `close` | ask the client to close (`xdg_toplevel.close` / `WM_DELETE_WINDOW`) |
 | `minimize`, `unminimize` | |
 | `maximize`, `unmaximize`, `fullscreen`, `unfullscreen` | through the same paths as the client's own requests; a minimized window is restored first |
@@ -361,3 +364,18 @@ and when these settings change. This is shared desktop state, independent of per
 and controls visibility. Kiosk fullscreens existing and newly mapped application windows. Turning it
 off restores saved window state and geometry; windows first opened in kiosk become maximized in the
 work area. Application fullscreen requests remain available in either mode.
+
+## Workspace state
+
+`Workspaces` (`0x18`) carries UTF-8 JSON `{ "active": 1, "count": 4 }` and is replayed to desktop
+and window sessions. Every `WindowInfo` has a `workspace` number. The full window list includes
+inactive and minimized windows; only the active workspace contributes desktop hit tests and rendering.
+`Control` accepts `switchworkspace` with `workspace`, and `movetoworkspace` with `id` and `workspace`.
+Desktop sessions need current controller status and `desktop.control` for those operations. Explicit
+window activation can switch desktops using existing window-control authorization. Ordinary input
+cannot activate an inactive target; window streams receive a notice. Stream playback continues.
+
+`Control` operation `focus` conditionally focuses a window already mapped on the active workspace.
+Window tabs use it for browser focus changes; unlike `activate`, it never switches or restores.
+
+Window sockets accept workspace controls with `desktop.control`. Explicit window activation uses the existing window-control authorization on every socket and can switch the shared workspace, including for participants.

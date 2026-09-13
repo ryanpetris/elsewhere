@@ -99,6 +99,7 @@ impl XwmHandler for State {
     fn map_window_request(&mut self, _xwm: XwmId, window: X11Surface) {
         let _ = window.set_mapped(true);
         let win = Window::new_x11_window(window.clone());
+        self.assign_workspace(&win, self.parent_window(&win).as_ref().map_or(self.workspaces.active, |p| self.window_workspace(p)));
         if self.kiosk {
             let _ = window.set_fullscreen(true);
             let geo = self.space.output_geometry(&self.output).unwrap_or_default();
@@ -109,14 +110,16 @@ impl XwmHandler for State {
             rect.loc = self.work_area().loc + smithay::utils::Point::from((40 + 30 * n, 40 + elsewhere_core::decoration::BAR + 30 * n));
             self.place_x11(&win, &window, rect);
         }
-        win.set_activated(true);
-        self.active = Some(win); // mapped activated: that is what the desktop API reports as focused
+        win.set_activated(self.on_active_workspace(&win));
+        if self.on_active_workspace(&win) { self.pending_initial_focus = None; self.active = Some(win); } // mapped activated: that is what the desktop API reports as focused
     }
 
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, window: X11Surface) {
         // menus, tooltips: they know where they want to be
         let loc = window.last_configure().loc + window.geometry().loc;
-        self.space.map_element(Window::new_x11_window(window), loc, false);
+        let win = Window::new_x11_window(window);
+        self.assign_workspace(&win, self.parent_window(&win).as_ref().or(self.active.as_ref()).map_or(self.workspaces.active, |p| self.window_workspace(p)));
+        self.space.map_element(win, loc, false);
         self.dirty = true;
     }
 

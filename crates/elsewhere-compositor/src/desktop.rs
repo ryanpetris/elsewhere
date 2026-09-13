@@ -19,7 +19,7 @@ use smithay::{
     },
     desktop::{Window, WindowSurface, PopupManager},
     reexports::{wayland_protocols::{wp::content_type::v1::server::wp_content_type_v1::Type as ContentType, xdg::shell::server::xdg_toplevel::State as XdgState}, wayland_server::Resource},
-    utils::{Buffer, Physical, Rectangle, SERIAL_COUNTER, Scale, Size, Transform},
+    utils::{Buffer, Physical, Rectangle, Scale, Size, Transform},
     wayland::{compositor::with_states, content_type::ContentTypeSurfaceCachedState, shell::xdg::XdgToplevelSurfaceData, xdg_toplevel_icon::ToplevelIconCachedState},
 };
 
@@ -94,6 +94,7 @@ impl State {
             WindowSurface::X11(x) => (true, x.pid(), x.is_maximized(), x.is_fullscreen()),
         };
         WindowInfo {
+            workspace: self.window_workspace(window),
             id: window_id(window),
             title,
             app_id,
@@ -180,6 +181,7 @@ impl State {
 
     /// A request from the viewer page or `/api/control`. Unknown ids and impossible requests are ignored.
     pub fn control(&mut self, msg: ControlMsg) {
+        if let ControlOp::SwitchWorkspace { workspace } = &msg.op { return self.switch_workspace(*workspace); }
         if let ControlOp::Spawn { cmd } = &msg.op {
             return self.spawn_client(cmd);
         }
@@ -191,9 +193,11 @@ impl State {
         let mapped = self.space.element_location(&window).is_some();
         let floating = mapped && !maximized && !fullscreen;
         match msg.op {
+            ControlOp::Focus => { if self.on_active_workspace(&window) && mapped { self.focus_window(Some(&window), smithay::utils::SERIAL_COUNTER.next_serial()); } },
+            ControlOp::MoveToWorkspace { workspace } => self.move_to_workspace(&window, workspace),
+            ControlOp::SwitchWorkspace { .. } => {},
             ControlOp::Activate => {
-                self.unminimize(&window);
-                self.focus_window(Some(&window), SERIAL_COUNTER.next_serial());
+                self.activate_window(&window);
             }
             ControlOp::Close => match window.underlying_surface() {
                 WindowSurface::Wayland(t) => t.send_close(),

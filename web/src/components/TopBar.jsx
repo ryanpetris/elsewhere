@@ -64,6 +64,7 @@ const Capture = () => (
 
 export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, onHideControls, menu, onMenu, keyboard, onKeyboard, canType }) {
   const status = useStore(viewer.store, s => s.status);
+  const workspaces = useStore(viewer.store, s => s.workspaces);
   const stream = useStore(viewer.store, s => s.stream);
   const windowTitle = useStore(viewer.store, s => s.windowTitle);
   const role = useStore(viewer.store, s => s.role);
@@ -106,6 +107,9 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, o
           </span>
         )}
       </div>
+      {!windowMode && <select aria-label="Workspace" value={workspaces.active} disabled={status !== 'connected' || role !== 'controller' || !permissions.includes('desktop.control')} onChange={e => viewer.control({ op: 'switchworkspace', workspace: Number(e.target.value) })} className="mx-2 rounded border border-line bg-surface-2 px-2 py-1 text-xs text-ink disabled:opacity-50 max-sm:mx-1 max-sm:px-1 max-sm:text-[10px]">
+        {Array.from({ length: workspaces.count }, (_, i) => <option key={i + 1} value={i + 1}>Workspace {i + 1}</option>)}
+      </select>}
       <div className="ml-auto flex shrink-0 items-center sm:gap-0.5">
         {locked && <Capture />}
         <Role role={role} windowMode={windowMode} />

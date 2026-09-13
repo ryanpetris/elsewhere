@@ -15,7 +15,6 @@ use smithay::{
         },
         wayland_server::{Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, backend::ClientId},
     },
-    utils::SERIAL_COUNTER,
 };
 
 use crate::State;
@@ -180,8 +179,7 @@ impl Dispatch<ZwlrForeignToplevelHandleV1, Window> for State {
         }
         match request {
             R::Activate { .. } => {
-                state.unminimize(window);
-                state.focus_window(Some(window), SERIAL_COUNTER.next_serial());
+                state.activate_window(window);
             }
             R::Close => match window.underlying_surface() {
                 WindowSurface::Wayland(t) => t.send_close(),

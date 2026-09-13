@@ -16,7 +16,7 @@ elsewhere --exec 'dbus-run-session -- sh -c "xfce4-panel & exec foot"'
 | wlr-layer-shell: the bar itself, exclusive zones, menus as popups, on-demand keyboard | Smithay ships the protocol; the compositor policy is ours (below). |
 | wlr-foreign-toplevel-management: waybar's `wlr/taskbar`, xfce's tasklist, windowmenu, show-desktop | Hand-written server side, protocol version 2 (v3 only adds `parent`, which we don't track). Smithay only has the list-only ext protocol. |
 | Minimize: tasklists click the active task to minimize, show-desktop minimizes everything | Unmap from the space into a list, restore on activate. Also wired to xdg `set_minimized` and X11 `WM_CHANGE_STATE`. |
-| ext-workspace (xfce pager, waybar `ext/workspaces`) | One group with one always-active workspace (`workspace.rs`, hand-written like the foreign-toplevel global); the requests are accepted and ignored since nothing can be created or switched. |
+| ext-workspace (xfce pager, waybar `ext/workspaces`) | One group with four numbered workspaces. Activation takes effect on manager `commit`; state updates end with `done`. Only activation is advertised. Creation, removal, deactivation, and assignment to another group are unsupported. |
 | idle-inhibit (waybar `idle_inhibitor`) | Accepted and ignored: Smithay `IdleInhibitManagerState` with a no-op handler; there is no screen to blank. |
 | Xfce's private protocols | Skipped; labwc runs Xfce without them. |
 
@@ -36,7 +36,7 @@ elsewhere --exec 'dbus-run-session -- sh -c "xfce4-panel & exec foot"'
   floating ones clamped.
 - **Hit-testing.** Overlay and top layers before windows, bottom and background after; every surface of
   a layer is tried so an input-transparent overlay (an OSD) lets the pointer fall through to the panel
-  below it. While a mapped window is fullscreen the top layer is skipped, in rendering and hit-testing
+  below it. While a mapped window on the active workspace is fullscreen the top layer is skipped, in rendering and hit-testing
   alike, so the window covers the panel and clicks reach it; the overlay layer stays above everything.
   A launcher that should still appear over a fullscreen window belongs on the overlay layer.
 - **Keyboard.** A click on an on-demand layer focuses it (and deactivates the windows); an exclusive
@@ -55,7 +55,7 @@ elsewhere --exec 'dbus-run-session -- sh -c "xfce4-panel & exec foot"'
 as the handle's user data. Every loop iteration a diff of title, app id and state (maximized,
 minimized, activated, fullscreen) against what each taskbar was last told sends only the changed fields
 followed by `done`; a window that leaves the space or the minimized list gets `closed`. Requests route
-through the same functions as everything else: activate = unminimize + `focus_window`, close, maximize
+through the same functions as everything else: activate = switch to the window’s workspace, unminimize, and focus, close, maximize
 and fullscreen via the fill paths (unminimizing first, since those only know mapped windows), minimize.
 Requests on a handle already closed are ignored, as the protocol requires. X11 windows report their
 class as the app id.
@@ -87,3 +87,20 @@ desktop has nowhere to come back from.
 - **GTK rendering.** For GTK 4 Vulkan artifacts, set `GSK_RENDERER=ngl` in the environment launching
   Elsewhere. GTK 3 panels do not need this setting.
 
+
+## Workspaces
+
+The pager and the viewer switch the same shared desktop. Workspaces 1–4 exist for the running
+session. Panels remain shared. Tasklists discover windows from every workspace; activating a task
+switches to its workspace and restores it if minimized. The ext-workspace protocol does not move
+individual windows: use the viewer’s window list or the HTTP/MCP move operation for that.
+
+Independent windows open on the active workspace. Wayland and X11 transient windows follow their
+parent; moving a dialog moves its parent family. Geometry and relative stacking survive a switch.
+Each workspace remembers its last focused window, falling back to the top remaining window when
+that window is gone or minimized. Switching releases held keys/buttons, touch contacts, grabs, and
+pointer lock, and dismisses Wayland application and panel popups. Fullscreen windows suppress panels only on their
+own active workspace. Inactive windows remain discoverable and capturable; they are not minimized.
+
+An exclusive top or overlay launcher retains keyboard focus across a workspace switch. Moving its
+underlying active application changes the fallback application without interrupting launcher input.

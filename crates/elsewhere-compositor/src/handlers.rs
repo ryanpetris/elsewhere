@@ -287,18 +287,23 @@ impl CompositorHandler for State {
                 window.on_commit();
                 self.touch_window(&window);
                 let has_buffer = with_renderer_surface_state(&root, |s| s.buffer().is_some()).unwrap_or(false);
-                // a dialog opens over its parent, not in the cascade
+                // Parent requests precede the first buffer; resolve membership before activating a new window.
                 if has_buffer && window.user_data().insert_if_missing(|| FirstBuffer) {
+                    self.sync_workspace_parents(false);
                     self.center_on_parent(&window);
-                }
-                // A new window takes the keyboard once it has something to show (its first buffer), so typing
-                // goes to it without a click, unless a launcher holds an exclusive grab. Once per window.
-                if self.active.as_ref() == Some(&window)
-                    && has_buffer
-                    && !self.exclusive_layer_focused()
-                    && window.user_data().insert_if_missing(|| InitialFocus)
-                {
-                    self.focus_window(Some(&window), SERIAL_COUNTER.next_serial());
+                    let initial_focus = if window.toplevel().is_some() {
+                        self.pending_initial_focus.as_ref() == Some(&window)
+                    } else {
+                        self.active.as_ref() == Some(&window) && !window.x11_surface().is_some_and(|x| x.is_override_redirect())
+                    };
+                    if self.pending_initial_focus.as_ref() == Some(&window) { self.pending_initial_focus = None; }
+                    if initial_focus && self.on_active_workspace(&window) && self.space.element_location(&window).is_some() {
+                        if self.exclusive_layer_focused() {
+                            self.active = Some(window.clone());
+                        } else {
+                            self.focus_window(Some(&window), SERIAL_COUNTER.next_serial());
+                        }
+                    }
                 }
                 // wl_surface.offset: the client moved its buffer origin, so move the window with it.
                 // map_element always puts the window on top, so only do it for a real move: some
@@ -340,14 +345,12 @@ impl CompositorHandler for State {
     }
 }
 
-/// Marker: this window has had its one initial keyboard focus.
-struct InitialFocus;
 /// Marker: this window has shown its first buffer (placement happens once).
 struct FirstBuffer;
 
 impl State {
     /// A Top or Overlay layer surface with exclusive keyboard interactivity (a launcher) holds the keyboard.
-    fn exclusive_layer_focused(&self) -> bool {
+    pub(crate) fn exclusive_layer_focused(&self) -> bool {
         let Some(focus) = self.seat.get_keyboard().and_then(|k| k.current_focus()) else { return false };
         let Some(focus) = focus.wl_surface() else { return false };
         let layers = layer_map_for_output(&self.output);
@@ -417,15 +420,17 @@ impl XdgShellHandler for State {
                 s.size = Some(size);
             });
             let window = Window::new_wayland_window(surface);
-            self.space.map_element(window.clone(), (0, 0), true);
-            self.active = Some(window);
+            self.assign_workspace(&window, self.workspaces.active);
+            self.pending_initial_focus = Some(window.clone());
+            self.space.map_element(window, (0, 0), false);
             return;
         }
         let n = self.space.elements().count() as i32 % 10;
         let window = Window::new_wayland_window(surface);
+        self.assign_workspace(&window, self.workspaces.active);
+        self.pending_initial_focus = Some(window.clone());
         // Reserve room for possible server decoration in the cascade.
-        self.space.map_element(window.clone(), work.loc + Point::from((40 + 30 * n, 40 + elsewhere_core::decoration::BAR + 30 * n)), true);
-        self.active = Some(window); // mapped activated: that is what the desktop API reports as focused
+        self.space.map_element(window, work.loc + Point::from((40 + 30 * n, 40 + elsewhere_core::decoration::BAR + 30 * n)), false);
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
@@ -447,6 +452,10 @@ impl XdgShellHandler for State {
         let seat: Seat<State> = Seat::from_resource(&seat).unwrap();
         let kind = PopupKind::Xdg(surface);
         let Some(root) = find_popup_root_surface(&kind).ok() else { return };
+        if self.window_for(&root).is_some_and(|w| !self.on_active_workspace(&w)) {
+            let _ = smithay::desktop::PopupManager::dismiss_popup(&root, &kind);
+            return;
+        }
         let Ok(mut grab) = self.popups.grab_popup(root.into(), kind, &seat, serial) else { return };
         if let Some(keyboard) = seat.get_keyboard() {
             if keyboard.is_grabbed() && !(keyboard.has_grab(serial) || keyboard.has_grab(grab.previous_serial().unwrap_or(serial))) {
@@ -674,6 +683,7 @@ impl SeatHandler for State {
         self.export_cursor();
     }
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&KeyboardFocus>) {
+        self.pending_initial_focus = None;
         let client = focused.and_then(|f| f.wl_surface()).and_then(|s| self.dh.get_client(s.id()).ok());
         set_data_device_focus(&self.dh, seat, client.clone());
         set_primary_focus(&self.dh, seat, client);
@@ -863,8 +873,7 @@ impl smithay::wayland::xdg_activation::XdgActivationHandler for State {
         self.xdg_activation_state.remove_token(&token);
         let minimized = self.minimized.iter().map(|(w, ..)| w).find(|w| w.wl_surface().is_some_and(|s| *s == surface)).cloned();
         if let Some(window) = self.window_for(&surface).or(minimized) {
-            self.unminimize(&window);
-            self.focus_window(Some(&window), SERIAL_COUNTER.next_serial());
+            self.activate_window(&window);
         }
     }
 }

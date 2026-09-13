@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
-import { CONFIG, ROLE, POINTER_LOCK, POINTER_LOCK_LOST, KEY, BLUR } from '../src/protocol.js';
+import { CONFIG, ROLE, WINDOWS, WORKSPACES, POINTER_LOCK, POINTER_LOCK_LOST, KEY, BLUR } from '../src/protocol.js';
 
 const root = await mkdtemp('/tmp/elsewhere-fullscreen-');
 const children = [];
@@ -30,7 +30,13 @@ window.sent = []; window.errors = [];
 addEventListener('unhandledrejection', event => errors.push(String(event.reason)));
 window.WebSocket = class {
   static OPEN = 1; readyState = 1;
-  constructor() { window.socket = this; queueMicrotask(() => { this.onopen?.({}); this.onmessage?.({ data: new Uint8Array([0x15, ...new TextEncoder().encode(JSON.stringify(["desktop.view", "desktop.control", "clipboard.read", "clipboard.write"]))]).buffer }); }); }
+  constructor() { window.socket = this; queueMicrotask(() => {
+    this.onopen?.({});
+    const send = (type, value) => this.onmessage?.({ data: new Uint8Array([type, ...new TextEncoder().encode(JSON.stringify(value))]).buffer });
+    send(0x15, ["desktop.view", "desktop.control", "clipboard.read", "clipboard.write"]);
+    send(${WORKSPACES}, { active: 1, count: 4 });
+    send(${WINDOWS}, [{ id: 1, title: 'Capture fixture', app_id: 'fixture', workspace: 1, minimized: false, x: 0, y: 0, w: 1280, h: 720, popups: [] }]);
+  }); }
   send(data) { sent.push([...new Uint8Array(data)]); }
   close() {}
 };
@@ -100,7 +106,7 @@ try {
       };
       checkPip = async () => {
         const next = page.context().waitForEvent('page');
-        await page.getByRole('button', { name: 'Picture-in-Picture', exact: true }).click();
+        await page.locator('header').getByRole('button', { name: 'Picture-in-Picture', exact: true }).click();
         const popup = await next;
         let frame;
         await wait(() => { frame = popup.frames().find(f => f.parentFrame()); return !!frame; });

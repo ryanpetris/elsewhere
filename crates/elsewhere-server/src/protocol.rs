@@ -47,6 +47,8 @@ pub const PERMISSIONS: u8 = 0x15;
 pub const ROSTER: u8 = 0x16;
 /// `[f64 x][f64 y][f64 logical width][f64 logical height]`.
 pub const POINTER_POSITION: u8 = 0x17;
+/// Shared active workspace and fixed count, as JSON.
+pub const WORKSPACES: u8 = 0x18;
 // client -> server
 /// `[AUTH][token as UTF-8]`: must be the first message on a new socket; nothing else is processed before it.
 pub const AUTH: u8 = 0x80;
@@ -609,4 +611,10 @@ mod tests {
         let a = audio(0x11, &[4, 5, 6], 3);
         assert_eq!(&a[..], &[AUDIO, 0, 3, 0, 0x11, 0, 0, 0, 0, 0, 0, 0, 4, 5, 6]);
     }
+}
+
+pub fn workspaces(state: &elsewhere_core::WorkspaceState) -> Bytes {
+    let mut b = vec![WORKSPACES];
+    serde_json::to_writer(&mut b, state).expect("workspace state serializes");
+    b.into()
 }

@@ -68,6 +68,8 @@ pub enum Command {
     /// Pointer or keyboard input from the API or MCP, resolved on the compositor thread (window-relative
     /// coordinates against the live geometry, keys through the keymap) so a whole click lands as one unit.
     Input(InputMsg),
+    /// Per-window viewer input, admitted only while the target is on the active desktop.
+    WindowInput { window: u64, command: Box<Command> },
     /// Render one window (or the whole output) to pixels and hand them to `reply`.
     Snapshot { id: Option<u64>, sizing: SnapshotSizing, reply: SnapshotReply },
     /// The icon a window's client set as pixels (xdg-toplevel-icon), the largest; `NoSuchWindow` when it set none.
@@ -151,9 +153,22 @@ pub mod decoration {
     }
 }
 
+pub const WORKSPACE_COUNT: u32 = 4;
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct WorkspaceState {
+    pub active: u32,
+    pub count: u32,
+}
+impl Default for WorkspaceState {
+    fn default() -> Self { Self { active: 1, count: WORKSPACE_COUNT } }
+}
+
 /// One window as the desktop API reports it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct WindowInfo {
+    /// Numbered desktop containing this window, independent of minimization.
+    pub workspace: u32,
     pub id: u64,
     pub title: String,
     /// X11: the WM_CLASS
@@ -200,6 +215,10 @@ pub struct ControlMsg {
 #[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]
 #[serde(tag = "op", rename_all = "lowercase")]
 pub enum ControlOp {
+    /// Focus only if already mapped on the active workspace; never switch or restore.
+    Focus,
+    SwitchWorkspace { workspace: u32 },
+    MoveToWorkspace { workspace: u32 },
     Activate,
     Close,
     Minimize,
@@ -285,6 +304,7 @@ pub enum Event {
     PointerLock(bool),
     /// The window list changed (full list, bottom to top, minimized last).
     Windows(Vec<WindowInfo>),
+    Workspaces(WorkspaceState),
     /// A desktop application put text (a `text/*` mime) or a PNG on the clipboard.
     Clipboard { mime: String, data: Bytes, operation: Option<ClipboardOperation> },
     /// A clipboard owner changed or its read failed. No mime means no selection.

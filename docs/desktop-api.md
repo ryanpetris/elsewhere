@@ -125,8 +125,8 @@ Capture time includes compositor queueing, rendering and readback; PNG time incl
 dispatch. These timings do not isolate window-list bookkeeping CPU cost. Hidden-pane capture work fell
 to zero. The measurements do not justify adding preview streams or encoders.
 
-`State::active` is written by `focus_window` and when a window is first mapped, and cleared when the
-active window dies. Maximize and restore raise a window without activating it, so an API request on a
+`State::active` tracks the active application. Wayland initial focus waits for the first buffer and
+parent membership; X11 initial activation happens at map. It is cleared when the active window dies. Maximize and restore raise a window without activating it, so an API request on a
 background window does not make it look focused.
 
 ## Control
@@ -663,7 +663,7 @@ read it with `useSyncExternalStore` and send actions back through the engine.
 - **Windows tab**: one row per window, top-most first, minimized last: a thumbnail, a colour dot, the
   title, the app id and size, state badges, and (on hover) buttons to open the window in its own popup
   (a window stream), snapshot, maximize/restore, minimize/restore (restore uses `activate`, so the window
-  also gets the keyboard), close. Clicking a row activates the window. The command box at the top spawns
+  also gets the keyboard), close. Clicking a row switches to the window’s workspace and activates it. The command box at the top spawns
   programs; focusing it releases any key held in the compositor, and keys typed into any text field of
   the page never reach the desktop.
 - Thumbnails use `content_revision` and their required image dimensions to detect pending updates.
@@ -739,3 +739,26 @@ X11 restoration after resolution shrink, including kiosk-created windows and ove
 Run `node checks/window-bounds.mjs` with a C compiler, libwayland-dev, wayland-protocols and
 plasma-wayland-protocols in the Docker rig to verify emitted Wayland bounds across xdg/KDE decoration,
 fullscreen, kiosk and resolution changes, including minimized windows.
+
+## Workspaces
+
+`GET /api/workspaces` and MCP `workspaces` return `{ "active": 1, "count": 4 }`.
+The `workspace` field in every window identifies its numbered desktop, independently of `minimized`.
+Reads require `desktop.view`.
+
+Send `{ "op": "switchworkspace", "workspace": 2 }` to `POST /api/control` to switch,
+or `{ "op": "movetoworkspace", "id": 7, "workspace": 2 }` to move a window and its transient
+family without switching. MCP exposes `switch_workspace` and `move_to_workspace`. Numbers must be
+1–4; invalid numbers return 400. Control requests return 202 when queued; inspect state afterwards.
+HTTP/MCP mutations require `desktop.control`, independently of the viewer’s controller role.
+Desktop WebSocket switch/move requests additionally require the current controller.
+
+Activating a window explicitly switches to its desktop, restores it if minimized, and focuses it.
+Ordinary window-relative input never switches desktops: HTTP/MCP rejects an inactive target with
+409; window streams receive a notice and offer **Activate on Desktop**. The compositor also checks
+membership when queued input executes. Opening or focusing a window viewer sends a conditional `focus` operation: it focuses only a
+window already mapped on the active workspace, never switching or restoring one. Window streams and snapshots keep working on inactive workspaces. Captured
+inactive windows continue receiving frame callbacks; uncaptured inactive windows can idle.
+
+Workspace selection is shared, replayed on reconnect, and lasts for the running session. Workspaces
+organize a single desktop; they do not partition access or conceal windows from authorized viewers.

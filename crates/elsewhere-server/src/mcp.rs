@@ -69,6 +69,14 @@ pub struct Mcp {
 }
 
 #[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceArg { pub workspace: u32 }
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MoveWorkspaceArg { pub window: u64, pub workspace: u32 }
+
+#[derive(Deserialize, JsonSchema)]
 pub struct WindowArg {
     /// Window id from `windows`.
     pub window: u64,
@@ -279,7 +287,23 @@ impl Mcp {
 
 #[tool_router(vis = "pub(crate)")]
 impl Mcp {
-    #[tool(description = "The windows on the desktop: id, title, app_id, icon (name the client set; its picture is at GET /api/windows/{id}/icon), content (video/game/photo when the client says so), pid, geometry x y w h (logical px), stacking z, maximized/fullscreen/minimized/focused, updated_ms (last redraw), popups (open menus, relative to x y).")]
+    #[tool(description = "Read the shared active workspace number and the fixed workspace count. Requires desktop.view.")]
+    fn workspaces(&self, Extension(parts): Extension<Parts>) -> ToolResult {
+        if let Err(e) = self.require_key(&parts, P::DesktopView) { return done(Err(e)); }
+        json(self.app.workspaces())
+    }
+
+    #[tool(description = "Switch the shared desktop to workspace 1 through 4. Releases held input and restores that workspace's focus. Requires desktop.control; check workspaces afterwards.")]
+    fn switch_workspace(&self, Extension(parts): Extension<Parts>, Parameters(args): Parameters<WorkspaceArg>) -> ToolResult {
+        self.control(&parts, 0, ControlOp::SwitchWorkspace { workspace: args.workspace })
+    }
+
+    #[tool(description = "Move a window and its transient family to workspace 1 through 4, retaining geometry and minimized state. Does not switch desktops. Requires desktop.control; check windows afterwards.")]
+    fn move_to_workspace(&self, Extension(parts): Extension<Parts>, Parameters(args): Parameters<MoveWorkspaceArg>) -> ToolResult {
+        self.control(&parts, args.window, ControlOp::MoveToWorkspace { workspace: args.workspace })
+    }
+
+    #[tool(description = "The windows on the desktop: id, title, app_id, icon (name the client set; its picture is at GET /api/windows/{id}/icon), content (video/game/photo when the client says so), pid, geometry x y w h (logical px), workspace number, stacking z, maximized/fullscreen/minimized/focused, updated_ms (last redraw), popups (open menus, relative to x y).")]
     fn windows(&self, Extension(parts): Extension<Parts>) -> ToolResult {
         if let Err(e) = self.require_key(&parts, P::DesktopView) { return done(Err(e)); }
         json(self.app.windows())
@@ -334,7 +358,7 @@ impl Mcp {
         self.png(Some(window), sizing).await
     }
 
-    #[tool(description = "Change a window's state: activate (raise, focus, restore), close, minimize, unminimize, maximize, unmaximize, fullscreen, unfullscreen. Fire-and-forget; check `windows` afterwards.")]
+    #[tool(description = "Change a window's state: activate (switch workspace, raise, focus, restore), close, minimize, unminimize, maximize, unmaximize, fullscreen, unfullscreen. Fire-and-forget; check `windows` afterwards.")]
     fn window_control(&self, Extension(parts): Extension<Parts>, Parameters(WindowControlArgs { window, op }): Parameters<WindowControlArgs>) -> ToolResult {
         let op = match op {
             WindowOp::Activate => ControlOp::Activate,

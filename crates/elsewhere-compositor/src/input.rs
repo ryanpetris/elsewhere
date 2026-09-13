@@ -9,7 +9,7 @@ use smithay::{
     desktop::{LayerSurface, Window, WindowSurface, WindowSurfaceType, layer_map_for_output},
     input::{
         keyboard::{FilterResult, Keysym, xkb},
-        pointer::{AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, Focus, GrabStartData, MotionEvent, PointerHandle, RelativeMotionEvent},
+        pointer::{AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, GrabStartData, MotionEvent, PointerHandle, RelativeMotionEvent},
         touch::{DownEvent, GrabStartData as TouchStart, MotionEvent as TouchMotion, UpEvent},
     },
     reexports::{
@@ -115,6 +115,11 @@ impl State {
                 self.key(evdev, pressed);
             }
             Command::Input(msg) => self.input(msg),
+            Command::WindowInput { window, command } => {
+                if self.window_by_id(window).is_some_and(|w| self.on_active_workspace(&w) && self.space.element_location(&w).is_some()) {
+                    self.handle_command(*command);
+                }
+            }
             Command::SetClipboard { mime, data, operation } => self.set_clipboard(mime, data, operation),
             Command::PasteClipboard { mime, data, operation, shift_insert, window, admission } => admission.execute(Box::new(|input| {
                 let input = input && window.is_none_or(|id| self.active.as_ref().is_some_and(|w| window_id(w) == id && self.space.element_location(w).is_some()));
@@ -180,7 +185,9 @@ impl State {
         let at = |st: &Self, x: f64, y: f64, window: Option<u64>| -> Option<Point<f64, Logical>> {
             match window {
                 Some(id) => {
-                    let geo = st.space.element_geometry(&st.window_by_id(id)?)?; // None while minimized
+                    let target = st.window_by_id(id)?;
+                    if !st.on_active_workspace(&target) { return None; }
+                    let geo = st.space.element_geometry(&target)?; // None while minimized
                     Some((geo.loc.x as f64 + x, geo.loc.y as f64 + y).into())
                 }
                 None => Some((x, y).into()),
@@ -268,7 +275,7 @@ impl State {
         true
     }
 
-    fn release_all(&mut self) {
+    pub(crate) fn release_all(&mut self) {
         if self.drag_active {
             self.drag(elsewhere_core::Drag::Cancel); // a drag the browser can't finish any more lets go over nothing
         }
@@ -281,7 +288,7 @@ impl State {
             pointer.button(self, &ButtonEvent { button, state: ButtonState::Released, serial: SERIAL_COUNTER.next_serial(), time: self.now() });
         }
         pointer.frame(self);
-        for slot in std::mem::take(&mut self.touch_down) {
+        for (slot, _) in std::mem::take(&mut self.touch_down) {
             self.touch(TouchKind::Up, slot, Point::default()); // fingers the browser won't lift any more
         }
     }
@@ -298,8 +305,8 @@ impl State {
         let slot = TouchSlot::from(Some(slot_id));
         match kind {
             TouchKind::Down => {
-                self.touch_down.insert(slot_id);
                 let under = self.surface_under(location); // before a bar button changes what is there
+                self.touch_down.insert(slot_id, under.as_ref().map(|(focus, _)| focus.clone()));
                 if !touch.is_grabbed() {
                     match self.window_under(location) {
                         _ if let Some((layer, _, _)) = self.layer_under(location, true) => {
@@ -337,7 +344,7 @@ impl State {
     /// tooltip: its client holds the grab, the focus stays with its window); the empty desktop lets a
     /// bottom or background layer have it if it asked (on-demand panels).
     fn focus_at(&mut self, location: Point<f64, Logical>, serial: Serial) {
-        let clicked = self.space.element_under(location).map(|(w, _)| w.clone());
+        let clicked = self.active_element_under(location).map(|(w, _)| w.clone());
         if !clicked.as_ref().is_some_and(|w| w.x11_surface().is_some_and(|x| x.is_override_redirect())) {
             self.focus_window(clicked.as_ref(), serial);
         }
@@ -397,7 +404,7 @@ impl State {
     }
 
     /// The browser lost its pointer lock: release the client's, and stay unlocked until the next click or browser capture.
-    fn release_pointer_lock(&mut self) {
+    pub(crate) fn release_pointer_lock(&mut self) {
         let pointer = self.seat.get_pointer().unwrap();
         if let Some(focus) = pointer.current_focus()
             && let Some(surface) = focus.wl_surface()
@@ -486,11 +493,10 @@ impl State {
                             !(st.contains(S::Maximized) || st.contains(S::Fullscreen))
                         }
                     };
-                    if let Some((window, loc)) = self.space.element_under(self.pointer_location).filter(|(w, _)| draggable(w)).map(|(w, l)| (w.clone(), l)) {
+                    if let Some(window) = self.active_element_under(self.pointer_location).filter(|(w, _)| draggable(w)).map(|(w, _)| w.clone()) {
                         self.space.raise_element(&window, true);
-                        let start_data = GrabStartData { focus: None, button, location: self.pointer_location };
-                        let grab = crate::grabs::MoveGrab { start_data, window, initial_location: loc };
-                        pointer.set_grab(self, grab, serial, Focus::Clear);
+                        let start = crate::grabs::Start::Pointer(GrabStartData { focus: None, button, location: self.pointer_location });
+                        self.start_move(start, window, serial);
                         // fall through: the press goes to the grab (which sends nothing) and keeps the pressed set right
                     }
                 }
@@ -527,6 +533,8 @@ impl State {
     /// A resize from our decoration band, like an xdg resize request but started by us.
     /// Raise and activate `window` (none: just deactivate everything) and give it the keyboard.
     pub fn focus_window(&mut self, window: Option<&Window>, serial: Serial) {
+        self.pending_initial_focus = None;
+        let window = window.filter(|w| self.on_active_workspace(w) && self.space.element_location(w).is_some());
         self.active = window.cloned();
         self.dirty = true; // the bars follow the focus
         let keyboard = self.seat.get_keyboard().unwrap();

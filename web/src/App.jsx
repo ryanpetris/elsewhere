@@ -121,7 +121,8 @@ export function App({ viewer }) {
     { id: 'fullscreen', label: fullscreen ? 'Exit Fullscreen' : 'Fullscreen', available: () => !PIP, run: () => viewer.isFullscreen() ? document.exitFullscreen() : viewer.fullscreen(), focus: 'canvas.stage' },
     { id: 'controls', label: hidden ? 'Show Controls' : 'Hide Controls', available: () => !PIP, run: () => viewer.setControlsHidden(!hidden), focus: 'canvas.stage' },
   ];
-  const canType = status === 'connected' && permissions.includes('desktop.control') && (windowMode || role === 'controller');
+  const windowOnDesktop = useStore(viewer.store, s => s.windows.some(w => w.id === Number(WINDOW) && w.workspace === s.workspaces.active && !w.minimized));
+  const canType = status === 'connected' && permissions.includes('desktop.control') && (windowMode ? windowOnDesktop : role === 'controller');
   useEffect(() => { if (!canType) setKeyboard(false); }, [canType]);
   useEffect(() => viewer.setStatsOn(!PIP && sidebar && tab === 'stats' && !hidden), [viewer, sidebar, tab, hidden]);
 

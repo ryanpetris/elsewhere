@@ -35,8 +35,8 @@ The compositor could always move the pointer, click and press keys: that is how 
 was missing was a way in other than the viewer's binary WebSocket. `InputMsg` in `elsewhere-core` is that way:
 `move`, `click`, `button`, `scroll`, `key`, `text`, served as `POST /api/input` and as tools.
 
-- The server only checks that a named window exists (for the `404`) and forwards the message as one
-  `Command::Input`. The compositor resolves window-relative coordinates against the geometry it has at
+- The server rejects missing windows with 404 and inactive workspace targets with 409, then forwards
+  one `Command::Input`. The compositor resolves window-relative coordinates against the geometry it has at
   that moment and emits a click's motion and button events in one go, so neither a moving window nor a
   human's pointer motion arriving in between can redirect it. Coordinates are output logical pixels or,
   with a window id, relative to that window's geometry, the origin element rectangles use.
@@ -123,3 +123,13 @@ toolkit reports rejection. Inspect the application after an action, including af
 A timeout during validation before a mutation is dispatched returns `tree_timeout` and can be
 retried. After dispatch it returns `uncertain`; inspect the application before deciding whether
 another action is needed.
+
+## Workspaces
+
+`workspaces` returns the shared active workspace and the fixed count (four); `windows` reports each
+window’s `workspace`. Reads require `desktop.view`. `switch_workspace` takes `workspace` (1–4).
+`move_to_workspace` takes `window` and `workspace`, moving the parent/transient family while retaining
+geometry and minimized state. Both require `desktop.control` independently of desktop viewer roles.
+They queue control operations; read state to confirm completion. Explicit `window_control` activation switches
+to the target’s workspace. Coordinate input to inactive windows is rejected; it never switches for you.
+Snapshots and per-window streams remain available across workspace switches.

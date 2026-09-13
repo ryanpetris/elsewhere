@@ -11,7 +11,8 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
 
 | Method and path | Body or query | Result |
 |---|---|---|
-| `GET /api/windows` | | JSON array of **Window** |
+| `GET /api/windows` | | JSON array of **Window**, including workspace membership |
+| `GET /api/workspaces` | | desktop.view; **Workspaces** with active number and fixed count |
 | `GET /api/broadcasts/capabilities` | | broadcast encoder availability and limits |
 | `POST /api/broadcasts/start` | **BroadcastStart** | broadcasts.manage + desktop.view, plus audio.listen for desktop audio; runtime status without connection credentials |
 | `GET /api/broadcasts` | | runtime statuses; no saved configurations or credentials |
@@ -36,8 +37,8 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
 | `POST /api/windows/{id}/elements/wait` | **ElementWait** | desktop.view; **ElementWaitResult**, including matched=false on timeout; same error statuses as action |
 | `GET /api/windows/{id}/snapshot.png` | one optional `width`, `height`, or `percentage`; default native | PNG of the window; `404`, `429` another snapshot in flight, `500` render failed, `503` |
 | `GET /api/screenshot.png` | same sizing as window snapshots; default native | PNG of the whole output; `429`, `500`, `503` as for a window |
-| `POST /api/control` | **Control** | `202`; fire-and-forget; `404` unknown application (`launch`); `503` compositor gone |
-| `POST /api/input` | **Input** | `202`, with `{"warning": …}` when a click aims past the desktop's edge at an X11 window (Xwayland pins it to the edge); `404` unknown window; `503` compositor gone |
+| `POST /api/control` | **Control** | `400` for an out-of-range workspace; `202`; fire-and-forget; `404` unknown application (`launch`); `503` compositor gone |
+| `POST /api/input` | **Input** | `202`, with `{"warning": …}` when a click aims past the desktop's edge at an X11 window (Xwayland pins it to the edge); `404` unknown window; `409` inactive workspace (activate explicitly); `503` compositor gone |
 | `GET /api/clipboard/state` | | metadata: `observation`, `operation`, `present`, `mime`, `size`, `preview`; preview is empty, loading, available, unavailable or restricted; opaque identifiers are scoped to this server process |
 | `GET /api/clipboard` | optional `If-Match` with quoted observation | current bytes with Content-Type and ETag; `clipboard.read` and `files.download` required for file lists; `204` no selection, `409` bytes unavailable, `412` observation changed |
 | `PUT /api/clipboard` | UTF-8 text body, a PNG with `Content-Type: image/png`, or `file://` URIs with `text/uri-list` | queues a desktop clipboard change; `202` with an opaque `operation` confirmed by matching metadata after installation; `413` over 1 MiB (text) or 16 MiB (PNG) |
@@ -49,6 +50,32 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
 | `DELETE /api/tokens/{id}` | canonical UUIDv4 ID | `tokens.manage`; `204`, `404`; stops the affected token’s live resources |
 | `POST /mcp` | MCP Streamable HTTP | the tools below |
 | `GET /skill/SKILL.md`, `GET /skill/reference.md` | no token needed | this documentation |
+
+## Workspaces
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WorkspaceState",
+  "type": "object",
+  "properties": {
+    "active": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "count": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "active",
+    "count"
+  ]
+}
+```
 
 ## BroadcastStart
 
@@ -239,6 +266,12 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
       "type": "integer",
       "format": "int32"
     },
+    "workspace": {
+      "description": "Numbered desktop containing this window, independent of minimization.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
     "x": {
       "description": "xdg geometry in logical px",
       "type": "integer",
@@ -262,6 +295,7 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
     }
   },
   "required": [
+    "workspace",
     "id",
     "title",
     "app_id",
@@ -646,6 +680,55 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
     }
   },
   "oneOf": [
+    {
+      "description": "Focus only if already mapped on the active workspace; never switch or restore.",
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string",
+          "const": "focus"
+        }
+      },
+      "required": [
+        "op"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string",
+          "const": "switchworkspace"
+        },
+        "workspace": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "op",
+        "workspace"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string",
+          "const": "movetoworkspace"
+        },
+        "workspace": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "op",
+        "workspace"
+      ]
+    },
     {
       "type": "object",
       "properties": {
@@ -2208,6 +2291,34 @@ Move the pointer without clicking (hover, or the middle of a drag).
 }
 ```
 
+### `move_to_workspace`
+
+Move a window and its transient family to workspace 1 through 4, retaining geometry and minimized state. Does not switch desktops. Requires desktop.control; check windows afterwards.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "window": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "workspace": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "window",
+    "workspace"
+  ],
+  "type": "object"
+}
+```
+
 ### `move_window`
 
 Move a floating window's geometry to x y (output logical px).
@@ -2413,6 +2524,28 @@ Start a program as a client of this desktop (`sh -c cmd`). Its window appears in
 }
 ```
 
+### `switch_workspace`
+
+Switch the shared desktop to workspace 1 through 4. Releases held input and restores that workspace's focus. Requires desktop.control; check workspaces afterwards.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "workspace": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "workspace"
+  ],
+  "type": "object"
+}
+```
+
 ### `type`
 
 Type text into the focused field through the keyboard layout (click it first). `\n` is Return.
@@ -2435,7 +2568,7 @@ Type text into the focused field through the keyboard layout (click it first). `
 
 ### `window_control`
 
-Change a window's state: activate (raise, focus, restore), close, minimize, unminimize, maximize, unmaximize, fullscreen, unfullscreen. Fire-and-forget; check `windows` afterwards.
+Change a window's state: activate (switch workspace, raise, focus, restore), close, minimize, unminimize, maximize, unmaximize, fullscreen, unfullscreen. Fire-and-forget; check `windows` afterwards.
 
 ```json
 {
@@ -2476,7 +2609,18 @@ Change a window's state: activate (raise, focus, restore), close, minimize, unmi
 
 ### `windows`
 
-The windows on the desktop: id, title, app_id, icon (name the client set; its picture is at GET /api/windows/{id}/icon), content (video/game/photo when the client says so), pid, geometry x y w h (logical px), stacking z, maximized/fullscreen/minimized/focused, updated_ms (last redraw), popups (open menus, relative to x y).
+The windows on the desktop: id, title, app_id, icon (name the client set; its picture is at GET /api/windows/{id}/icon), content (video/game/photo when the client says so), pid, geometry x y w h (logical px), workspace number, stacking z, maximized/fullscreen/minimized/focused, updated_ms (last redraw), popups (open menus, relative to x y).
+
+```json
+{
+  "properties": {},
+  "type": "object"
+}
+```
+
+### `workspaces`
+
+Read the shared active workspace number and the fixed workspace count. Requires desktop.view.
 
 ```json
 {

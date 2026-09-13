@@ -186,6 +186,79 @@ try {
   socket.send(Buffer.from([POINTER_LOCK_LOST]));
   await wait(() => packets.slice(releaseStart).some(p => p[0] === POINTER_LOCK && p[1] === 0), 'browser releases client pointer lock');
   console.log('client pointer lock activates and releases');
+  // Workspace changes cancel native input even when the grabbed window lost keyboard focus.
+  const workspace = async n => {
+    await api('control', {op: 'switchworkspace', workspace: n});
+    await wait(async () => (await api('workspaces')).active === n, 'workspace ' + n);
+  };
+  for (const name of ['x-source', 'w-source']) {
+    const id = windows[name].id;
+    const current = async () => (await api('windows')).find(w => w.id === id);
+    for (const mode of ['move', 'resize']) {
+      await api('control', {id, op: 'activate'});
+      await writeFile(`${root}/${name}.mode`, mode);
+      const before = await current();
+      await move(before.x + 100, before.y + 90); await sleep(80); await button(true); await sleep(120);
+      await move(before.x + 140, before.y + 110);
+      await wait(async () => { const w = await current(); return mode === 'move' ? w.x !== before.x : w.w !== before.w; }, 'live ' + mode);
+      if (mode === 'move') {
+        await api('control', {id: windows['w-target'].id, op: 'focus'});
+        await api('control', {id, op: 'movetoworkspace', workspace: 2});
+        await wait(async () => (await current()).workspace === 2, 'unfocused grabbed root move');
+      } else await workspace(2);
+      await sleep(100); const hidden = await current();
+      await move(before.x + 230, before.y + 200); await button(false); await sleep(150);
+      const after = await current();
+      assert.deepEqual([after.x, after.y, after.w, after.h], [hidden.x, hidden.y, hidden.w, hidden.h], name + ' hidden grab is cancelled');
+      await api('control', {id, op: 'movetoworkspace', workspace: 1}); await workspace(1);
+    }
+    await writeFile(`${root}/${name}.mode`, 'accept');
+    await api('control', {id, op: 'activate'});
+    const before = await current();
+    touch(0, before.x + 40, before.y - 16); await sleep(80);
+    touch(1, before.x + 60, before.y - 6); await sleep(100);
+    await workspace(2); const hidden = await current();
+    touch(1, before.x + 150, before.y + 100); touch(2, before.x + 150, before.y + 100); await sleep(100);
+    const after = await current(); assert.deepEqual([after.x, after.y], [hidden.x, hidden.y], 'touch grab ends on switch');
+    await workspace(1);
+  }
+  await api('control', {op: 'spawn', cmd: `GDK_BACKEND=wayland python3 /src/web/checks/workspace-native.py ${quote(root + '/hidden')} HiddenDialogOwner`});
+  const hiddenOwner = await wait(async () => (await api('windows')).find(w => w.title === 'HiddenDialogOwner' && w.w > 0), 'hidden dialog owner');
+  await api('control', {id: hiddenOwner.id, op: 'movetoworkspace', workspace: 2});
+  await api('control', {id: windows['w-target'].id, op: 'activate'});
+  await input({type: 'click', button: 'right', x: 100, y: 90, window: windows['w-target'].id});
+  await wait(async () => (await api('windows')).find(w => w.id === windows['w-target'].id).popups.length, 'workspace popup');
+  await writeFile(root + '/hidden.command', 'dialog');
+  await wait(async () => (await api('windows')).find(w => w.title === 'HiddenDialogOwner Dialog' && w.workspace === 2), 'dialog mapped behind visible popup');
+  await sleep(200);
+  assert((await api('windows')).find(w => w.id === windows['w-target'].id).popups.length, 'hidden dialog preserves unrelated popup grab');
+
+  await workspace(2);
+  await wait(async () => !(await api('windows')).find(w => w.id === windows['w-target'].id).popups.length, 'switch dismisses popup');
+  await workspace(1);
+
+  // A native drag over an accepting target must cancel, not drop, when switching.
+  const source = 'w-target', target = 'x-target';
+  await api('control', {id: windows[source].id, op: 'activate'});
+  const receivedBefore = (await records(target)).filter(r => r.kind === 'received').length;
+  const beginBefore = (await records(source)).filter(r => r.kind === 'begin').length;
+  const [sx, sy] = point(source);
+  await move(sx, sy); await button(true); await sleep(100); await move(sx + 35, sy);
+  await wait(async () => (await records(source)).filter(r => r.kind === 'begin').length > beginBefore, 'workspace drag starts');
+  for (let i = 0; i < 4; i++) { await move(...point(target)); await sleep(100); }
+  await workspace(2); await button(false); await sleep(250);
+  assert.equal((await records(target)).filter(r => r.kind === 'received').length, receivedBefore, 'switch cannot commit native drag');
+  await workspace(1);
+  await api('control', {id: lockWindow.id, op: 'activate'});
+  const relock = packets.length;
+  await input({type: 'click', x: 80, y: 100, window: lockWindow.id});
+  await wait(() => packets.slice(relock).some(p => p[0] === POINTER_LOCK && p[1] === 1), 'lock before inactive move');
+  await api('control', {id: windows['w-target'].id, op: 'focus'});
+  const unlock = packets.length;
+  await api('control', {id: lockWindow.id, op: 'movetoworkspace', workspace: 2});
+  await wait(() => packets.slice(unlock).some(p => p[0] === POINTER_LOCK && p[1] === 0), 'unfocused hidden lock released');
+  assert.equal((await api('workspaces')).active, 1);
+  console.log('Workspace switch/move ends native pointer, touch, popup, drag-and-drop, and unfocused pointer-lock ownership.');
   console.log('drag-and-drop checks passed');
 } catch (error) {
   console.error('Artifacts: ' + root);

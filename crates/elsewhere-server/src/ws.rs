@@ -122,6 +122,10 @@ pub async fn forward_events(app: Arc<App>, mut rx: mpsc::UnboundedReceiver<Event
                 v.locked = locked;
                 Bytes::from(vec![protocol::POINTER_LOCK, locked as u8])
             }
+            Event::Workspaces(state) => {
+                v.workspaces = state;
+                protocol::workspaces(&state)
+            }
             Event::Windows(list) => {
                 let msg = protocol::windows(&list);
                 v.windows = Some(msg.clone());
@@ -253,7 +257,7 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
             app.set_controller(&mut v, Some(id));
         }
         app.mixer_audience(&v);
-        let replay: Vec<Bytes> = [Some(protocol::session(id)), key.has(P::AudioListen).then(|| protocol::mixer_state(&app.mixer_state())), v.cursor.borrow().clone(), v.windows.clone(), v.locked.then(|| Bytes::from(vec![protocol::POINTER_LOCK, 1])), Some(protocol::role(v.role_of(id), app.features(&key), v.control_epoch)), Some(notifications.clone())].into_iter().flatten().collect();
+        let replay: Vec<Bytes> = [Some(protocol::session(id)), key.has(P::AudioListen).then(|| protocol::mixer_state(&app.mixer_state())), v.cursor.borrow().clone(), v.windows.clone(), Some(protocol::workspaces(&v.workspaces)), v.locked.then(|| Bytes::from(vec![protocol::POINTER_LOCK, 1])), Some(protocol::role(v.role_of(id), app.features(&key), v.control_epoch)), Some(notifications.clone())].into_iter().flatten().collect();
         v.publish_roster();
         let mut roster = v.roster.subscribe();
         roster.mark_changed();
@@ -492,7 +496,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
     let replay: Vec<Bytes> = {
         let v = app.viewers.lock().unwrap();
         let role = if key.has(P::DesktopControl) { Role::Controller } else { Role::Viewer };
-        [Some(protocol::session(stream | 1 << 63)), v.cursor.borrow().clone(), v.windows.clone(), v.locked.then(|| Bytes::from(vec![protocol::POINTER_LOCK, 1])), Some(protocol::role(role, 0, 0))].into_iter().flatten().collect()
+        [Some(protocol::session(stream | 1 << 63)), v.cursor.borrow().clone(), v.windows.clone(), Some(protocol::workspaces(&v.workspaces)), v.locked.then(|| Bytes::from(vec![protocol::POINTER_LOCK, 1])), Some(protocol::role(role, 0, 0))].into_iter().flatten().collect()
     };
     for msg in replay {
         let _ = send(&mut socket, &key, msg).await;
@@ -642,7 +646,14 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                         Some(m) => input_command(m),
                         None => None,
                     };
-                    if let Some(cmd) = cmd {
+                    if let Some(mut cmd) = cmd {
+                        if is_input(&cmd) || matches!(cmd, Command::ResumePointerLock) {
+                            if let Err(error) = app.require_active_window(id) {
+                                let _ = etx.try_send(protocol::notice(&error.to_string()));
+                                continue;
+                            }
+                            cmd = Command::WindowInput { window: id, command: Box::new(cmd) };
+                        }
                         // under the lock a revocation clears, so nothing slips through behind one
                         let Ok(_admission) = key.admit() else { break Some((UNAUTHORIZED, "token revoked or expired")); };
                         let live = app.window_viewers.lock().unwrap();
@@ -838,6 +849,10 @@ impl App {
                     s.control.request_keyframe();
                 }
                 Some(Command::RequestFullFrame)
+            }
+            ClientMsg::Control(m) if matches!(&m.op, ControlOp::SwitchWorkspace { .. } | ControlOp::MoveToWorkspace { .. }) && !controls => {
+                let _ = v.sessions[&id].events.try_send(protocol::notice("Workspace changes require the current desktop controller."));
+                None
             }
             ClientMsg::Control(m) if key.has(auth::control_permission(&m)) => self.command_for(m).ok(),
             ClientMsg::SetClipboard(text) if key.has(P::ClipboardWrite) => Some(Command::SetClipboard { mime: api::TEXT.into(), data: text.into(), operation: None }),
@@ -1188,7 +1203,7 @@ mod tests {
 }
 
 fn is_input(command: &Command) -> bool {
-    matches!(command, Command::Input(_) | Command::Key { .. } | Command::PointerMotionRelative { .. } | Command::PointerMotionAbsolute { .. } | Command::PointerButton { .. } | Command::PointerAxis { .. } | Command::Touch { .. })
+    matches!(command, Command::WindowInput { .. } | Command::Input(_) | Command::Key { .. } | Command::PointerMotionRelative { .. } | Command::PointerMotionAbsolute { .. } | Command::PointerButton { .. } | Command::PointerAxis { .. } | Command::Touch { .. })
 }
 
 impl App {

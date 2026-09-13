@@ -175,7 +175,7 @@ impl State {
     /// What is under `pos` among the windows, top-most first: a client surface (a window's own, its
     /// popups and its resize handles included) or one of our decorations; either hides everything below.
     pub fn window_under(&self, pos: Point<f64, Logical>) -> Option<Under> {
-        for window in self.space.elements().rev() {
+        for window in self.space.elements().rev().filter(|w| self.on_active_workspace(w)) {
             let Some(loc) = self.space.element_location(window) else { continue };
             // the space places the geometry; surface_under wants the point from the surface's own origin,
             // which sits a shadow margin up and left of it for client-side decorated windows
