@@ -30,7 +30,7 @@ impl ClipboardPaste for Admission {
             let pasted = apply(input);
             let events = if window { &windows[&(self.session & !(1 << 63))].events } else { &viewers.sessions[&self.session].events };
             if !window && (self.epoch != viewers.control_epoch || self.paste && !pasted) {
-                let _ = events.try_send(protocol::role(viewers.role_of(self.session), app.features(&self.key), viewers.control_epoch));
+                viewers.publish_roster();
             }
             if self.paste && !pasted {
                 let _ = events.try_send(protocol::notice("Clipboard updated; paste skipped because control or window focus changed."));

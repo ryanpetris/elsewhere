@@ -86,18 +86,7 @@ pub async fn distribute_audio(app: Arc<App>, mut rx: mpsc::Receiver<StreamMsg>) 
         }
     }
     app.audio_available.store(false, Ordering::Relaxed);
-    let targets: Vec<_> = app.viewers.lock().unwrap().sessions.iter().map(|(&id, s)| (id, s.events.clone())).collect();
-    for (id, events) in targets {
-        let app = app.clone();
-        tokio::spawn(async move {
-            if let Ok(permit) = events.reserve().await {
-                let viewers = app.viewers.lock().unwrap();
-                if viewers.sessions.contains_key(&id) {
-                    permit.send(protocol::role(viewers.role_of(id), app.features(&viewers.sessions[&id].key), viewers.control_epoch));
-                }
-            }
-        });
-    }
+    app.viewers.lock().unwrap().publish_roster();
 }
 
 /// Compositor events (cursor, pointer lock, window list, clipboard) to every viewer and window session.
@@ -917,11 +906,6 @@ impl App {
         self.retarget(v);
         if let Some(size) = size {
             let _ = self.commands.send(Command::Resize(size));
-        }
-        for id in [old, next].into_iter().flatten() {
-            if let Some(s) = v.sessions.get(&id) {
-                let _ = s.events.try_send(protocol::role(v.role_of(id), self.features(&s.key), v.control_epoch));
-            }
         }
         v.publish_roster();
     }

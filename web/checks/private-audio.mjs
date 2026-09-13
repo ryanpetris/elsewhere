@@ -258,6 +258,17 @@ try {
   await page.waitForFunction(() => !elsewhere.store.get().mic && micTracks.every(t => t.readyState === 'ended'));
   await page.waitForFunction(() => elsewhere.store.get().status === 'connected' && elsewhere.store.get().role === 'controller');
   console.log('AudioWorklet repeated delivery, pending permission cancellation, handover and disconnect passed');
+  const micToken = await createToken(root, ['desktop.view', 'desktop.control', 'microphone.send']);
+  const micOnly = await browser.newPage();
+  await micOnly.goto('http://127.0.0.1:8088/#token=' + micToken);
+  await micOnly.waitForFunction(() => elsewhere.store.get().role === 'participant');
+  assert.deepEqual(await micOnly.evaluate(() => [elsewhere.store.get().micAvailable, elsewhere.store.get().audioAvailable]), [true, false]);
+  await approveControl(page, micOnly);
+  await micOnly.evaluate(() => elsewhere.mic.start());
+  await micOnly.waitForFunction(() => elsewhere.store.get().mic);
+  await approveControl(micOnly, page);
+  await micOnly.waitForFunction(() => !elsewhere.store.get().mic);
+
   await page.evaluate(() => elsewhere.mic.start());
   await page.waitForFunction(() => elsewhere.store.get().mic);
   const children = (await readdir('/proc')).filter(n => /^\d+$/.test(n));
@@ -275,6 +286,8 @@ try {
     console.error('Audio shutdown state', await page.evaluate(() => { const { audioAvailable, micAvailable, mic, playback, role, status } = elsewhere.store.get(); return { audioAvailable, micAvailable, mic, playback: !!playback, role, status }; }));
     throw error;
   });
+  await micOnly.waitForFunction(() => !elsewhere.store.get().micAvailable && elsewhere.store.get().status === 'connected');
+  assert(await page.evaluate(() => micTracks.every(t => t.readyState === 'ended')), 'service failure stops browser capture tracks');
   assert.equal(await page.evaluate(() => elsewhere.store.get().status), 'connected');
   console.log('service failure withdraws live playback and microphone while desktop stays connected');
 } catch (error) {

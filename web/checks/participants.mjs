@@ -156,8 +156,12 @@ try {
   let terminal;
   await wait('cursor terminal', async () => { terminal = (await (await api('/api/windows')).json()).find(w => w.app_id === 'participant-cursor'); return terminal; });
   await api('/api/control', 'POST', { op: 'activate', id: terminal.id });
+  await wait('focused terminal', async () => { terminal = (await (await api('/api/windows')).json()).find(w => w.id === terminal.id); return terminal?.focused && terminal.w > 100 && terminal.h > 100; });
+  await api('/api/input', 'POST', { type: 'move', x: 0, y: 0 });
+  await page.waitForFunction(() => elsewhere.store.get().observerPointer?.x === 0);
+  const outsideCursor = await page.evaluate(() => elsewhere.store.get().cursorImage?.url);
   await api('/api/input', 'POST', { type: 'move', x: terminal.x + terminal.w / 2, y: terminal.y + terminal.h / 2 });
-  await page.locator('[data-observer-pointer]').waitFor();
+  await page.waitForFunction(url => elsewhere.store.get().cursorImage?.url && elsewhere.store.get().cursorImage.url !== url, outsideCursor);
   await api('/api/input', 'POST', { type: 'key', keys: 'a' });
   await page.waitForFunction(() => elsewhere.store.get().cursorImage === null);
   assert.equal(await page.locator('[data-observer-pointer]').count(), 0);

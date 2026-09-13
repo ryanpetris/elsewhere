@@ -276,6 +276,13 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
         proxy_strips_prefix: cfg.proxy_strips_prefix,
     });
     if let Some(errors) = mixer_errors { tokio::spawn(mixer::errors(app.clone(), errors)); }
+    if let Some(mic) = app.mic.clone() {
+        let app = Arc::downgrade(&app);
+        tokio::spawn(async move {
+            mic.closed().await;
+            if let Some(app) = app.upgrade() { app.viewers.lock().unwrap().publish_roster(); }
+        });
+    }
     tokio::spawn(ws::distribute_audio(app.clone(), audio_rx));
     tokio::spawn(ws::forward_events(app.clone(), events_rx));
     tokio::spawn(notify::serve(app.clone()));
