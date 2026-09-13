@@ -30,7 +30,10 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
 | `GET /api/notifications` | | JSON array of **Notification**: what applications reported and the viewers show |
 | `POST /api/notifications/{id}` | `{"action": "default" \| "<key>"}`, or `{}` to dismiss | click, invoke an action of, or dismiss a notification; `202`, `404` |
 | `GET /api/notifications/{id}/icon` | | the notification's picture (the application's, else its launcher's); `404` none |
-| `GET /api/windows/{id}/elements` | | **Elements**; `501` without `--elements`, `503` tree unreadable, `404` unknown window |
+| `GET /api/windows/{id}/elements` | | desktop.view; **Elements**; `501` without `--elements`, `503` tree unreadable, `404` unknown window |
+| `POST /api/windows/{id}/elements/action` | **ElementAction** | desktop.control; **Element** validated before dispatch; invokes one advertised action; `400/401/403/404/409/422/429/501/503` with error and code |
+| `POST /api/windows/{id}/elements/text` | **ElementText** | desktop.control; **Element** validated before dispatch; replaces editable text; same error statuses as action |
+| `POST /api/windows/{id}/elements/wait` | **ElementWait** | desktop.view; **ElementWaitResult**, including matched=false on timeout; same error statuses as action |
 | `GET /api/windows/{id}/snapshot.png` | one optional `width`, `height`, or `percentage`; default native | PNG of the window; `404`, `429` another snapshot in flight, `500` render failed, `503` |
 | `GET /api/screenshot.png` | same sizing as window snapshots; default native | PNG of the whole output; `429`, `500`, `503` as for a window |
 | `POST /api/control` | **Control** | `202`; fire-and-forget; `404` unknown application (`launch`); `503` compositor gone |
@@ -1034,22 +1037,80 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
         "string",
         "null"
       ]
+    },
+    "truncated": {
+      "description": "A bounded or interrupted walk cannot prove selector uniqueness.",
+      "type": "boolean"
+    },
+    "unavailable": {
+      "description": "Accessibility failure, even when compositor decorations remain readable.",
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [
     "level",
-    "elements"
+    "elements",
+    "truncated"
   ],
   "$defs": {
     "Element": {
       "type": "object",
       "properties": {
+        "actions": {
+          "description": "Advertised action names; null means discovery failed.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "bounds_available": {
+          "type": "boolean"
+        },
+        "checked": {
+          "description": "Null for controls without a checked state or unavailable state information.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "editable": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "enabled": {
+          "description": "Null means the toolkit did not provide the state.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "focused": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "h": {
           "type": "integer",
           "format": "int32"
         },
         "name": {
           "type": "string"
+        },
+        "reference": {
+          "description": "Opaque reference valid for 30 seconds, within this window and server process.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "role": {
           "type": "string"
@@ -1068,12 +1129,441 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
         }
       },
       "required": [
+        "bounds_available",
         "role",
         "name",
         "x",
         "y",
         "w",
         "h"
+      ]
+    }
+  }
+}
+```
+
+## Element
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Element",
+  "type": "object",
+  "properties": {
+    "actions": {
+      "description": "Advertised action names; null means discovery failed.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      }
+    },
+    "bounds_available": {
+      "type": "boolean"
+    },
+    "checked": {
+      "description": "Null for controls without a checked state or unavailable state information.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "editable": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "enabled": {
+      "description": "Null means the toolkit did not provide the state.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "focused": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "h": {
+      "type": "integer",
+      "format": "int32"
+    },
+    "name": {
+      "type": "string"
+    },
+    "reference": {
+      "description": "Opaque reference valid for 30 seconds, within this window and server process.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "role": {
+      "type": "string"
+    },
+    "w": {
+      "type": "integer",
+      "format": "int32"
+    },
+    "x": {
+      "type": "integer",
+      "format": "int32"
+    },
+    "y": {
+      "type": "integer",
+      "format": "int32"
+    }
+  },
+  "required": [
+    "bounds_available",
+    "role",
+    "name",
+    "x",
+    "y",
+    "w",
+    "h"
+  ]
+}
+```
+
+## ElementAction
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ElementAction",
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string"
+    },
+    "target": {
+      "$ref": "#/$defs/Selector"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "target",
+    "action"
+  ],
+  "$defs": {
+    "Selector": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "reference": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "reference"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "role",
+            "name"
+          ]
+        }
+      ]
+    }
+  }
+}
+```
+
+## ElementText
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ElementText",
+  "type": "object",
+  "properties": {
+    "target": {
+      "$ref": "#/$defs/Selector"
+    },
+    "text": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "target",
+    "text"
+  ],
+  "$defs": {
+    "Selector": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "reference": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "reference"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "role",
+            "name"
+          ]
+        }
+      ]
+    }
+  }
+}
+```
+
+## ElementWait
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ElementWait",
+  "type": "object",
+  "properties": {
+    "condition": {
+      "$ref": "#/$defs/Condition"
+    },
+    "target": {
+      "$ref": "#/$defs/Selector"
+    },
+    "timeout_ms": {
+      "description": "0 through 10000 milliseconds, including tree reads. Default 2000.",
+      "type": "integer",
+      "format": "uint64",
+      "default": 2000,
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "target",
+    "condition"
+  ],
+  "$defs": {
+    "Condition": {
+      "type": "string",
+      "enum": [
+        "present",
+        "enabled",
+        "disabled",
+        "checked",
+        "unchecked",
+        "focused",
+        "unfocused"
+      ]
+    },
+    "Selector": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "reference": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "reference"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "role",
+            "name"
+          ]
+        }
+      ]
+    }
+  }
+}
+```
+
+## ElementWaitResult
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WaitResult",
+  "type": "object",
+  "properties": {
+    "attempts": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "elapsed_ms": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "element": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Element"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "last_error": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WaitError"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "matched": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "matched",
+    "elapsed_ms",
+    "attempts"
+  ],
+  "$defs": {
+    "Element": {
+      "type": "object",
+      "properties": {
+        "actions": {
+          "description": "Advertised action names; null means discovery failed.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "bounds_available": {
+          "type": "boolean"
+        },
+        "checked": {
+          "description": "Null for controls without a checked state or unavailable state information.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "editable": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "enabled": {
+          "description": "Null means the toolkit did not provide the state.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "focused": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "h": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "name": {
+          "type": "string"
+        },
+        "reference": {
+          "description": "Opaque reference valid for 30 seconds, within this window and server process.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "type": "string"
+        },
+        "w": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "x": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "y": {
+          "type": "integer",
+          "format": "int32"
+        }
+      },
+      "required": [
+        "bounds_available",
+        "role",
+        "name",
+        "x",
+        "y",
+        "w",
+        "h"
+      ]
+    },
+    "WaitError": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "error"
       ]
     }
   }
@@ -1354,9 +1844,220 @@ Put text on the desktop clipboard, for pasting into an application (images go th
 }
 ```
 
+### `element_action`
+
+Invoke exactly one advertised UI action by window-bound reference or unique exact role and name. Requires --elements and desktop.control, independently of viewer control. Never clicks coordinates or retries. A cancelled or uncertain dispatched action may still complete; inspect state before deciding what to do next. Returns the validated target state from before dispatch.
+
+```json
+{
+  "$defs": {
+    "Selector": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reference": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reference"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "role",
+            "name"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "type": "string"
+    },
+    "target": {
+      "$ref": "#/$defs/Selector"
+    },
+    "window": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "window",
+    "target",
+    "action"
+  ],
+  "type": "object"
+}
+```
+
+### `element_text`
+
+Replace all text in an editable UI element by window-bound reference or unique exact role and name. Requires --elements and desktop.control. Maximum 65536 UTF-8 bytes. No keyboard or coordinate fallback. A cancelled or uncertain dispatched edit may still complete; do not retry automatically. Returns the validated target state from before dispatch.
+
+```json
+{
+  "$defs": {
+    "Selector": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reference": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reference"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "role",
+            "name"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "target": {
+      "$ref": "#/$defs/Selector"
+    },
+    "text": {
+      "type": "string"
+    },
+    "window": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "window",
+    "target",
+    "text"
+  ],
+  "type": "object"
+}
+```
+
+### `element_wait`
+
+Wait up to 10000 ms for a unique exact role/name or live reference to be present, enabled, disabled, checked, unchecked, focused, or unfocused. Requires --elements and desktop.view. Polls with a 100 ms pause between reads, stops on cancellation or token expiry/revocation, and returns matched=false on timeout with attempts, elapsed_ms, and last observed element. Ambiguity and stale references are errors. Unavailable application/state, bus, window-mapping and incomplete-tree failures are retried and returned in last_error on timeout.
+
+```json
+{
+  "$defs": {
+    "Condition": {
+      "enum": [
+        "present",
+        "enabled",
+        "disabled",
+        "checked",
+        "unchecked",
+        "focused",
+        "unfocused"
+      ],
+      "type": "string"
+    },
+    "Selector": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "reference": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reference"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "role",
+            "name"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "condition": {
+      "$ref": "#/$defs/Condition"
+    },
+    "target": {
+      "$ref": "#/$defs/Selector"
+    },
+    "timeout_ms": {
+      "default": 2000,
+      "description": "Maximum 10000 milliseconds. Default 2000.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "window": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "window",
+    "target",
+    "condition"
+  ],
+  "type": "object"
+}
+```
+
 ### `elements`
 
-The UI elements of a window (buttons, links, text fields, menu items, tabs, ...): role, name, and x y w h relative to the window's own x y. `level` full means the list is complete; none/app/frame mean the application exposes nothing (use a snapshot).
+Read live UI elements: exact role and name, window-relative bounds, nullable enabled/focused/checked/editable states, advertised action names, and 30-second window-bound references. Check truncated and unavailable; level full alone does not establish a complete tree. Requires --elements and desktop.view.
 
 ```json
 {

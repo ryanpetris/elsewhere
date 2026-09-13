@@ -29,7 +29,10 @@ const ROUTES: &str = "\
 | `GET /api/notifications` | | JSON array of **Notification**: what applications reported and the viewers show |
 | `POST /api/notifications/{id}` | `{\"action\": \"default\" \\| \"<key>\"}`, or `{}` to dismiss | click, invoke an action of, or dismiss a notification; `202`, `404` |
 | `GET /api/notifications/{id}/icon` | | the notification's picture (the application's, else its launcher's); `404` none |
-| `GET /api/windows/{id}/elements` | | **Elements**; `501` without `--elements`, `503` tree unreadable, `404` unknown window |
+| `GET /api/windows/{id}/elements` | | desktop.view; **Elements**; `501` without `--elements`, `503` tree unreadable, `404` unknown window |
+| `POST /api/windows/{id}/elements/action` | **ElementAction** | desktop.control; **Element** validated before dispatch; invokes one advertised action; `400/401/403/404/409/422/429/501/503` with error and code |
+| `POST /api/windows/{id}/elements/text` | **ElementText** | desktop.control; **Element** validated before dispatch; replaces editable text; same error statuses as action |
+| `POST /api/windows/{id}/elements/wait` | **ElementWait** | desktop.view; **ElementWaitResult**, including matched=false on timeout; same error statuses as action |
 | `GET /api/windows/{id}/snapshot.png` | one optional `width`, `height`, or `percentage`; default native | PNG of the window; `404`, `429` another snapshot in flight, `500` render failed, `503` |
 | `GET /api/screenshot.png` | same sizing as window snapshots; default native | PNG of the whole output; `429`, `500`, `503` as for a window |
 | `POST /api/control` | **Control** | `202`; fire-and-forget; `404` unknown application (`launch`); `503` compositor gone |
@@ -57,7 +60,7 @@ pub fn markdown() -> String {
     out.push_str("Generated from the code (`UPDATE_REFERENCE=1 cargo test -p elsewhere-server reference`); do not edit.\n\n");
     out.push_str("## HTTP API\n\nEvery `/api` request carries `Authorization: Bearer <token>`; `401` otherwise. Each operation requires explicit token permissions; missing grants return `403` permission denied.\nThe statuses in the table come with a JSON body `{\"error\": \"...\"}`. A request body the server can't read is\nrejected before that with a plain-text message: `400` invalid JSON, `415` missing\n`Content-Type: application/json`, `422` wrong shape. Coordinates are logical pixels.\n\n");
     out.push_str(ROUTES);
-    for (name, s) in [("BroadcastStart", schema::<elsewhere_core::broadcast::Start>()), ("Window", schema::<WindowInfo>()), ("Application", schema::<AppInfo>()), ("Notification", schema::<crate::notify::Notification>()), ("FileQuery", schema::<crate::files::FileQuery>()), ("FileListing", schema::<crate::files::FileListing>()), ("FileAction", schema::<crate::files::FileAction>()), ("SavedFile", schema::<crate::files::SavedFile>()), ("Control", schema::<ControlMsg>()), ("Input", schema::<InputMsg>()), ("Elements", schema::<Page>())] {
+    for (name, s) in [("BroadcastStart", schema::<elsewhere_core::broadcast::Start>()), ("Window", schema::<WindowInfo>()), ("Application", schema::<AppInfo>()), ("Notification", schema::<crate::notify::Notification>()), ("FileQuery", schema::<crate::files::FileQuery>()), ("FileListing", schema::<crate::files::FileListing>()), ("FileAction", schema::<crate::files::FileAction>()), ("SavedFile", schema::<crate::files::SavedFile>()), ("Control", schema::<ControlMsg>()), ("Input", schema::<InputMsg>()), ("Elements", schema::<Page>()), ("Element", schema::<crate::elements::Element>()), ("ElementAction", schema::<crate::elements::ElementAction>()), ("ElementText", schema::<crate::elements::ElementText>()), ("ElementWait", schema::<crate::elements::ElementWait>()), ("ElementWaitResult", schema::<crate::elements::WaitResult>())] {
         out.push_str(&format!("\n## {name}\n\n```json\n{s}\n```\n"));
     }
     out.push_str("\n## MCP tools\n\nStreamable HTTP at `/mcp`, same bearer token. Failures come back as tool errors with the same text as the API.\n");

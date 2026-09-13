@@ -76,6 +76,32 @@ pub struct WindowArg {
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct ElementActionArgs {
+    pub window: u64,
+    pub target: crate::elements::Selector,
+    pub action: String,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ElementTextArgs {
+    pub window: u64,
+    pub target: crate::elements::Selector,
+    pub text: String,
+}
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ElementWaitArgs {
+    pub window: u64,
+    pub target: crate::elements::Selector,
+    pub condition: crate::elements::Condition,
+    /// Maximum 10000 milliseconds. Default 2000.
+    #[serde(default = "element_wait_timeout")]
+    pub timeout_ms: u64,
+}
+fn element_wait_timeout() -> u64 { 2000 }
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct BroadcastId { pub id: String }
 
 type ScreenshotArgs = elsewhere_core::SnapshotSizing;
@@ -217,6 +243,7 @@ fn json(value: impl serde::Serialize) -> ToolResult {
 fn done(result: Result<(), ApiError>) -> ToolResult {
     match result {
         Ok(()) => Ok(CallToolResult::success(vec![ContentBlock::text("ok")])),
+        Err(ApiError::Element { code, message }) => Ok(CallToolResult::error(vec![ContentBlock::text(serde_json::json!({ "code": code, "error": message }).to_string())])),
         Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(e.to_string())])),
     }
 }
@@ -258,12 +285,40 @@ impl Mcp {
         json(self.app.windows())
     }
 
-    #[tool(description = "The UI elements of a window (buttons, links, text fields, menu items, tabs, ...): role, name, and x y w h relative to the window's own x y. `level` full means the list is complete; none/app/frame mean the application exposes nothing (use a snapshot).")]
-    async fn elements(&self, Extension(parts): Extension<Parts>, Parameters(WindowArg { window }): Parameters<WindowArg>) -> ToolResult {
-        if let Err(e) = self.require_key(&parts, P::DesktopView) { return done(Err(e)); }
-        match self.app.elements(window).await {
-            Ok(page) => json(page),
-            Err(e) => Ok(CallToolResult::error(vec![ContentBlock::text(e.to_string())])),
+    #[tool(description = "Read live UI elements: exact role and name, window-relative bounds, nullable enabled/focused/checked/editable states, advertised action names, and 30-second window-bound references. Check truncated and unavailable; level full alone does not establish a complete tree. Requires --elements and desktop.view.")]
+    async fn elements(&self, Extension(parts): Extension<Parts>, Parameters(WindowArg { window }): Parameters<WindowArg>, context: RequestContext<RoleServer>) -> ToolResult {
+        let key = match self.require_key(&parts, P::DesktopView) { Ok(key) => key, Err(e) => return done(Err(e)) };
+        tokio::select! { biased;
+            _ = context.ct.cancelled() => done(Err(crate::elements::error("cancelled", "element read cancelled"))),
+            result = self.app.elements(key, window) => match result { Ok(page) => json(page), Err(e) => done(Err(e)) },
+        }
+    }
+
+    #[tool(description = "Invoke exactly one advertised UI action by window-bound reference or unique exact role and name. Requires --elements and desktop.control, independently of viewer control. Never clicks coordinates or retries. A cancelled or uncertain dispatched action may still complete; inspect state before deciding what to do next. Returns the validated target state from before dispatch.")]
+    async fn element_action(&self, Extension(parts): Extension<Parts>, Parameters(args): Parameters<ElementActionArgs>, context: RequestContext<RoleServer>) -> ToolResult {
+        let key = match self.require_key(&parts, P::DesktopControl) { Ok(key) => key, Err(e) => return done(Err(e)) };
+        tokio::select! { biased;
+            _ = context.ct.cancelled() => done(Err(crate::elements::error("cancelled", "action cancelled; a dispatched action may still complete; do not retry automatically"))),
+            result = self.app.element_mutation(key, args.window, args.target, Some(args.action), None) => match result { Ok(element) => json(element), Err(e) => done(Err(e)) },
+        }
+    }
+
+    #[tool(description = "Replace all text in an editable UI element by window-bound reference or unique exact role and name. Requires --elements and desktop.control. Maximum 65536 UTF-8 bytes. No keyboard or coordinate fallback. A cancelled or uncertain dispatched edit may still complete; do not retry automatically. Returns the validated target state from before dispatch.")]
+    async fn element_text(&self, Extension(parts): Extension<Parts>, Parameters(args): Parameters<ElementTextArgs>, context: RequestContext<RoleServer>) -> ToolResult {
+        let key = match self.require_key(&parts, P::DesktopControl) { Ok(key) => key, Err(e) => return done(Err(e)) };
+        tokio::select! { biased;
+            _ = context.ct.cancelled() => done(Err(crate::elements::error("cancelled", "edit cancelled; a dispatched edit may still complete; do not retry automatically"))),
+            result = self.app.element_mutation(key, args.window, args.target, None, Some(args.text)) => match result { Ok(element) => json(element), Err(e) => done(Err(e)) },
+        }
+    }
+
+    #[tool(description = "Wait up to 10000 ms for a unique exact role/name or live reference to be present, enabled, disabled, checked, unchecked, focused, or unfocused. Requires --elements and desktop.view. Polls with a 100 ms pause between reads, stops on cancellation or token expiry/revocation, and returns matched=false on timeout with attempts, elapsed_ms, and last observed element. Ambiguity and stale references are errors. Unavailable application/state, bus, window-mapping and incomplete-tree failures are retried and returned in last_error on timeout.")]
+    async fn element_wait(&self, Extension(parts): Extension<Parts>, Parameters(args): Parameters<ElementWaitArgs>, context: RequestContext<RoleServer>) -> ToolResult {
+        let key = match self.require_key(&parts, P::DesktopView) { Ok(key) => key, Err(e) => return done(Err(e)) };
+        let request = crate::elements::ElementWait { target: args.target, condition: args.condition, timeout_ms: args.timeout_ms };
+        tokio::select! { biased;
+            _ = context.ct.cancelled() => done(Err(crate::elements::error("cancelled", "element wait cancelled"))),
+            result = self.app.element_wait(key, args.window, request) => match result { Ok(result) => json(result), Err(e) => done(Err(e)) },
         }
     }
 

@@ -8,9 +8,10 @@ pub struct Access {
     pub metadata: tokens::Token,
     cancelled: CancellationToken,
     gate: RwLock<()>,
+    dispatch: tokio::sync::RwLock<()>,
 }
 impl Access {
-    pub(crate) fn new(metadata: tokens::Token) -> Self { Self { metadata, cancelled: CancellationToken::new(), gate: RwLock::new(()) } }
+    pub(crate) fn new(metadata: tokens::Token) -> Self { Self { metadata, cancelled: CancellationToken::new(), gate: RwLock::new(()), dispatch: tokio::sync::RwLock::new(()) } }
     pub fn live(&self) -> bool { !self.cancelled.is_cancelled() && self.metadata.live() }
     pub fn admit(&self) -> Result<std::sync::RwLockReadGuard<'_, ()>, ApiError> {
         let guard = self.gate.read().unwrap();
@@ -28,7 +29,18 @@ impl Access {
         for &permission in permissions { self.require(permission)?; }
         action()
     }
-    fn cancel(&self) { let _guard = self.gate.write().unwrap(); self.cancelled.cancel(); }
+    pub(crate) async fn admit_dispatch(&self) -> Result<tokio::sync::RwLockReadGuard<'_, ()>, ApiError> {
+        let guard = self.dispatch.read().await;
+        self.require(P::DesktopControl)?;
+        Ok(guard)
+    }
+    fn cancel(&self) {
+        {
+            let _guard = self.gate.write().unwrap();
+            self.cancelled.cancel();
+        }
+    }
+    async fn drained(&self) { let _dispatch = self.dispatch.write().await; }
     pub async fn ended(&self) {
         let expiry = async {
             match self.metadata.expires_at_ms {
@@ -156,8 +168,10 @@ pub async fn revoke(Extension(key): Extension<Key>, State(app): State<Arc<App>>,
         let _serial = app.auth_serial.lock().await;
         key.require(P::TokensManage)?;
         if !app.tokens.revoke(id).await.map_err(internal)? { return Ok(StatusCode::NOT_FOUND); }
-        if let Some(access) = app.active_tokens.lock().unwrap().remove(&id).and_then(|k| k.upgrade()) { access.cancel(); }
+        let access = app.active_tokens.lock().unwrap().remove(&id).and_then(|k| k.upgrade());
+        if let Some(access) = &access { access.cancel(); }
         drop(_serial);
+        if let Some(access) = access { access.drained().await; }
         app.cancel_token(id).await;
         Ok(StatusCode::NO_CONTENT)
     }).await.map_err(|e| internal(e.into()))?
@@ -173,7 +187,7 @@ pub async fn sweep(app: std::sync::Weak<App>) {
         interval.tick().await;
         let Some(app) = app.upgrade() else { return; };
         let expired: Vec<_> = app.active_tokens.lock().unwrap().values().filter_map(std::sync::Weak::upgrade).filter(|k| !k.metadata.live()).collect();
-        for key in expired { key.cancel(); app.active_tokens.lock().unwrap().remove(&key.metadata.id); app.cancel_token(key.metadata.id).await; }
+        for key in expired { key.cancel(); key.drained().await; app.active_tokens.lock().unwrap().remove(&key.metadata.id); app.cancel_token(key.metadata.id).await; }
         app.viewers.lock().unwrap().expire_requests();
     }
 }

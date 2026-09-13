@@ -25,21 +25,33 @@ For example, `/elsewhere/alice/api/windows` and `/elsewhere/alice/mcp` address t
    `title`, an `app_id`, `focused`, `minimized`, and its geometry `x y w h` in logical pixels. Ids are
    stable for the window's life. Menus and tooltips are not windows; they show up as `popups` on the
    window that owns them.
-2. **Read the window's elements** (`GET /api/windows/{id}/elements`, tool `elements`) instead of
-   guessing from pixels. You get buttons, links, text fields, menu items, tabs, checkboxes and so on,
-   each with `role`, `name` and a rectangle `x y w h` **relative to the window's own `x y`**. The
-   answer's `level` tells you how much the application exposes: `full` is the normal case; `none`
-   means the toolkit publishes nothing (terminals, games); `frame` means Chromium or Electron running
-   without `--force-renderer-accessibility`. Below `full` the application's part of the list is empty
-   (the compositor's title bar and buttons, when it draws them, are still there) and a snapshot is
-   your only view of the content.
-3. **Act on an element** with the input operations (`POST /api/input`, tools `click`, `type`, `key`,
-   `scroll`, `move_pointer`). Pass the window id together with element-relative coordinates, for
-   example the centre of the element's rectangle, and the server adds the window position for you.
-   Without a window id the coordinates are output coordinates.
-4. **Read the elements again** after acting; the tree reflects the new state (menus that opened,
-   dialogs that appeared as new windows). Menus are placed at their popup, so their items have
-   correct rectangles too.
+2. **Read the window's elements** (`GET /api/windows/{id}/elements`, tool `elements`).
+   Each element has an exact `role` and `name`, window-relative bounds, nullable
+   `enabled`, `focused`, `checked`, and `editable` states, and advertised `actions`.
+   Null means unavailable or inapplicable, not false. Check `bounds_available` before using
+   the rectangle. `level` describes application coverage: `none`, `app`, `frame`, `full`,
+   or `ambiguous`. A `truncated` tree cannot prove exact-selector uniqueness; references still identify objects. `unavailable` reports a bus
+   failure even when compositor decorations remain readable.
+3. **Use semantic actions** (`POST /api/windows/{id}/elements/action`, tool `element_action`)
+   with `{ "target": { "reference": "..." }, "action": "<advertised name>" }`.
+   References expire 30 seconds after their last issuance and belong to the returned window and live application.
+   Alternatively use `target: { "role": "button", "name": "Save" }`, which must match
+   exactly one element in a complete tree. Text replacement uses `/elements/text` or
+   `element_text` with `target` and `text`. MCP also takes `window`.
+   These operations require `desktop.control`, independently of the viewer's controller role,
+   and never fall back to coordinates or keyboard input. They return the target state validated
+   before dispatch. Success means toolkit acknowledgement, not that the UI finished changing.
+   Text edits also read back the value unless it is a masked password field. Read again to confirm
+   action results. A reference can be evicted by the bounded cache; handle `stale` by reading again.
+4. **Wait for a state** (`POST /api/windows/{id}/elements/wait`, tool `element_wait`) with
+   `target`, `condition`, and optional `timeout_ms`, default 2000, maximum 10000.
+   Conditions are `present`, `enabled`, `disabled`, `checked`, `unchecked`, `focused`, and
+   `unfocused`. Reads and waits require `desktop.view`. A timeout returns `matched: false`,
+   elapsed time, read attempts, and the last observed element. Missing exact selectors can
+   appear later; stale references and ambiguity fail explicitly. Unavailable application/state, bus, mapping
+   and incomplete-tree failures are retried within the deadline and reported in `last_error`. Waits pause 100 ms between reads and stop on cancellation or token expiry/revocation.
+   For applications without semantic support, choose input operations explicitly and confirm
+   with a snapshot. Window-relative coordinates still work with `/api/input` and `click`.
 5. **Take a snapshot when you need to see** (`GET /api/windows/{id}/snapshot.png`, tool `snapshot`;
    `/api/screenshot.png`, tool `screenshot`). Window snapshots are lossless PNGs of the window's own
    buffers, so they work for covered and minimized windows; `percentage=50` halves either kind; `width` or `height` requests image pixels.
@@ -95,10 +107,15 @@ For example, `/elsewhere/alice/api/windows` and `/elsewhere/alice/mcp` address t
 | 429 | another snapshot is in flight | one at a time; retry after it returns |
 | 500 | the snapshot render failed | retry after checking the error |
 | 501 | the server runs without `--elements` | use snapshots instead |
-| 503 | the compositor or the accessibility bus didn't answer | retry once; if the body says there is no D-Bus session, elements are not available on this server |
+| 503 | the compositor or accessibility bus did not answer | reads may be retried; never automatically retry a semantic mutation with an uncertain outcome |
 | 400, 415, 422 | the body wasn't JSON, lacked `Content-Type: application/json`, or had the wrong shape (plain-text message) | see `reference.md` for the shape |
 
-MCP tools return the same failures as tool errors with the same text.
+Semantic errors include a `code`: `missing`, `stale`, `ambiguous`, `ambiguous_window`,
+`disabled`, `unsupported`, `incomplete_tree`, `state_unavailable`, `bus_unavailable`,
+`window_missing`, `window_unavailable`, `window_changed`, `tree_timeout`, `busy`, `rejected`,
+`invalid`, `cancelled`, or `uncertain`. A dispatched action cannot be undone by cancelling or timing out its response.
+Never automatically retry an uncertain mutation; inspect the application first.
+MCP tools return failures as tool errors.
 
 ## Things that surprise people
 

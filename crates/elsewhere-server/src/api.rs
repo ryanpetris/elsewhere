@@ -29,6 +29,7 @@ use crate::{App, apps, elements::Page};
 
 #[derive(Debug)]
 pub enum ApiError {
+    Element { code: &'static str, message: String },
     Broadcast { code: &'static str, message: String },
     File { code: &'static str, message: String },
     InvalidSize(&'static str),
@@ -60,6 +61,13 @@ impl std::error::Error for ApiError {}
 impl ApiError {
     pub fn status(&self) -> StatusCode {
         match self {
+            ApiError::Element { code, .. } => match *code {
+                "invalid" => StatusCode::BAD_REQUEST, "missing" | "stale" | "window_missing" => StatusCode::NOT_FOUND,
+                "ambiguous" | "ambiguous_window" | "disabled" | "incomplete_tree" | "window_changed" => StatusCode::CONFLICT,
+                "unsupported" | "state_unavailable" | "rejected" => StatusCode::UNPROCESSABLE_ENTITY,
+                "busy" => StatusCode::TOO_MANY_REQUESTS, "cancelled" => StatusCode::REQUEST_TIMEOUT,
+                _ => StatusCode::SERVICE_UNAVAILABLE,
+            },
             ApiError::Broadcast { code, .. } => match *code { "invalid" => StatusCode::BAD_REQUEST, "missing" => StatusCode::NOT_FOUND, "conflict" => StatusCode::CONFLICT, "busy" => StatusCode::TOO_MANY_REQUESTS, _ => StatusCode::SERVICE_UNAVAILABLE },
             ApiError::File { code, .. } => match *code {
                 "missing" => StatusCode::NOT_FOUND,
@@ -86,7 +94,7 @@ impl ApiError {
 impl std::fmt::Display for ApiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ApiError::Broadcast { message, .. } | ApiError::File { message, .. } => f.write_str(message),
+            ApiError::Element { message, .. } | ApiError::Broadcast { message, .. } | ApiError::File { message, .. } => f.write_str(message),
             ApiError::InvalidInput(why) => f.write_str(why),
             ApiError::InvalidSize(why) => f.write_str(why),
             ApiError::Disabled(what) => f.write_str(what),
@@ -105,7 +113,7 @@ impl std::fmt::Display for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let mut body = serde_json::json!({ "error": self.to_string() });
-        if let Self::File { code, .. } | Self::Broadcast { code, .. } = &self { body["code"] = (*code).into(); }
+        if let Self::Element { code, .. } | Self::File { code, .. } | Self::Broadcast { code, .. } = &self { body["code"] = (*code).into(); }
         (self.status(), [(header::CACHE_CONTROL, "no-store")], Json(body)).into_response()
     }
 }
@@ -125,17 +133,161 @@ impl App {
         Ok((win, v.output.scale))
     }
 
-    /// The window's UI elements from its accessibility tree (see `elements.rs`).
-    pub async fn elements(&self, id: u64) -> Result<Page, ApiError> {
-        if !self.elements {
-            return Err(ApiError::Disabled("started without --elements"));
+    fn element_windows(&self, win: &WindowInfo) -> Vec<(u64, String)> {
+        let mut windows: Vec<_> = self.windows().into_iter().filter(|w| w.pid == win.pid).map(|w| (w.id, w.title)).collect();
+        windows.sort_unstable();
+        windows
+    }
+
+    async fn element_scan(&self, key: &crate::Key, id: u64) -> Result<(WindowInfo, Page), ApiError> {
+        use crate::elements::error;
+        if !self.elements { return Err(ApiError::Disabled("started without --elements")); }
+        let (win, scale, windows) = {
+            let viewers = self.viewers.lock().unwrap();
+            let win = viewers.window_list.iter().find(|w| w.id == id).cloned().ok_or_else(|| error("window_missing", "no such desktop window"))?;
+            let mut windows: Vec<_> = viewers.window_list.iter().filter(|w| w.pid == win.pid).map(|w| (w.id, w.title.clone())).collect();
+            windows.sort_unstable();
+            (win, viewers.output.scale, windows)
+        };
+        let read = async {
+            let mut page = crate::elements::elements(&win, scale, windows.len() == 1).await.map_err(|e| error("bus_unavailable", format!("{e:#}")))?;
+            if self.windows().iter().filter(|w| w.pid == win.pid && w.title == win.title).count() > 1 { page.level = "ambiguous"; }
+            page.windows = windows.clone();
+            Ok(page)
+        };
+        let page = tokio::select! {
+            biased;
+            _ = key.ended() => return Err(ApiError::Unauthorized),
+            result = tokio::time::timeout(Duration::from_secs(2), read) => result.map_err(|_| error("tree_timeout", "accessibility tree read exceeded two seconds"))??,
+        };
+        let (live, _) = self.window(id).map_err(|_| error("window_missing", "desktop window disappeared during the read"))?;
+        if live.pid != win.pid || self.element_windows(&live) != windows { return Err(error("window_changed", "application windows changed during the read")); }
+        Ok((win, page))
+    }
+
+    fn element_reference(&self, win: &WindowInfo, selector: &crate::elements::Selector) -> Result<Option<crate::elements::Reference>, ApiError> {
+        use crate::elements::{Selector, error};
+        match selector {
+            Selector::Reference { reference } if reference.len() <= 64 => {
+                let r = self.element_refs.lock().unwrap().get(reference).ok_or_else(|| error("stale", "element reference expired or is unknown; read the tree again"))?;
+                if r.window != win.id || r.pid != win.pid { return Err(error("stale", "element reference does not belong to this live window")); }
+                Ok(Some(r))
+            },
+            Selector::Exact { role, name } if role.len() <= 128 && name.len() <= 4096 => Ok(None),
+            _ => Err(error("invalid", "selector exceeds its size limit")),
         }
-        let (win, scale) = self.window(id)?;
-        match tokio::time::timeout(Duration::from_secs(2), crate::elements::elements(&win, scale)).await {
-            Ok(Ok(page)) => Ok(page),
-            Ok(Err(e)) => Err(ApiError::Unavailable(format!("{e:#}"))),
-            Err(_) => Err(ApiError::Unavailable("timed out reading the tree".into())),
+    }
+
+    /// Current accessibility state, with bounded references scoped to this window.
+    pub async fn elements(&self, key: &crate::Key, id: u64) -> Result<Page, ApiError> {
+        key.require(crate::tokens::Permission::DesktopView)?;
+        let _permit = self.element_slots.try_acquire().map_err(|_| crate::elements::error("busy", "sixteen accessibility operations are already active"))?;
+        let (win, mut page) = self.element_scan(key, id).await?;
+        let mut refs = self.element_refs.lock().unwrap();
+        for element in &mut page.elements { refs.issue(&win, element); }
+        Ok(page)
+    }
+
+    /// Execute one advertised semantic mutation, without coordinate fallback or retries.
+    pub async fn element_mutation(&self, key: &crate::Key, id: u64, selector: crate::elements::Selector, action: Option<String>, text: Option<String>) -> Result<crate::elements::Element, ApiError> {
+        use crate::elements::{self, error, Target};
+        use crate::tokens::Permission::DesktopControl;
+        key.require(DesktopControl)?;
+        if text.as_ref().is_some_and(|t| t.len() > 65536) || action.as_ref().is_some_and(|a| a.len() > 256) { return Err(error("invalid", "text exceeds 65536 bytes or action name exceeds 256 bytes")); }
+        let _permit = self.element_slots.try_acquire().map_err(|_| error("busy", "sixteen accessibility operations are already active"))?;
+        let (initial, _) = self.window(id).map_err(|_| error("window_missing", "no such desktop window"))?;
+        self.element_reference(&initial, &selector)?;
+        let (win, page) = self.element_scan(key, id).await?;
+        let reference = self.element_reference(&win, &selector)?;
+        let mut element = elements::select(&page, &selector, reference.as_ref())?;
+        let _admission = key.admit_dispatch().await?;
+        if let Some(Target::Decoration(name)) = &element.target {
+            if action.as_deref() != Some("activate") || text.is_some() { return Err(error("unsupported", "decoration buttons advertise only activate")); }
+            let op = match name.as_str() { "Close" => ControlOp::Close, "Minimize" => ControlOp::Minimize, "Maximize" => ControlOp::Maximize, "Restore" => ControlOp::Unmaximize, _ => return Err(error("unsupported", "unknown decoration action")) };
+            let (live, _) = self.window(id).map_err(|_| error("window_missing", "desktop window disappeared before dispatch"))?;
+            if live.decoration == 0 || live.pid != win.pid || (name == "Restore" && !live.maximized) || (name == "Maximize" && live.maximized) { return Err(error("stale", "decoration changed before dispatch")); }
+            key.with(&[DesktopControl], || self.control(ControlMsg { id, op }))?;
+        } else {
+            let conn = page.connection.as_ref().ok_or_else(|| error("bus_unavailable", "no accessibility connection"))?;
+            element = tokio::time::timeout(Duration::from_secs(1), elements::refresh(conn, &element)).await.map_err(|_| error("tree_timeout", "target revalidation exceeded one second"))??;
+            match element.enabled { Some(true) => {}, Some(false) => return Err(error("disabled", "the target is disabled")), None => return Err(error("state_unavailable", "enabled state is unavailable")) }
+            if text.is_some() && element.editable != Some(true) { return Err(error("unsupported", "the target does not advertise editable text")); }
+            key.require(DesktopControl)?;
+            let (live, _) = self.window(id).map_err(|_| error("window_missing", "desktop window disappeared before dispatch"))?;
+            if live.pid != win.pid || self.element_windows(&live) != page.windows { return Err(error("window_changed", "application windows changed before dispatch")); }
+            if let Some(Target::Node { root, frame, .. }) = &element.target {
+                if root != frame && live.popups != win.popups { return Err(error("window_changed", "the popup changed before dispatch")); }
+            }
+            let mut dispatched = false;
+            tokio::time::timeout(Duration::from_secs(1), elements::perform(conn, key, &element, action.as_deref(), text.as_deref(), &mut dispatched)).await
+                .map_err(|_| if dispatched { error("uncertain", "the dispatched operation exceeded one second; it may still complete; do not retry automatically") } else { error("tree_timeout", "action validation exceeded one second before dispatch") })??;
         }
+        self.element_refs.lock().unwrap().issue(&win, &mut element);
+        Ok(element)
+    }
+
+    pub async fn element_wait(&self, key: &crate::Key, id: u64, request: crate::elements::ElementWait) -> Result<crate::elements::WaitResult, ApiError> {
+        use crate::elements::{self, error, WaitResult};
+        key.require(crate::tokens::Permission::DesktopView)?;
+        if !self.elements { return Err(ApiError::Disabled("started without --elements")); }
+        if request.timeout_ms > 10000 { return Err(error("invalid", "wait timeout must be at most 10000 milliseconds")); }
+        let (window, _) = self.window(id).map_err(|_| error("window_missing", "no such desktop window"))?;
+        self.element_reference(&window, &request.target)?;
+        let _permit = self.element_slots.try_acquire().map_err(|_| error("busy", "sixteen accessibility operations are already active"))?;
+        let started = tokio::time::Instant::now();
+        let deadline = started + Duration::from_millis(request.timeout_ms);
+        let mut attempts = 0;
+        let mut last = None;
+        let mut last_window = None;
+        let mut last_error = None;
+        let mut observed = false;
+        while tokio::time::Instant::now() < deadline {
+            attempts += 1;
+            let observe = async {
+                let (win, page) = self.element_scan(key, id).await?;
+                let reference = self.element_reference(&win, &request.target)?;
+                let mut element = match elements::select(&page, &request.target, reference.as_ref()) {
+                    Ok(element) => element,
+                    Err(ApiError::Element { code: "missing", .. }) => return Ok((win, None)),
+                    Err(error) => return Err(error),
+                };
+                if reference.is_some() && matches!(element.target, Some(elements::Target::Node { .. })) {
+                    let conn = page.connection.as_ref().ok_or_else(|| error("bus_unavailable", "no accessibility connection"))?;
+                    element = tokio::time::timeout(Duration::from_secs(1), elements::refresh(conn, &element)).await.map_err(|_| error("tree_timeout", "target revalidation exceeded one second"))??;
+                }
+                Ok((win, Some(element)))
+            };
+            let observation = tokio::select! { biased;
+                _ = key.ended() => return Err(ApiError::Unauthorized),
+                result = tokio::time::timeout_at(deadline, observe) => match result {
+                    Ok(result) => result,
+                    Err(_) => { if !observed { last_error = Some(elements::WaitError { code: "tree_timeout", error: "wait deadline reached before any accessibility observation".into() }); } break; },
+                },
+            };
+            match observation {
+                Ok((win, Some(mut element))) => {
+                    observed = true;
+                    let matched = request.condition.matches(&element);
+                    if matches!(matched, Ok(true)) {
+                        self.element_refs.lock().unwrap().issue(&win, &mut element);
+                        return Ok(WaitResult { matched: true, elapsed_ms: started.elapsed().as_millis() as u64, attempts, element: Some(element), last_error: None });
+                    }
+                    last = Some(element);
+                    last_window = Some(win);
+                    last_error = match matched { Ok(_) => None, Err(ApiError::Element { code, message }) => Some(elements::WaitError { code, error: message }), Err(error) => return Err(error) };
+                },
+                Ok((win, None)) => { observed = true; last = None; last_window = Some(win); last_error = None; },
+                Err(ApiError::Element { code: code @ ("tree_timeout" | "bus_unavailable" | "window_unavailable" | "window_changed" | "incomplete_tree" | "unsupported" | "state_unavailable"), message }) => {
+                    last = None;
+                    last_window = None;
+                    last_error = Some(elements::WaitError { code, error: message });
+                },
+                Err(error) => return Err(error),
+            }
+            tokio::select! { biased; _ = key.ended() => return Err(ApiError::Unauthorized), _ = tokio::time::sleep_until(deadline.min(tokio::time::Instant::now() + Duration::from_millis(100))) => {} }
+        }
+        if let (Some(win), Some(element)) = (last_window, &mut last) { self.element_refs.lock().unwrap().issue(&win, element); }
+        Ok(WaitResult { matched: false, elapsed_ms: started.elapsed().as_millis() as u64, attempts, element: last, last_error })
     }
 
     /// PNG of one window or, with `None`, the whole output. Omitted sizing is native.

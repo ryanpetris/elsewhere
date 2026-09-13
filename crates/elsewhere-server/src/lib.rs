@@ -138,6 +138,8 @@ pub struct App {
     /// Where a drag's or a paste's files wait for the application that takes them (`files.rs`).
     drops_dir: PathBuf,
     elements: bool,
+    element_refs: Mutex<elements::References>,
+    element_slots: tokio::sync::Semaphore,
     version: &'static str,
     tls: bool,
     port: u16,
@@ -269,6 +271,8 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
         files_dir: cfg.files_dir,
         drops_dir: files::drops_dir(),
         elements: cfg.elements,
+        element_refs: Mutex::default(),
+        element_slots: tokio::sync::Semaphore::new(16),
         version: cfg.version,
         tls: cfg.tls,
         port: cfg.listen.port(),
@@ -316,6 +320,9 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
                 .route("/api/windows/{id}/snapshot.png", get(api_window_snapshot))
                 .route("/api/screenshot.png", get(api_screenshot))
                 .route("/api/windows/{id}/elements", get(api_window_elements))
+                .route("/api/windows/{id}/elements/action", post(api_element_action))
+                .route("/api/windows/{id}/elements/text", post(api_element_text))
+                .route("/api/windows/{id}/elements/wait", post(api_element_wait))
                 .route("/api/windows/{id}/icon", get(api_window_icon))
                 .route("/api/files", get(api_files).post(api_manage_file))
                 .route("/api/files/{name}", get(api_file).put(api_put_file).delete(api_delete_file))
@@ -596,9 +603,27 @@ async fn api_notification_icon(Extension(key): Extension<Key>, UrlPath(id): UrlP
 
 async fn api_window_elements(Extension(key): Extension<Key>, UrlPath(id): UrlPath<u64>, State(app): State<Arc<App>>) -> Response {
     if let Err(e) = key.require(P::DesktopView) { return e.into_response(); }
-    match app.elements(id).await {
+    match app.elements(&key, id).await {
         Ok(page) => (NO_STORE, Json(page)).into_response(),
         Err(e) => e.into_response(),
+    }
+}
+
+async fn api_element_action(Extension(key): Extension<Key>, UrlPath(id): UrlPath<u64>, State(app): State<Arc<App>>, Json(request): Json<elements::ElementAction>) -> Response {
+    match app.element_mutation(&key, id, request.target, Some(request.action), None).await {
+        Ok(element) => (NO_STORE, Json(element)).into_response(), Err(e) => e.into_response(),
+    }
+}
+
+async fn api_element_text(Extension(key): Extension<Key>, UrlPath(id): UrlPath<u64>, State(app): State<Arc<App>>, Json(request): Json<elements::ElementText>) -> Response {
+    match app.element_mutation(&key, id, request.target, None, Some(request.text)).await {
+        Ok(element) => (NO_STORE, Json(element)).into_response(), Err(e) => e.into_response(),
+    }
+}
+
+async fn api_element_wait(Extension(key): Extension<Key>, UrlPath(id): UrlPath<u64>, State(app): State<Arc<App>>, Json(request): Json<elements::ElementWait>) -> Response {
+    match app.element_wait(&key, id, request).await {
+        Ok(result) => (NO_STORE, Json(result)).into_response(), Err(e) => e.into_response(),
     }
 }
 

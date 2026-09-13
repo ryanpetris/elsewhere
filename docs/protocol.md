@@ -259,24 +259,37 @@ paths reject input. Keys follow the compositor's current keyboard focus in both 
 
 ### Elements object
 
-```json
-{"level": "full", "toolkit": "GTK",
- "elements": [{"role": "button", "name": "Save As…", "x": 549, "y": 47, "w": 107, "h": 34}, …]}
-```
+`GET /api/windows/{id}/elements` returns `level`, nullable `toolkit`, `truncated`, nullable
+`unavailable`, and `elements`. Each element includes `role`, `name`, nullable `reference`,
+nullable `enabled`, `focused`, `checked`, `editable`, advertised canonical `actions`,
+`bounds_available`, and window-relative `x y w h`. Null distinguishes unavailable or
+inapplicable state from false. Null actions mean discovery failed; an empty list means
+no Action interface or no advertised actions.
 
-- `level`: `none` (the application publishes no tree), `app` (it does, but no toplevel of it matches this
-  window), `frame` (the toplevel is there but empty; Chromium without `--force-renderer-accessibility`),
-  `full`. `elements` is empty below `full`.
-- `toolkit` as the application names it (`GTK`, `gtk`, `Gecko`, `Chromium`, …), when it says.
-- `role` is one of `button`, `toggle`, `switch`, `checkbox`, `radio`, `link`, `entry`, `text`,
-  `password`, `combobox`, `menu`, `menuitem`, `tab`, `slider`, `spinbutton`, `listitem`, `treeitem`,
-  `scrollbar`, `heading`. Containers and static text are not listed.
-- `x y w h` are logical pixels relative to the window's `x y`, so `x + window.x` is where to click. Only
-  elements that are showing and have a size are listed; at most 500, from a walk of at most 3000 nodes.
-  Items of an open menu are placed at the menu's popup (see `popups` on the window object).
-  When the compositor decorates the window (`decoration` > 0), the list ends with its title bar (role
-  `title bar`, the window's title as `name`) and its three buttons (`push button`: `Minimize`,
-  `Maximize` or `Restore`, `Close`), at `y = -32` above the geometry; they are there at every `level`.
+`level` is `none` when the application publishes no tree, `app` when no toplevel matches,
+`frame` when the matching toplevel is empty, `full`, or `ambiguous`. Compositor decorations
+can be listed at any level. A truncated tree cannot prove exact role/name uniqueness.
+The walk visits at most 3000 nodes and lists at most 500 application elements. After window
+matching, traversal stops at its 1.5-second deadline and returns a marked partial tree.
+The enclosing two-second deadline covers connection and window matching as well.
+
+Application roles include `button`, `toggle`, `switch`, `checkbox`, `radio`, `link`, `entry`,
+`text`, `password`, `combobox`, `menu`, `menuitem`, `tab`, `slider`, `spinbutton`, `listitem`,
+`treeitem`, `scrollbar`, and `heading`. Recognized showing elements can be listed without
+geometry; use rectangles only when `bounds_available` is true. Open menu rectangles include
+popup placement. Compositor decorations use `title bar` and `push button`, with `Minimize`,
+`Maximize` or `Restore`, and `Close`, at negative `y` above the window geometry.
+
+With `--elements`, POST `/api/windows/{id}/elements/action`, `/text`, or `/wait` takes a
+`target` that is either `{reference}` or exact `{role, name}`. Action adds an advertised
+`action`; text adds UTF-8 `text`; wait adds `condition` and optional `timeout_ms` up to 10000.
+Reads and waits require `desktop.view`; mutations require `desktop.control`, independently
+of viewer control ownership. References expire 30 seconds after their last issuance, are
+window/application-bound, and remain usable beyond a truncated prefix after live revalidation.
+There is no coordinate or keyboard fallback and no automatic retry of uncertain mutations.
+Wait results include `matched`, `elapsed_ms`, `attempts`, the last observed `element` and
+`last_error`. See the [generated schemas](../skills/elsewhere/reference.md) and
+[semantic operation details](mcp.md#semantic-ui-operations).
 
 ### Control message
 

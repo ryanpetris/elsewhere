@@ -79,3 +79,47 @@ the embedded viewer needs) and cannot silently drift.
   `ctrl+a`; the snapshot showed the typed lines selected.
 - Key resolution has a unit test on the `us` keymap (letters, Shift for capitals and `plus`, `ctrl`,
   `Return`, `F5`).
+
+## Semantic UI operations
+
+`elements`, `element_action`, `element_text`, and `element_wait` share their implementation
+with the HTTP routes in `api.rs`. All require `--elements`. Reads and waits use
+`desktop.view`; actions and text replacement use `desktop.control`, independently of
+viewer control ownership. The generated reference documents input and result schemas.
+
+An exact role/name selector must match one element in a complete, unambiguous window tree.
+References expire 30 seconds after their last issuance and retain the window ID, process ID, accessibility bus
+identity, frame and object. The cache holds at most 4096 entries. Dispatch checks live
+ownership and capabilities again. Compositor buttons use existing window control commands.
+There is no coordinate fallback.
+
+Up to 16 accessibility operations run concurrently. Tree walks visit at most 3000 objects
+and return at most 500 application elements; reaching a bound marks the tree incomplete.
+A read has a two-second deadline; after a frame is matched, tree traversal stops at its 1.5-second deadline and returns a marked partial tree. Connection or window-matching failure can still return an error because no application ownership has been established. Mutation revalidation and dispatch each have a one-second
+deadline. Waits have a total deadline of at most ten seconds, with 100 ms between reads.
+They own their polling futures, with no background wait workers or persistent subscriptions.
+MCP cancellation drops the operation; token expiry and revocation stop reads and waits.
+An already dispatched mutation may finish after cancellation or a transport error. Its
+outcome is uncertain, so callers must inspect state and must not retry automatically.
+Mutation results describe the target before dispatch, not confirmation of a resulting UI state.
+
+Text replacement reads back at most the requested UTF-16 length plus one within the dispatch
+deadline. An acknowledgement without matching text returns `uncertain`. Password fields return toolkit acknowledgement without reading masked text back. Native Docker checks
+cover GTK 3, Qt 6, Firefox and Chromium with accessibility enabled. Chromium may expose actions
+without EditableText; such edits return `unsupported`. Firefox may acknowledge an edit without
+applying it; readback detects that case. Toolkit acknowledgement alone is not UI confirmation.
+
+Exact role/name selectors require a complete tree. References can resolve an object beyond the
+truncated prefix by revalidating its live bus, frame, ancestry and capabilities; its bounds are
+then unavailable. Repeated reads reuse references to the same live target. The capacity limit
+can evict references to distinct targets, so clients must handle `stale` by reading again.
+Waits retry unavailable application/state, bus, mapping and incomplete-tree errors within their deadline and report
+the last such error in `last_error`. Zero timeout performs no read and returns unmatched.
+
+Action success means toolkit acknowledgement. Some bridges acknowledge before running the
+application callback, and others wait for it to finish. `rejected` is available only when the
+toolkit reports rejection. Inspect the application after an action, including after a timeout.
+
+A timeout during validation before a mutation is dispatched returns `tree_timeout` and can be
+retried. After dispatch it returns `uncertain`; inspect the application before deciding whether
+another action is needed.
