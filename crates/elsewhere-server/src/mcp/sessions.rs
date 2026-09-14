@@ -34,6 +34,11 @@ impl Default for Sessions {
 }
 
 impl Sessions {
+    #[cfg(test)]
+    pub(crate) fn own_session(self: &Arc<Self>, id: &str, key: Key) {
+        drop(self.register(id, key).unwrap());
+    }
+
     fn acquire(self: &Arc<Self>, id: &str, key: &Key) -> Result<Lease, StatusCode> {
         let mut owners = self.owners.lock().unwrap();
         let owner = owners.get_mut(id).ok_or(StatusCode::NOT_FOUND)?;

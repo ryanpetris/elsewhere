@@ -10,6 +10,11 @@ pub(crate) struct ControlRequest {
     expires_at_ms: i64,
 }
 
+#[cfg(test)]
+impl ControlRequest {
+    pub(crate) fn elapse(&mut self) { self.deadline = Instant::now(); }
+}
+
 impl Viewers {
     pub(crate) fn publish_roster(&self) {
         let mut sessions: Vec<_> = self.sessions.iter().filter(|(_, s)| s.key.has(P::DesktopView)).collect();

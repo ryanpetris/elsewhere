@@ -1066,7 +1066,7 @@ fn fit(output: &OutputGeometry, stage: &OutputGeometry) -> (u32, u32) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[derive(Default)]
@@ -1080,6 +1080,14 @@ mod tests {
         fn set_quality(&self, _: elsewhere_core::Quality) {}
         fn set_effort(&self, _: EncodingEffort) {}
         fn effort(&self) -> elsewhere_core::EffortState { elsewhere_core::EffortState::pending(EncodingEffort::Fast) }
+    }
+
+    pub(crate) fn viewer(key: Key) -> ViewerSession {
+        let control = Box::new(Control::default());
+        let selection = CodecSelection::new(&[], &[], control.as_ref());
+        ViewerSession { key, events: mpsc::channel(8).0, audio: mpsc::channel(8).0, audio_seq: 0,
+            size: None, control, selection, quality: Preset::Medium.quality(1000), preset: Preset::Medium,
+            cam_wait_key: false, mixer_subscribed: false, request: None, request_result: None }
     }
 
     #[test]

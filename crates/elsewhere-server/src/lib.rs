@@ -20,6 +20,8 @@ pub mod rtc;
 mod protocol;
 #[cfg(test)]
 mod reference;
+#[cfg(test)]
+mod test_rig;
 mod ws;
 mod terminal;
 pub mod tokens;
