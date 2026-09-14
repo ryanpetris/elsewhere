@@ -38,7 +38,7 @@ try {
   const ready = async () => {
     await page.waitForFunction(() => !!window.elsewhere?.store && !!window.socket);
     await page.evaluate(({ CONFIG, CURSOR, ROLE }) => {
-      packet([ROLE, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+      packet([ROLE, 2, 8, 0, 0, 0, 0, 0, 0, 0, 0]);
       packet([CONFIG, ...new TextEncoder().encode(JSON.stringify({ streamId: 1, codec: 'vp8', width: 1280, height: 720, scale: 1 }))]);
       const cursor = new Uint8Array(13 + 16 * 16 * 4), dv = new DataView(cursor.buffer);
       cursor[0] = CURSOR; dv.setUint16(1, 16, true); dv.setUint16(3, 16, true); cursor.fill(255, 13);

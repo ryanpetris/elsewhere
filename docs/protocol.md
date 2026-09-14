@@ -17,7 +17,7 @@ Routes below are relative to the public URL prefix, if configured. For example, 
   nobody: nothing is processed. A wrong token, or five seconds of silence, closes it with code **4001**
   `Invalid or expired token`. Socket messages are bounded to 16 MiB plus the paste header, including during authentication; all non-paste payloads remain limited to 1 MiB. A live token without desktop.view closes with `4004`, preserving its identity.
   The authenticated socket sends the full Permissions grant list before session replay; the viewer uses
-  it for feature access. Role tracks desktop input ownership.
+  it for feature access. Role tracks participant ownership and active desktop input eligibility.
 - **Window streams** (`/ws/window/{id}`): authenticated like `/ws`; see below.
 - **HTTP API** (`/api/...`): `Authorization: Bearer <token>`. Nothing else is accepted, so the token
   never appears in a URL the server or a proxy logs. Operations without their required grants return `403`.
@@ -45,7 +45,7 @@ respecting the decoder's existing visible origin. `scale` converts those dimensi
 | `0x05` | Audio | `u8 0` `u16 seq` `u64 pts_us` then one 20 ms Opus packet. `seq` counts every packet, sent or not. |
 | `0x06` | Windows | JSON array of window objects (see below), the whole list, whenever anything in it changed. Replayed to a new viewer. |
 | `0x07` | Clipboard | JSON clipboard metadata (`observation`, `operation`, `source`, `present`, `mime`, `size`, `preview`), as in `/api/clipboard/state`, with `text` for an observed text selection (at most 1 MiB). `source`, when present, identifies the originating authenticated socket by string `session` and its `u32 request`; it confirms an installed compound paste. Other binary bodies use conditional `GET /api/clipboard`. Not replayed: reconnecting retains the browser clipboard. |
-| `0x08` | Role | `u8 role` `u8 features` `u64 control_epoch`: desktop input eligibility and ownership. The epoch changes on every desktop control handoff (zero for window streams). 0 watch only (the token without `desktop.control`); 1 act but not drive (a token with `desktop.control` while another session controls); 2 control: its pointer, keyboard and window size are the desktop's. `features` reflects both token permissions and server availability: bit 0 its microphone (`Mic`), bit 1 its webcam (`Cam`), bit 2 session playback is available. Sent with the replay after `Hello` and whenever it changes. |
+| `0x08` | Role | `u8 role` `u8 features` `u64 control_epoch`: participant ownership and desktop input eligibility. The epoch changes on every participant control handoff (zero for window streams). 0 watch only (the token without `desktop.control`); 1 act but not drive (a token with `desktop.control` while another participant controls); 2 control: its participant owns the desktop; bit 3 identifies which connection supplies input and size. `features` reflects both token permissions and server availability: bit 0 its microphone (`Mic`), bit 1 its webcam (`Cam`), bit 2 session playback is available, bit 3 this connection supplies desktop input. Microphone and camera bits also identify the permitted capture source. Sent with the replay after `Hello` and whenever it changes. |
 | `0x09` | Notice | `u8 kind` (0 a warning, 1 good news) then UTF-8 text about the session's last action, for the page to show briefly. Sent to the controller when its drag (`Drag`) was dropped: good news naming the application that took the files, a warning when none did. Sent to a window stream whose press aims past the desktop's edge at an X11 window: Xwayland's screen is the desktop, and the X server pins the pointer to it, so that click cannot arrive. |
 | `0x0B` | Notifications | JSON array of the open desktop notifications, oldest first, whenever they change and in the replay: each has `id`, `rev` (counts up when the application replaces it), `app`, `summary`, `body`, `icon` (whether `GET /api/notifications/{id}/icon` has a picture), `actions` as `[key, label]` pairs, and `timeout_ms` (0: until closed). |
 | `0x0C` | StreamState | JSON `{"codec", "codecs", "status", "attempt", "preset", "ceiling_kbps", "medium_kbps", "bitrate_kbps", "max_fps", "effort"}`: `codec` is the selected family or null when exhausted. `codecs` is the full server list of `{"codec","hardware"}` entries. `status` is `starting`, `streaming`, `retrying`, `switching`, or `failed`; `attempt` identifies the current encoder attempt. Sent before video starts and when recovery changes state. Also contains selected preset and ceiling, configured Medium ceiling, and current stream target (`max_fps` 0: the compositor's rate), when an encoder reports a new stream and whenever the rate controller steps the quality; the page separates ceiling, stream target, and measured throughput. `effort` contains `requested`, nullable `applied`, nullable `encoder` and `setting`, and `pending`. Effort values are `fast`, `balanced`, or `high`; unavailable controls have null `applied` and `setting` with `pending: false`. |
@@ -54,9 +54,10 @@ respecting the decoder's existing visible origin. `scale` converts those dimensi
 | `0x0F` | MixerState | JSON `{generation, available, error, routing, nodes}`: initial desktop audio snapshot and authoritative updates. Each node has an opaque `id`, `name`, nullable `application`, `kind` (`output`, `input`, `playback`, `recording`), `state`, nullable `volume` and `mute`, `volume_writable`, `mute_writable`, `routing_writable`, `targets` (IDs), `is_default`, `meter_before_volume`, `meter_active`, and nullable `meter_error`. Unavailable state invalidates rows; an error with `available: true` describes degraded service. |
 | `0x10` | MixerLevels | JSON array of `{id, peak}`, at about 10 Hz to subscribed desktop viewers. Peaks are linear amplitudes measured from audio, shared across subscribers. |
 | `0x11` | MixerError | UTF-8 error for the viewer's mixer command. |
-| `0x12` | Session | `u64 id`: this socket connection, used for clipboard origin correlation and desktop presentation handoff. Window sockets have the high bit set. |
+| `0x12` | Session | `u64 id`: this socket connection, used for clipboard origin correlation. Window sockets have the high bit set. |
 | `0x14` | Display | JSON `{kiosk, resolution}`: shared display settings on connection and when changed. The latest snapshot is retained for slow readers. See [display settings](#display-settings). |
 | `0x15` | Permissions | JSON array of permission names from the authenticated token, sent before session initialization on desktop and window sockets. |
+| `0x19` | Participant | Desktop-only JSON `{id, secret}` for the shared participant and its authenticated opener association. See Viewers below. |
 
 Config and Video share the active transport's ordering. RTC queue replacement retains a Config
 before the recovery key. While RTC owns video, the viewer ignores delayed WebSocket Video messages.
@@ -71,7 +72,7 @@ Config on WebSocket before video if that stream has not been configured on the s
 | Type | Name | Payload |
 |---|---|---|
 | `0x80` | Auth | the token as UTF-8. First message. |
-| `0x81` | Hello | JSON `{"codecs":["h264","hevc","av1","vp9","vp8"],"quality":"medium","effort":"fast"}`. `codecs` is required and ordered by browser preference; duplicate names are ignored, unknown names reject the message, and an empty list has no shared codec. Quality defaults to Medium when missing or unknown; effort defaults to Fast when missing. The server starts the first supported codec in this list. |
+| `0x81` | Hello | JSON `{"codecs":["h264","hevc","av1","vp9","vp8"],"quality":"medium","effort":"fast"}`. `codecs` is required and ordered by browser preference; duplicate names are ignored, unknown names reject the message, and an empty list has no shared codec. Quality defaults to Medium when missing or unknown; effort defaults to Fast when missing. The server starts the first supported codec in this list. Desktop connections may also include `participant: {secret, pip, resume}` as described below. |
 | `0x82` | Resize | `u16 css_w` `u16 css_h` `f32 dpr`. Output = CSS size × dpr, rounded down to even, capped at 8K. |
 | `0x83` | MotionAbs | `f32 x` `f32 y` in logical (CSS) pixels. |
 | `0x84` | MotionRel | `f32 dx` `f32 dy` while pointer-locked. |
@@ -89,14 +90,14 @@ Config on WebSocket before video if that stream has not been configured on the s
 | `0x90` | Drag | JSON `{"op": "start"}`, `{"op": "drop", "batch": "…", "names": ["a.txt", …]}` or `{"op": "cancel"}` (with `"batch"` when files were staged for it): the browser drags local files over the desktop. `start` begins a drag on the desktop where the pointer is (offering `text/uri-list`, to copy or to move); the pointer messages move it; `drop` names the batch the files were staged in (`PUT /api/drop/{batch}/{name}` first, not the transfer folder) and their names, and drops their `file://` URIs on the application under the pointer; a drop nothing took, or a cancel naming a batch, sends the files to the transfer folder; `cancel` lets go over nothing. Controlling session only. |
 | `0x91` | Input | JSON: one input action as `POST /api/input` takes it (`{"type": "text", "text": "…"}`, `{"type": "key", "keys": "ctrl+c"}`, `move`, `click`, …), resolved on the compositor thread, in order with the session's other input; the on-screen keyboard types with it. Controlling session only. |
 | `0x92` | Touch | `u8 kind` (0 down, 1 motion, 2 up) `u8 id` `f32 x` `f32 y`: a finger on the browser's touchscreen, passed on as a `wl_touch` point (`id` tells the fingers down at once apart; logical px); each message is its own frame; a finger the browser takes for a gesture of its own is lifted. Controlling session only. |
-| `0x93` | Mic | One Opus packet (20 ms, 48 kHz, mono) of the browser's microphone, played into the desktop's virtual source as it arrives. Controlling session only; dropped when the desktop has no audio. |
-| `0x94` | Cam | One VP8 frame of the browser's webcam (720p at 30 fps asked of the camera, whatever it gives encoded at 2 Mbit/s with a keyframe every two seconds), played into the loopback camera as it arrives, scaled to 720p; when the desktop is behind, frames are dropped there until the next keyframe. Controlling session only; dropped without `--webcam`. |
+| `0x93` | Mic | One Opus packet (20 ms, 48 kHz, mono) of the browser's microphone, played into the desktop's virtual source as it arrives. Owning participant's media connection only; dropped when the desktop has no audio. |
+| `0x94` | Cam | One VP8 frame of the browser's webcam (720p at 30 fps asked of the camera, whatever it gives encoded at 2 Mbit/s with a keyframe every two seconds), played into the loopback camera as it arrives, scaled to 720p; when the desktop is behind, frames are dropped there until the next keyframe. Owning participant's media connection only; dropped without `--webcam`. |
 | `0x95` | Rtc | JSON: `{"offer": "<sdp>", "g": 1}` from the page to open its `video` data channel (ordered, reliable; the page sends the offer once its candidates are gathered, and the server answers as an ICE-lite peer. The UI keeps the first answer candidate, sets its host to the configured host or page hostname and its port to the server-supplied UDP port, and drops the other candidates before applying the answer. The browser resolves hostnames, which should be fully qualified because ICE resolution does not use DNS search suffixes); `{"close": true, "g": 1}` to go back to the socket. `g` is a required unsigned integer on offers and closes, numbering the attempt; it comes back with answers and server close notifications. A client close must carry the matching generation; it cannot close a newer attempt. While a session's channel is open its video frames and decoder configuration go there with the same message formats; other messages stay on the socket. Desktop and window sessions alike; the page offers while WebRTC is selected, initially and on recovery. Each attempt belongs to one WebSocket session. |
 | `0x96` | Report | `u16 delay_ms` `u16 dropped`: the page's last second of video, once a second while frames come: how much later they arrived than at their best over the last ten seconds (the link queueing, which comes before it loses) and how many its decoder dropped. Either feeds the server's rate controller, which halves the bitrate under the viewer's quality ceiling and holds two seconds; five clean seconds raise it a quarter. |
 | `0x97` | Mixer | JSON, at most 4096 bytes: `{op: "subscribe", enabled: bool}`, `{op: "volume", id, value}`, `{op: "mute", id, value}`, `{op: "target", id, target}`, or `{op: "default", id}`. Subscriptions are available to every authenticated desktop viewer; mutations require the current controller. Volume is finite 0–100 percent with cubic gain; mute is boolean; target is a compatible endpoint ID or null to follow the session default. Unknown fields, stale IDs and unsupported operations are rejected. Commands never accept a server address or native operation. |
-| `0x98` | Handoff | `u64 target`: the current controller transfers to a live desktop.control desktop connection. Other senders, missing targets and desktop-view-only targets are ignored. |
+| `0x98` | Handoff | `u64 target`: the owning participant transfers to a live participant with desktop.control. Other senders, missing targets and desktop-view-only targets are ignored. |
 | `0x99` | PointerLockGained | none. The browser acquired pointer lock; allow a pending application lock to resume without sending a button event. Capture-on-click sends MotionAbs at the clicked position before this message so locks resume at that target; application-requested capture preserves the current pointer position. Driving sessions only. |
-| `0x9A` | PasteClipboard | `u8 flags` `u64 control_epoch` `u32 request`, then a PNG (up to 16 MiB) or UTF-8 JSON `{ "names": [...], "batch": "…" }` (up to 1 MiB). Flag bit 0 requests a paste chord, bit 1 selects Shift+Insert instead of Ctrl+V, bit 2 selects staged files instead of PNG. Other bits are invalid. The socket identifies the viewer; capture its Role epoch before staging. Clipboard installation requires a live session with `clipboard.write` (and `files.upload` for files). On the compositor thread, install first, then tap only if `desktop.control` and current session eligibility still hold: desktop controller and matching epoch, or a live window stream whose window still has focus. Otherwise install without input. Revoked/disconnected sessions do neither. All selected files must validate under the token’s batch ownership; execution failures notify the originating session. A skipped requested chord sends a notice and refreshes a desktop viewer’s Role. |
+| `0x9A` | PasteClipboard | `u8 flags` `u64 control_epoch` `u32 request`, then a PNG (up to 16 MiB) or UTF-8 JSON `{ "names": [...], "batch": "…" }` (up to 1 MiB). Flag bit 0 requests a paste chord, bit 1 selects Shift+Insert instead of Ctrl+V, bit 2 selects staged files instead of PNG. Other bits are invalid. The socket identifies the viewer; capture its Role epoch before staging. Clipboard installation requires a live session with `clipboard.write` (and `files.upload` for files). On the compositor thread, install first, then tap only if `desktop.control` and current session eligibility still hold: active desktop input connection and matching epoch, or a live window stream whose window still has focus. Otherwise install without input. Revoked/disconnected sessions do neither. All selected files must validate under the token’s batch ownership; execution failures notify the originating session. A skipped requested chord sends a notice and refreshes a desktop viewer’s Role. |
 
 ### Close codes
 
@@ -104,41 +105,49 @@ Config on WebSocket before video if that stream has not been configured on the s
 |---|---|
 | 4001 | unauthorized: no or wrong token within five seconds, or its token was revoked or expired |
 | 4003 | a stream that can't run: no such window, the window closed, or no encoder could be made |
-| 4004 | authenticated token lacks desktop.view; the token remains valid for its other permissions |
+| 4004 | authenticated token lacks desktop.view or participant association was rejected; the token remains valid for its other permissions |
 
-The page shows these (a token dialog for 4001 or 4004, a card for 4003) and stops retrying; on any other close
-it reconnects after a second.
+The page shows these (a token dialog for 4001 or 4004, a card for 4003) and stops retrying. Desktop PiP
+retries 4004 with reason `The opener's participant is no longer connected.`, waiting for its opener's
+current association before rejoining. On any other close it reconnects after a second.
 
 ### Viewers
 
-Any number of sessions may watch the desktop at once; each has its own encoder, so each gets the
-codec its browser decodes best and a stream scaled to fit its own window. One session at a time is the
-**controller**: the first desktop.control session to connect, until it leaves (then the oldest
-remaining desktop.control session), a session with desktop.take_control takes over, approves a pending request, or hands control to another eligible session. The
-controller's pointer and keyboard messages drive the desktop, and its `Resize` sizes the output; the
-others' pointer and keyboard messages are ignored and their `Resize` only sets the size their own
-stream is scaled to (the output's aspect, never enlarged; the page letterboxes it). A desktop.control
-session that isn't controlling still acts through `Control` and `SetClipboard`, and through the API;
-a desktop-view-only session can't. Control changes send `Role` to the two sessions concerned and release
-whatever the old controller held. `Session` identifies each desktop connection. `Handoff` uses the
-same control-change path but checks ownership and the target under the session lock. PiP uses this
-conditional transfer so a late presentation callback cannot displace another controller.
+Any number of connections may watch the desktop; each has its own encoder and viewport. One
+participant owns control. Its active connection supplies desktop pointer, keyboard and sizing.
+Other connections' input is ignored and their resize requests fit their own streams. Both
+connections of an owning participant may use controller-only workspace and mixer controls.
+Other `Control` operations, clipboard writes and HTTP/MCP actions retain their independent grants.
 
-Desktop membership uses `Roster` (`0x16`, UTF-8 JSON). It contains `controller` and `epoch`
-as decimal strings, and sorted `sessions` with `id`, connection `label`, `can_control`, `request`
-and `result`. Labels such as "Session 3" identify connections, not verified people. No token IDs,
-secrets or permission lists are included. A request contains decimal-string `id` and `epoch` plus
-`expires_at_ms`, a Unix timestamp. Results are `approved`, `declined`, `cancelled`, `expired` or
+`Session` identifies the connection. Desktop connections also receive `Participant` (`0x19`),
+UTF-8 JSON with decimal-string `id` and a 64-character hexadecimal `secret`. The secret remains
+in browser memory and authorizes the opener's desktop PiP and connection resume; it is not in the
+roster or URL. `Hello` can include `participant: {secret, pip, resume}`. A matching secret and the
+same authenticated token join the existing participant. `pip: true` selects that connection as
+the participant's desktop input source. Invalid associations close with 4004. A resume whose
+secret no longer exists creates an independent participant under normal election rules, without
+reclaiming control from another participant. Sharing a token alone never joins participants.
+
+The first eligible participant controls initially. After its final connection leaves, the oldest
+remaining eligible participant controls. `TakeControl` requires `desktop.take_control` while
+someone owns control; `Handoff` checks the owning participant and target participant under the
+viewers lock. Same-participant connection changes release old input and update sizing without
+changing the ownership epoch or pending requests.
+
+`Roster` (`0x16`, UTF-8 JSON) contains participant `controller` and `epoch` as decimal strings,
+and sorted `sessions` entries with participant `id`, `label`, `can_control`, `request` and `result`.
+Labels such as "Session 3" identify participants, not verified people. Token IDs, secrets and
+permission lists are absent. A request contains decimal-string `id` and `epoch` plus Unix
+`expires_at_ms`. Results are `approved`, `declined`, `cancelled`, `expired` or
 `controller_changed`, otherwise null.
 
-`RequestControl` (`0x9B`, no payload) creates an eligible participant's request, expiring after
-five minutes. Repeating it preserves the deadline. With no controller it claims control immediately.
-`CancelControl` (`0x9C`) carries the request ID and epoch as two little-endian u64 values.
-`ApproveControl` (`0x9D`) and `DeclineControl` (`0x9E`) carry target session ID, request ID and
-epoch as three little-endian u64 values. Only the current controller can decide a live matching
-request in the current control epoch. Disconnect, revocation and controller changes invalidate
-pending requests. Approval does not grant permissions. HTTP, MCP and window input retain their
-permission checks independently of desktop approval.
+`RequestControl` (`0x9B`, no payload) creates a participant's shared five-minute request.
+Repeating it from either connection preserves the deadline. With no controller it claims control.
+`CancelControl` (`0x9C`) carries request ID and epoch as two little-endian u64 values.
+`ApproveControl` (`0x9D`) and `DeclineControl` (`0x9E`) carry target participant ID, request ID
+and epoch. Either connection of the owner may decide a live matching request. Concurrent decisions
+are serialized. Losing the final connection, revocation and ownership changes invalidate requests;
+PiP opening, closing and a surviving sibling's disconnect do not. Approval never grants permissions.
 
 `PointerPosition` (`0x17`) carries four little-endian f64 values: compositor logical x, y,
 output width and output height. Changed positions are sampled every 34 ms independently of video,

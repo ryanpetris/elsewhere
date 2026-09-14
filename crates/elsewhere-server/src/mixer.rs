@@ -49,10 +49,10 @@ impl App {
                 self.mixer_audience(viewers);
                 return Ok(());
             }
-            if viewers.controller != Some(id) { return Err("Only the controlling viewer can change session audio."); }
+            if !viewers.owns_control(id) { return Err("Only the controlling viewer can change session audio."); }
             let mixer = self.mixer.as_ref().ok_or("Session mixer is unavailable.")?;
             if !mixer.state.borrow().available { return Err("Session mixer is unavailable."); }
-            mixer.commands.try_send(Request::Command { viewer: id, epoch: viewers.control_epoch, command })
+            mixer.commands.try_send(Request::Command { viewer: viewers.participant_of(id).unwrap(), epoch: viewers.control_epoch, command })
                 .map_err(|_| "Session mixer is busy or disconnected. Try again.")
         })();
         if let Err(error) = result {
@@ -63,7 +63,7 @@ impl App {
 
 pub(crate) async fn errors(app: Arc<App>, mut errors: mpsc::Receiver<(u64, String)>) {
     while let Some((viewer, error)) = errors.recv().await {
-        if let Some(session) = app.viewers.lock().unwrap().sessions.get(&viewer) {
+        for session in app.viewers.lock().unwrap().sessions.values().filter(|s| s.participant == viewer) {
             let _ = session.events.try_send(protocol::mixer_error(&error));
         }
     }

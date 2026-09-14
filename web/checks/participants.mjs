@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, open, readFile, rm } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
 import { createToken } from './token-fixture.mjs';
-import { AUTH, HELLO, SESSION, ROSTER, ROLE, POINTER_POSITION, CURSOR, VIDEO, TAKE_CONTROL, HANDOFF, REQUEST_CONTROL, CANCEL_CONTROL, APPROVE_CONTROL, DECLINE_CONTROL, MOTION_ABS } from '../src/protocol.js';
+import { AUTH, HELLO, PARTICIPANT, SESSION, ROSTER, ROLE, POINTER_POSITION, CURSOR, VIDEO, TAKE_CONTROL, HANDOFF, REQUEST_CONTROL, CANCEL_CONTROL, APPROVE_CONTROL, DECLINE_CONTROL, MOTION_ABS } from '../src/protocol.js';
 
 const root = await mkdtemp('/tmp/elsewhere-participants-');
 await mkdir(root + '/runtime', { mode: 0o700 });
@@ -24,24 +24,26 @@ const send = (s, tag, values = []) => {
   values.forEach((v, i) => dv.setBigUint64(1 + i * 8, BigInt(v), true)); s.socket.send(b);
 };
 const own = s => s.roster?.sessions.find(member => member.id === s.id);
-const connect = async token => {
+const connect = async (token, participant, denied = false) => {
   const socket = new WebSocket(origin.replace('http', 'ws') + '/ws');
   socket.binaryType = 'arraybuffer';
   const s = { socket, positions: 0, frames: 0, closed: false };
   sockets.push(s);
   socket.onmessage = ({ data }) => {
     const b = new Uint8Array(data), dv = new DataView(data);
-    if (b[0] === SESSION) s.id = dv.getBigUint64(1, true).toString();
-    if (b[0] === ROLE) s.role = b[1];
+    if (b[0] === SESSION) s.connectionId = dv.getBigUint64(1, true).toString();
+    if (b[0] === PARTICIPANT) { const p = JSON.parse(new TextDecoder().decode(b.subarray(1))); s.id = p.id; s.secret = p.secret; }
+    if (b[0] === ROLE) { s.role = b[1]; s.drives = !!(b[2] & 8); }
     if (b[0] === ROSTER) s.roster = JSON.parse(new TextDecoder().decode(b.subarray(1)));
     if (b[0] === CURSOR) s.cursor = b;
     if (b[0] === POINTER_POSITION) { s.pointer = [1, 9, 17, 25].map(i => dv.getFloat64(i, true)); s.positions++; }
     if (b[0] === VIDEO) s.frames++;
   };
-  socket.onclose = () => { s.closed = true; };
+  socket.onclose = event => { s.closed = true; s.closeCode = event.code; };
   await wait('socket', () => socket.readyState === WebSocket.OPEN);
   socket.send(new Uint8Array([AUTH, ...new TextEncoder().encode(token)]));
-  socket.send(new Uint8Array([HELLO, ...new TextEncoder().encode(JSON.stringify({ codecs: ['vp8'] }))]));
+  socket.send(new Uint8Array([HELLO, ...new TextEncoder().encode(JSON.stringify({ codecs: ['vp8'], ...(participant && { participant }) }))]));
+  if (denied) { await wait('association denied', () => s.closed); assert.equal(s.closeCode, 4004); return s; }
   await wait('roster', () => !!own(s));
   return s;
 };
@@ -50,15 +52,57 @@ try {
   await wait('server', async () => { try { return (await fetch(origin)).ok; } catch { return false; } });
   admin = await createToken(root);
   const ordinary = await create(['desktop.view', 'desktop.control']);
-  const a = await connect(admin), b = await connect(ordinary.token);
+  let a = await connect(admin);
+  const b = await connect(ordinary.token);
   const eligible = await create(['desktop.view', 'desktop.control']);
   const c = await connect(eligible.token);
   const readonly = await create(['desktop.view']);
   const reader = await connect(readonly.token);
-  await wait('four members', () => sockets.every(s => s.roster.sessions.length === 4));
-  assert(sockets.every(s => s.roster.controller === a.id));
+  await wait('four members', () => sockets.filter(s => !s.closed).every(s => s.roster.sessions.length === 4));
+  assert(sockets.filter(s => !s.closed).every(s => s.roster.controller === a.id));
   assert.equal(own(reader).can_control, false);
   for (const member of a.roster.sessions) assert.deepEqual(Object.keys(member).sort(), ['can_control', 'id', 'label', 'request', 'result']);
+  send(b, REQUEST_CONTROL);
+  await wait('pending before PiP', () => !!own(b).request);
+  const pending = own(b).request, epoch = a.roster.epoch, participant = a.id, secret = a.secret;
+  const popup = await connect(admin, { secret, pip: true });
+  await wait('shared active PiP', () => popup.drives && !a.drives && a.roster.sessions.length === 4);
+  assert.equal(popup.id, participant);
+  assert.equal(a.role, 2); assert.equal(popup.role, 2);
+  assert.equal(a.roster.epoch, epoch); assert.deepEqual(own(b).request, pending);
+  send(a, REQUEST_CONTROL); send(popup, REQUEST_CONTROL);
+  await delay(50); assert.equal(own(a).request, null);
+  a.socket.close();
+  await wait('main connection lost', () => a.closed && popup.roster.sessions.length === 4);
+  assert.equal(popup.roster.controller, participant); assert.deepEqual(own(b).request, pending);
+  a = await connect(admin, { secret, resume: true });
+  assert.equal(a.id, participant);
+  await wait('resumed main preserves PiP source', () => popup.drives && !a.drives);
+  decide(a, b, true, pending); decide(popup, b, true, pending);
+  await wait('one simultaneous approval', () => b.roster.controller === b.id && a.roster.controller === b.id);
+  assert.equal(BigInt(b.roster.epoch), BigInt(epoch) + 1n);
+  popup.socket.close(); await wait('PiP closure after transfer', () => popup.closed);
+  assert.equal(b.roster.controller, b.id);
+  const observerPopup = await connect(admin, { secret, pip: true });
+  assert.equal(observerPopup.role, 1); assert.equal(observerPopup.roster.controller, b.id);
+  send(a, REQUEST_CONTROL); await wait('shared observing request', () => !!own(observerPopup).request);
+  const sharedRequest = own(observerPopup).request;
+  send(observerPopup, REQUEST_CONTROL); await delay(50); assert.deepEqual(own(a).request, sharedRequest);
+  send(observerPopup, CANCEL_CONTROL, [sharedRequest.id, sharedRequest.epoch]);
+  await wait('shared cancellation', () => own(a).result === 'cancelled');
+  send(b, HANDOFF, [participant]); await wait('participant owns again', () => observerPopup.drives);
+  send(c, REQUEST_CONTROL); await wait('request to shared controller', () => !!own(c).request);
+  decide(observerPopup, c, false);
+  await wait('PiP decline shared with main', () => own(c).result === 'declined' && a.roster.sessions.find(s => s.id === c.id)?.result === 'declined');
+  send(b, REQUEST_CONTROL); await wait('pending before popup close', () => !!own(b).request);
+  const preserved = own(b).request, tenure = b.roster.epoch;
+  observerPopup.socket.close();
+  await wait('surviving main input', () => observerPopup.closed && a.drives);
+  assert.equal(a.roster.epoch, tenure); assert.deepEqual(own(b).request, preserved);
+  send(b, CANCEL_CONTROL, [preserved.id, preserved.epoch]); await wait('reset shared check', () => !own(b).request);
+  await connect(admin, { secret: '0'.repeat(64), pip: true }, true);
+  await connect(ordinary.token, { secret, pip: true }, true);
+  console.log('Shared PiP ownership, pending deadlines, simultaneous approval, sibling loss/resume, transfer preservation and association authorization passed');
   send(reader, REQUEST_CONTROL); send(reader, TAKE_CONTROL); send(b, TAKE_CONTROL);
   await delay(150);
   assert.equal(a.roster.controller, a.id); assert.equal(own(reader).request, null);
@@ -73,7 +117,7 @@ try {
   decide(a, b, false); await wait('decline', () => own(b).result === 'declined');
   send(b, REQUEST_CONTROL); await wait('third request', () => !!own(b).request);
   const approved = own(b).request;
-  decide(a, b); await wait('approval', () => sockets.every(s => s.roster.controller === b.id));
+  decide(a, b); await wait('approval', () => sockets.filter(s => !s.closed).every(s => s.roster.controller === b.id));
   assert.equal(a.role, 1); assert.equal(b.role, 2); assert.equal(own(b).result, 'approved');
   send(b, HANDOFF, [a.id]); await wait('direct handoff', () => b.roster.controller === a.id);
   decide(a, b, true, approved); await delay(100); assert.equal(a.roster.controller, a.id);

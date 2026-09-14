@@ -435,9 +435,9 @@ follow one ordered stream.
 
 ## Viewers
 
-`ws.rs`. `Viewers` holds every session (`ViewerSession`: which token, its event and audio senders, its
-last size, and the `StreamControl` of its own encoder) and the shared state they all see (cursor,
-pointer lock, window list, clipboard text, the output as the controller last sized it). A session
+`ws.rs`. `Viewers` holds every session (`ViewerSession`: its token, participant, event and audio senders,
+last size, and the `StreamControl` of its own encoder), participant ownership and requests, and the shared
+state they all see (cursor, pointer lock, window list, clipboard text, and output size). A session
 authenticates and receives its token grants over the socket. The viewer uses these grants for feature
 access without an HTTP permission preflight. It sends `Hello` to pick its codec, gets an encoder from
 the server's `SinkFactory`
@@ -454,7 +454,7 @@ session's peer connection over one UDP socket per local address, and paces frame
 up to 16 KiB plus a nine-byte header using each viewer's stream target; `Hub::pressure` reports active channels and
 their drops or native send-buffer blockage; window sessions use the same
 hub under keys with the top bit set); a channel that closes, a `{"close": true}`, or the session's end
-drops the peer. The controller's `Mic` packets
+drops the peer. The controlling participant's selected capture connection's `Mic` packets
 go to `Config::mic`, the channel `elsewhere-stream`'s `audio_sink` plays into the microphone sink (`elsewhere`
 creates the sink and the remapped source next to the audio sink), and its `Cam` frames to `Config::cam`,
 which `video_sink` decodes (VP8) and scales to 720p YUYV for the `--webcam` loopback device (which keeps
@@ -463,15 +463,19 @@ keyframe (a VP8 frame tag's low bit is clear). A failed media worker closes its 
 which withdraws the feature and tells the controller; the `Role` message's second byte tells
 sessions which of the two exist.
 
-The controller's `Resize` becomes `Command::Resize` and re-fits everyone else (`retarget`); another
+The active input connection's `Resize` becomes `Command::Resize` and re-fits everyone else (`retarget`); another
 session's `Resize` only sets its own encoder's size (`fit`: the output's aspect within its window, never
 enlarged, even-sized). `set_size` on a `FfmpegSink` changes the worker's conversion target, scaling on
 the GPU to NV12 or on the CPU to YUV420P. The stream's `scale` becomes `output scale × target / output width`, so
-the page's logical mapping still holds; the controller's encoder has no target and takes the output as
-it is, so a resize reopens its encoder once, through the compositor. An approved request, an owner-initiated handoff, a claim of an unowned desktop, or the controller
-leaving (the oldest remaining desktop.control session inherits), goes through `set_controller`: release
-all input and the pointer lock, re-fit, resize the output to the new controller's size, tell both
-sessions their `Role`. An encoder that fails is rebuilt by the next full frame; one that fails again
+the page's logical mapping still holds; the active connection's encoder has no target and takes the output
+as it is, so a resize reopens its encoder once, through the compositor. An approved request, an
+owner-initiated handoff, a claim of an unowned desktop, or the controlling participant losing its final
+connection updates ownership through `set_controller`. The oldest remaining eligible participant
+inherits control after final connection loss. Ownership changes advance the epoch and end pending
+requests. A different active connection releases the old connection's held input and pointer lock,
+re-fits the streams, and sizes automatic output to the new connection. A sibling becoming active
+preserves ownership, the epoch and pending requests. Every connection receives its updated `Role`.
+An encoder that fails is rebuilt by the next full frame; one that fails again
 before producing a stream ends the session, and the page reconnects. Revocation cancels the affected token’s sessions, which close with `4001`.
 
 ## Window streams
@@ -519,18 +523,26 @@ status and Return. Desktop controllers and window viewers with control permissio
 on-screen keyboard, including its device-IME field.
 Fullscreen remains available in the normal viewer.
 
-Desktop control transfers only from its current owner to a live desktop.control connection, using the
-server's conditional `Handoff` message. A participant opening PiP keeps watching until explicitly
-requesting and receiving approval. Closing PiP conditionally returns control to the opener; a third party's intervening
-control is preserved. The opener and PiP both expose the participant request flow. If the opener is
-disconnected when PiP closes, the server uses its normal oldest-session election. Only the controller sizes the desktop; other presentations scale their stream to
-their actual viewport and DPR. Each presentation has its own decoder.
+The opener and desktop PiP share one participant, authorized by a server-issued secret and the
+opener's authenticated token. A shared token alone does not associate independent viewers.
+Both presentations retain the participant's controller role and can request, approve or decline
+control. Opening or closing PiP preserves pending requests and their deadlines. A transfer to
+another participant applies to both presentations, including after reconnection.
 
-Desktop PiP owns playback while it is open. The opener stops its playback graph and restores it on
-return. Losing control stops microphone and camera capture; PiP never starts either automatically.
-This playback ownership covers the opener/PiP pair; unrelated viewers still have their own audio.
+PiP supplies desktop input and sizing while connected. The opener keeps rendering its desktop
+beneath a dimmed desktop-only overlay with “Desktop is open in picture-in-picture.” and a
+Return to Viewer button. The overlay blocks remote desktop input and leaves the toolbar, sidebar
+and other controls usable. Returning or closing PiP restores the opener's desktop input only if
+the participant still owns control. A surviving sibling supplies input after a connection is lost;
+losing the participant's final connection follows the normal controller election.
+
+Desktop PiP owns playback while connected. The opener stops its playback graph and restores it on
+return. Microphone and camera capture use the main connection while it survives, otherwise a
+sibling. Opening PiP does not stop main-viewer capture. Losing participant ownership stops capture,
+and neither presentation starts capture automatically. Unrelated viewers retain their own playback.
 Window streams keep their existing video-only behavior. Reconnecting stays inside the existing PiP;
-closing it never schedules another browser window. Opener navigation, authentication failure and
+after both connections drop, PiP waits for the opener's participant before rejoining. Closing it
+never schedules another browser window. Opener navigation, authentication failure and
 remote window closure dispose owned content.
 
 The action requires a secure context and a browser exposing Document PiP, and opens directly from a
@@ -608,7 +620,7 @@ read it with `useSyncExternalStore` and send actions back through the engine.
   codec and size, the toggles, fullscreen, the power menu),
   the stage (`Stage.jsx`: the canvas, centred and fitted to it, plus the overlays and the status banners), the
   side panel (`Sidebar.jsx`) and a status bar (`StatusBar.jsx`: fps, bandwidth, input-to-paint latency,
-  loss counters, clipboard, pointer lock, audio). The controller's stage sizes the desktop's output; the
+  loss counters, clipboard, pointer lock, audio). The controlling participant's active stage sizes the desktop's output; the
   other sessions get it fitted into theirs. Fullscreen
   is requested on the viewer root. Controls start hidden and can be shown inside fullscreen. Toggles are remembered in
   `localStorage`. A popup (`?window=ID`) shows the window's title in the top bar, no side panel, and the

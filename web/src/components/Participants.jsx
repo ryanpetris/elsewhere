@@ -5,13 +5,13 @@ import { Popover } from './SearchMenu.jsx';
 
 export function Participants({ viewer, menu, onMenu }) {
   const roster = useStore(viewer.store, s => s.roster);
-  const sessionId = useStore(viewer.store, s => s.sessionId);
+  const participantId = useStore(viewer.store, s => s.participantId);
   const takeControl = useStore(viewer.store, s => s.permissions.includes('desktop.take_control'));
   const status = useStore(viewer.store, s => s.status);
   const open = menu === 'participants';
   const trigger = useRef(null), panel = useRef(null);
-  const own = roster?.sessions.find(s => s.id === String(sessionId));
-  const controlling = roster?.controller === String(sessionId);
+  const own = roster?.sessions.find(s => s.id === participantId);
+  const controlling = roster?.controller === participantId;
   const pending = roster?.sessions.filter(s => s.request).length ?? 0;
   useEffect(() => { if (status !== 'connected' && open) onMenu(null); }, [status]);
   useLayoutEffect(() => {
@@ -50,7 +50,7 @@ export function Participants({ viewer, menu, onMenu }) {
       <h2 className="mb-2 text-sm font-semibold">Participants</h2>
       <ul className="min-h-0 overflow-y-auto">
         {roster.sessions.map(member => <li key={member.id} className="border-t border-line py-2 text-xs">
-          <span className="font-medium">{member.label}{member.id === String(sessionId) ? ' · You' : ''}</span>
+          <span className="font-medium">{member.label}{member.id === participantId ? ' · You' : ''}</span>
           <span className="ml-2 text-ink-3">{member.id === roster.controller ? 'Controlling' : member.can_control ? 'Can control' : 'View only'}</span>
           {member.request && <div className="mt-2 flex items-center gap-2">
             <span role="status">Control requested</span>

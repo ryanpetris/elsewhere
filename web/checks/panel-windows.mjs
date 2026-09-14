@@ -217,7 +217,15 @@ try {
     }
     audio = await open('Audio Visualizer', 'Pop Out Visualizer');
     await page.evaluate(() => elsewhere.setPlaybackEnabled(false));
-    await until(() => audio.isClosed(), 'desktop PiP playback handoff closes visualizer popup');
+    await until(async () => await edges() === 1, 'PiP playback detaches visualizer analysis');
+    assert.equal(audio.isClosed(), false, 'visualizer window stays open during PiP playback');
+    await page.evaluate(() => {
+      elsewhere.setPlaybackEnabled(true);
+      elsewhere.store.set({ playback: { context: playback.context, source: playback.source } });
+    });
+    await until(async () => await edges() === 2, 'returning playback resumes the open visualizer');
+    await audio.close();
+    await until(async () => await edges() === 1, 'visualizer closure detaches resumed analysis');
     // An isolated teardown failure must not prevent the other window from closing.
     await page.evaluate(() => {
       elsewhere.store.set({ playback: { context: playback.context, source: playback.source } });
@@ -248,7 +256,7 @@ try {
     await orphan.goto(`${base}?panel=mixer`);
     await orphan.getByText('Open this panel from the main Elsewhere viewer.').waitFor();
     assert.equal(await orphan.evaluate(() => typeof window.elsewhere), 'undefined');
-    console.log('panel popouts: shared connection/audio, URL prefix, controls, permissions, visibility, sizing, fullscreen, preferences, reconnect, blocked popup, repeated cleanup, PiP handoff and parent navigation passed');
+    console.log('panel popouts: shared connection/audio, URL prefix, controls, permissions, visibility, sizing, fullscreen, preferences, reconnect, blocked popup, repeated cleanup, PiP playback and parent navigation passed');
   }
   assert.equal(errors.length, 0, errors.join('\n'));
 } finally {

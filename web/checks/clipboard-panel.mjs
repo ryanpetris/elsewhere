@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
-import { CONFIG, ROLE, CLIPBOARD, KEY, INPUT } from '../src/protocol.js';
+import { CONFIG, ROLE, WINDOWS, CLIPBOARD, KEY, INPUT } from '../src/protocol.js';
 
 const root = await mkdtemp('/tmp/elsewhere-clipboard-panel-');
 let serial = 0, operation = 0, clipboard, queued = [], previewReads = 0, fileReads = 0, failWrite = false, delayPreview, releasePreview;
@@ -81,10 +81,11 @@ try {
   const connect = async (token = 'control', windowMode = false) => {
     await page.goto(`http://127.0.0.1:${server.address().port}/?check=${serial}&window=${windowMode ? '1' : ''}#token=${token}`);
     await page.waitForFunction(() => !!window.elsewhere?.store && !!window.socket);
-    await page.evaluate(({ ROLE, CONFIG, token }) => {
-      packet([ROLE, token === 'viewer' ? 0 : 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    await page.evaluate(({ ROLE, CONFIG, WINDOWS, token, windowMode }) => {
+      packet([ROLE, token === 'viewer' ? 0 : 2, token === 'viewer' ? 0 : 8, 0, 0, 0, 0, 0, 0, 0, 0]);
+      if (windowMode) packet([WINDOWS, ...new TextEncoder().encode(JSON.stringify([{ id: 1, minimized: false }]))]);
       packet([CONFIG, ...new TextEncoder().encode(JSON.stringify({ streamId: 1, codec: 'vp8', width: 1280, height: 720, scale: 1 }))]);
-    }, { ROLE, CONFIG, token });
+    }, { ROLE, CONFIG, WINDOWS, token, windowMode });
     await page.waitForFunction(() => elsewhere.store.get().clipboardState.status === 'ready');
   };
   const notify = () => page.evaluate(({ CLIPBOARD, full, restricted }) => {
@@ -249,7 +250,7 @@ try {
   await page.evaluate(ROLE => packet([ROLE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ROLE);
   assert(await typeButton.isDisabled(), 'input role revocation disables typing preserved drafts');
   assert.equal(await panel.getByRole('button', { name: 'Replace with Draft' }).isDisabled(), false, 'clipboard grant does not depend on input role');
-  await page.evaluate(ROLE => packet([ROLE, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ROLE);
+  await page.evaluate(ROLE => packet([ROLE, 2, 8, 0, 0, 0, 0, 0, 0, 0, 0]), ROLE);
   await page.waitForFunction(() => elsewhere.store.get().clipboardState.text === 'after reconnect');
   await panel.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.mouse.click(1, 1);

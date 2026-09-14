@@ -404,10 +404,12 @@ opens the whole desktop; a window row's action opens that application. One PiP w
 opener, with a compact title/status bar and Return to Viewer. Choosing another target replaces its
 content. Ordinary popups remain available.
 
-When you control the desktop, control and its dimensions follow the PiP viewport. Returning, or taking
-control in the main viewer, returns that presentation to the main window. Another viewer's control is
-not displaced just by opening or closing PiP. Desktop playback moves to PiP; microphone and camera
-capture stop on handoff and must be restarted explicitly in the main viewer. Window PiP has no audio.
+The main viewer and desktop PiP share one participant and its control requests. While that participant
+controls the desktop, PiP supplies input and dimensions. The main desktop stays visible beneath a
+dimmed overlay; Return to Viewer or closing PiP restores it. Toolbar and sidebar controls remain usable.
+Another participant's control is preserved when PiP opens, closes or reconnects. Desktop playback moves
+to PiP; microphone and camera capture stay with the main connection while it survives. Capture stops
+when the participant loses control and must be restarted explicitly. Window PiP has no audio.
 PiP cannot use fullscreen keyboard capture. Use the on-screen keyboard or its IME field for desktop and window input, and
 return to the normal viewer for copied-file downloads or capture controls. Browser checks and known
 interaction limits are recorded in [the desktop UI notes](docs/desktop-api.md#document-picture-in-picture).

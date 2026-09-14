@@ -1,5 +1,5 @@
-//! WebSocket sessions: the viewers of the desktop (any number, each with its own encoder; one of them,
-//! the controller, drives the pointer and keyboard and sizes the output) and the per-window streams.
+//! WebSocket sessions: desktop viewers, each with its own encoder, and per-window streams.
+//! The controlling participant's active connection supplies desktop input and sizing.
 
 use std::{
     sync::{Arc, atomic::{AtomicU64, Ordering}},
@@ -188,13 +188,13 @@ pub(super) async fn authenticate(socket: &mut WebSocket, app: &App) -> Option<Ke
 }
 
 /// Hello, which picks the codec, before the encoder exists; five seconds of silence ends the socket.
-async fn hello(socket: &mut WebSocket, key: &Key) -> Option<(Vec<Codec>, Preset, EncodingEffort)> {
+async fn hello(socket: &mut WebSocket, key: &Key) -> Option<(Vec<Codec>, Preset, EncodingEffort, Option<protocol::JoinParticipant>)> {
     tokio::select! { biased; _ = key.ended() => None, result = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match socket.recv().await? {
                 Ok(Message::Binary(b)) => {
-                    if let Some(ClientMsg::Hello { codecs, quality, effort }) = protocol::decode(&b) {
-                        return Some((codecs, quality, effort));
+                    if let Some(ClientMsg::Hello { codecs, quality, effort, participant }) = protocol::decode(&b) {
+                        return Some((codecs, quality, effort, participant));
                     }
                 }
                 Ok(Message::Close(_)) | Err(_) => return None,
@@ -225,7 +225,7 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
     if !key.live() { return close(&mut socket, UNAUTHORIZED, "token revoked or expired").await; }
     if !key.metadata.permissions.contains(&P::DesktopView) { return close(&mut socket, FORBIDDEN, "This token does not allow desktop viewing").await; }
     if !send(&mut socket, &key, protocol::permissions(&key.metadata.permissions)).await { return; }
-    let Some((preferences, preset, effort)) = hello(&mut socket, &key).await else { return };
+    let Some((preferences, preset, effort, participant)) = hello(&mut socket, &key).await else { return };
     let (tx, mut rx) = mpsc::channel::<StreamMsg>(2);
     let (sink, control) = match (app.sinks)(tx) {
         Ok(x) => x,
@@ -242,29 +242,37 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
     let (etx, mut erx) = mpsc::channel::<Bytes>(32);
     let (atx, mut arx) = mpsc::channel::<Bytes>(4);
     let notifications = protocol::notifications(&app.notifications()); // its own lock: never inside the viewers'
-    let (id, replay, mut roster, mut cursor, mut pointer) = {
+    let registration = (|| {
         // registered under the lock a revocation clears, so a session that came in with an old token is
         // either cleared by it or refused here
         let mut v = app.viewers.lock().unwrap();
         if !key.live() {
-            drop(v);
-            return close(&mut socket, UNAUTHORIZED, "token revoked or expired").await;
+            return Err((UNAUTHORIZED, "token revoked or expired"));
         }
         let id = v.next_id;
         v.next_id += 1;
-        v.sessions.insert(id, ViewerSession { key: key.clone(), events: etx.clone(), audio: atx, audio_seq: 0, size: None, control, selection, quality, preset, cam_wait_key: false, mixer_subscribed: false, request: None, request_result: None });
-        if key.has(P::DesktopControl) && v.controller.is_none() {
-            app.set_controller(&mut v, Some(id));
-        }
-        app.mixer_audience(&v);
-        let replay: Vec<Bytes> = [Some(protocol::session(id)), key.has(P::AudioListen).then(|| protocol::mixer_state(&app.mixer_state())), v.cursor.borrow().clone(), v.windows.clone(), Some(protocol::workspaces(&v.workspaces)), v.locked.then(|| Bytes::from(vec![protocol::POINTER_LOCK, 1])), Some(protocol::role(v.role_of(id), app.features(&key), v.control_epoch)), Some(notifications.clone())].into_iter().flatten().collect();
+        let previous_input = v.active_session();
+        let participant_id = match v.register_participant(id, &key, participant.as_ref()) {
+            Ok(id) => id,
+            Err(reason) => return Err((FORBIDDEN, reason)),
+        };
+        let pip = participant.as_ref().is_some_and(|p| p.pip);
+        v.sessions.insert(id, ViewerSession { key: key.clone(), participant: participant_id, pip, events: etx.clone(), audio: atx, audio_seq: 0, size: None, control, selection, quality, preset, cam_wait_key: false, mixer_subscribed: false });
+        if pip { v.participants.get_mut(&participant_id).unwrap().active = id; }
+        let controller = v.controller.or_else(|| key.has(P::DesktopControl).then_some(participant_id));
+        app.update_controller(&mut v, controller, previous_input);
+        let replay: Vec<Bytes> = [Some(protocol::session(id)), Some(protocol::participant(participant_id, &v.participants[&participant_id].secret)), key.has(P::AudioListen).then(|| protocol::mixer_state(&app.mixer_state())), v.cursor.borrow().clone(), v.windows.clone(), Some(protocol::workspaces(&v.workspaces)), v.locked.then(|| Bytes::from(vec![protocol::POINTER_LOCK, 1])), Some(app.viewer_role(&v, id)), Some(notifications.clone())].into_iter().flatten().collect();
         v.publish_roster();
         let mut roster = v.roster.subscribe();
         roster.mark_changed();
         let cursor = v.cursor.subscribe();
         let mut pointer = v.pointer.subscribe();
         pointer.mark_changed();
-        (id, replay, roster, cursor, pointer)
+        Ok((id, replay, roster, cursor, pointer))
+    })();
+    let (id, replay, mut roster, mut cursor, mut pointer) = match registration {
+        Ok(session) => session,
+        Err((code, reason)) => return close(&mut socket, code, reason).await,
     };
     for msg in replay {
         let _ = send(&mut socket, &key, msg).await;
@@ -300,8 +308,8 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
                 if changed.is_err() { break None; }
                 let (message, role) = {
                     let v = app.viewers.lock().unwrap();
-                    let Some(session) = v.sessions.get(&id) else { break Some((UNAUTHORIZED, "token revoked or expired")); };
-                    (roster.borrow_and_update().clone(), protocol::role(v.role_of(id), app.features(&session.key), v.control_epoch))
+                    let Some(_) = v.sessions.get(&id) else { break Some((UNAUTHORIZED, "token revoked or expired")); };
+                    (roster.borrow_and_update().clone(), app.viewer_role(&v, id))
                 };
                 if !send(&mut socket, &key, role).await || !send(&mut socket, &key, message).await { break None; }
             },
@@ -435,14 +443,7 @@ pub async fn session(mut socket: WebSocket, app: Arc<App>) {
     };
     {
         let mut v = app.viewers.lock().unwrap();
-        v.sessions.remove(&id);
-        if v.controller == Some(id) {
-            // the oldest remaining control-permitted session takes over
-            let next = v.sessions.iter().filter(|(_, s)| s.key.has(P::DesktopControl)).map(|(id, _)| *id).min();
-            app.set_controller(&mut v, next);
-        }
-        app.mixer_audience(&v);
-        v.publish_roster();
+        app.remove_viewers(&mut v, &[id]);
     }
     app.release_input(&key, id);
     let _ = app.commands.send(Command::ViewerStream { key: id, sink: None });
@@ -467,7 +468,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
     if !app.viewers.lock().unwrap().window_list.iter().any(|w| w.id == id) {
         return close(&mut socket, GONE, "no such window").await;
     }
-    let Some((preferences, mut preset, effort)) = hello(&mut socket, &key).await else { return };
+    let Some((preferences, mut preset, effort, _participant)) = hello(&mut socket, &key).await else { return };
     let (tx, mut rx) = mpsc::channel::<StreamMsg>(2);
     let (sink, control) = match (app.sinks)(tx) {
         Ok(x) => x,
@@ -694,7 +695,7 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
 
 impl Viewers {
     pub(crate) fn role_of(&self, id: u64) -> Role {
-        if self.controller == Some(id) {
+        if self.owns_control(id) {
             Role::Controller
         } else if self.sessions.get(&id).is_some_and(|s| s.key.has(P::DesktopControl)) {
             Role::Participant
@@ -795,8 +796,8 @@ impl App {
         Some(s.selection.state(self, s.quality, s.preset, s.control.as_ref()))
     }
 
-    /// A message from a viewer session: its size always counts (the output's if it controls, its own
-    /// stream's scale otherwise); input only from the controller. Window actions use their own grants;
+    /// A viewer's size sets the output when it supplies desktop input, or its own stream's scale
+    /// otherwise. Only the active connection sends desktop input. Window actions use their own grants;
     /// clipboard writes require clipboard.write independently of control.
     fn viewer_message(&self, id: u64, key: &Key, m: ClientMsg) {
         let Ok(_admission) = key.admit() else { return; };
@@ -804,7 +805,8 @@ impl App {
         if !v.sessions.contains_key(&id) {
             return; // a revocation cleared it under this lock; the session is about to end
         }
-        let controls = v.controller == Some(id);
+        let controls = v.owns_control(id);
+        let drives = v.drives(id);
         let cmd = match m {
             // dpr bounds keep a bogus value from turning into a giant dmabuf allocation
             ClientMsg::Resize { css_w, css_h, dpr } if (0.5..=8.0).contains(&dpr) => {
@@ -812,20 +814,21 @@ impl App {
                 if let Some(s) = v.sessions.get_mut(&id) {
                     s.size = Some(geo);
                 }
-                if controls && matches!(v.display.resolution, crate::display::Resolution::Auto) {
+                if drives && matches!(v.display.resolution, crate::display::Resolution::Auto) {
                     v.output = geo;
                     self.retarget(&v);
                     Some(Command::Resize(geo))
                 } else {
                     if let Some(s) = v.sessions.get(&id) {
-                        s.control.set_size((!controls).then(|| fit(&v.output, &geo)));
+                        s.control.set_size((!drives).then(|| fit(&v.output, &geo)));
                     }
                     None
                 }
             }
             ClientMsg::TakeControl => {
                 if key.has(P::DesktopControl) && (v.controller.is_none() || key.has(P::DesktopTakeControl)) {
-                    self.set_controller(&mut v, Some(id));
+                    let participant = v.participant_of(id);
+                    self.set_controller(&mut v, participant);
                 } else if !controls {
                     let _ = v.sessions[&id].events.try_send(protocol::notice(if key.has(P::DesktopControl) { "Request control from the current controller." } else { "This token does not allow desktop control." }));
                 }
@@ -835,7 +838,7 @@ impl App {
             ClientMsg::CancelControl { request, epoch } => { self.cancel_control(&mut v, id, request, epoch); None }
             ClientMsg::DecideControl { target, request, epoch, approve } => { self.decide_control(&mut v, id, target, request, epoch, approve); None }
             ClientMsg::Handoff(target) => {
-                if controls && key.has(P::DesktopControl) && v.sessions.get(&target).is_some_and(|s| s.key.has(P::DesktopControl)) {
+                if controls && key.has(P::DesktopControl) && v.can_control(target) {
                     self.set_controller(&mut v, Some(target));
                 }
                 None
@@ -852,16 +855,16 @@ impl App {
             }
             ClientMsg::Control(m) if key.has(auth::control_permission(&m)) => self.command_for(m).ok(),
             ClientMsg::SetClipboard(text) if key.has(P::ClipboardWrite) => Some(Command::SetClipboard { mime: api::TEXT.into(), data: text.into(), operation: None }),
-            ClientMsg::Drag(d) if controls && key.has(P::DragdropUpload) && key.has(P::FilesUpload) => Some(self.drag_command(key, d, &v)),
-            ClientMsg::Input(m) if controls && key.has(P::DesktopControl) => Some(Command::Input(m)),
+            ClientMsg::Drag(d) if drives && key.has(P::DragdropUpload) && key.has(P::FilesUpload) => Some(self.drag_command(key, d, &v)),
+            ClientMsg::Input(m) if drives && key.has(P::DesktopControl) => Some(Command::Input(m)),
             ClientMsg::Mixer(command) if key.has(P::AudioListen) => { self.mixer_message(&mut v, id, command); None },
-            ClientMsg::Mic(packet) if controls && key.has(P::MicrophoneSend) => {
+            ClientMsg::Mic(packet) if v.media_session() == Some(id) && key.has(P::MicrophoneSend) => {
                 if let Some(mic) = &self.mic {
                     let _ = mic.try_send(packet); // a full queue drops the packet: the sink is behind anyway
                 }
                 None
             }
-            ClientMsg::Cam(frame) if controls && key.has(P::CameraSend) => {
+            ClientMsg::Cam(frame) if v.media_session() == Some(id) && key.has(P::CameraSend) => {
                 // a VP8 frame tag's low bit is clear on a keyframe; after a drop only one of those makes sense
                 let key = frame.first().is_some_and(|b| b & 1 == 0);
                 if let (Some(cam), Some(s)) = (&self.cam, v.sessions.get_mut(&id))
@@ -881,7 +884,7 @@ impl App {
                 }
                 None
             }
-            m if controls && key.has(P::DesktopControl) => input_command(m),
+            m if drives && key.has(P::DesktopControl) => input_command(m),
             _ => None,
         };
         // sent under the lock: a handover's ReleaseAllInput then follows everything the old controller got in
@@ -890,43 +893,49 @@ impl App {
         }
     }
 
-    /// Hand control to `next` (none: nobody drives). Unless fixed, the desktop takes the new
-    /// controller's size. Every stream is re-fitted, and the two sessions learn their roles.
+    /// Participant ownership changes end requests; changing its desktop connection preserves them.
     pub(crate) fn set_controller(&self, v: &mut Viewers, next: Option<u64>) {
-        let old = v.controller;
-        if old == next {
-            return;
+        self.update_controller(v, next, v.active_session());
+    }
+
+    pub(crate) fn update_controller(&self, v: &mut Viewers, next: Option<u64>, previous_input: Option<u64>) {
+        if v.controller != next {
+            v.end_requests();
+            v.controller = next;
+            v.control_epoch = v.control_epoch.wrapping_add(1);
         }
-        v.end_requests();
-        v.controller = next;
-        v.control_epoch = v.control_epoch.wrapping_add(1);
         self.mixer_audience(v);
-        // whatever the old controller held; the application asks for its pointer lock again on the new one's click
-        let mut owner = self.input_owner.lock().unwrap();
-        if owner.is_some_and(|(_, session)| Some(session) == old) {
-            *owner = None;
-            let _ = self.commands.send(Command::ReleaseAllInput);
-        }
-        drop(owner);
-        let _ = self.commands.send(Command::ReleasePointerLock);
-        // targets first, so the frame the compositor renders for the new size finds them in place
-        let size = next.filter(|_| matches!(v.display.resolution, crate::display::Resolution::Auto)).and_then(|id| v.sessions.get(&id)).and_then(|s| s.size);
-        if let Some(size) = size {
-            v.output = size;
-        }
-        self.retarget(v);
-        if let Some(size) = size {
-            let _ = self.commands.send(Command::Resize(size));
+        let next_input = v.active_session();
+        if previous_input != next_input {
+            let mut owner = self.input_owner.lock().unwrap();
+            if owner.is_some_and(|(_, session)| Some(session) == previous_input) {
+                *owner = None;
+                let _ = self.commands.send(Command::ReleaseAllInput);
+            }
+            drop(owner);
+            let _ = self.commands.send(Command::ReleasePointerLock);
+            let size = next_input.filter(|_| matches!(v.display.resolution, crate::display::Resolution::Auto))
+                .and_then(|id| v.sessions.get(&id)).and_then(|s| s.size);
+            if let Some(size) = size { v.output = size; }
+            self.retarget(v);
+            if let Some(size) = size { let _ = self.commands.send(Command::Resize(size)); }
         }
         v.publish_roster();
     }
 
-    /// Viewers' encoders scale the output to their windows. The controller receives native frames
+    fn viewer_role(&self, v: &Viewers, id: u64) -> Bytes {
+        let mut features = self.features(&v.sessions[&id].key);
+        if v.media_session() != Some(id) { features &= !(protocol::FEATURE_MIC | protocol::FEATURE_CAM); }
+        if v.drives(id) { features |= protocol::FEATURE_INPUT; }
+        protocol::role(v.role_of(id), features, v.control_epoch)
+    }
+
+    /// Viewers' encoders scale the output to their windows. The active connection receives native frames
     /// and the browser scales the canvas to fit, preserving exact logical input coordinates.
     pub(crate) fn retarget(&self, v: &Viewers) {
         for (id, s) in &v.sessions {
             if let Some(size) = s.size {
-                s.control.set_size((v.controller != Some(*id)).then(|| fit(&v.output, &size)));
+                s.control.set_size((v.active_session() != Some(*id)).then(|| fit(&v.output, &size)));
             }
         }
     }
@@ -1085,9 +1094,9 @@ pub(crate) mod tests {
     pub(crate) fn viewer(key: Key) -> ViewerSession {
         let control = Box::new(Control::default());
         let selection = CodecSelection::new(&[], &[], control.as_ref());
-        ViewerSession { key, events: mpsc::channel(8).0, audio: mpsc::channel(8).0, audio_seq: 0,
+        ViewerSession { key, participant: 0, pip: false, events: mpsc::channel(8).0, audio: mpsc::channel(8).0, audio_seq: 0,
             size: None, control, selection, quality: Preset::Medium.quality(1000), preset: Preset::Medium,
-            cam_wait_key: false, mixer_subscribed: false, request: None, request_result: None }
+            cam_wait_key: false, mixer_subscribed: false }
     }
 
     #[test]

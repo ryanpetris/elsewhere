@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
-import { CONFIG, ROLE, WINDOWS, WORKSPACES, POINTER_LOCK, POINTER_LOCK_LOST, KEY, BLUR } from '../src/protocol.js';
+import { PARTICIPANT, CONFIG, ROLE, WINDOWS, WORKSPACES, POINTER_LOCK, POINTER_LOCK_LOST, KEY, BLUR } from '../src/protocol.js';
 
 const root = await mkdtemp('/tmp/elsewhere-fullscreen-');
 const children = [];
@@ -34,6 +34,7 @@ window.WebSocket = class {
     this.onopen?.({});
     const send = (type, value) => this.onmessage?.({ data: new Uint8Array([type, ...new TextEncoder().encode(JSON.stringify(value))]).buffer });
     send(0x15, ["desktop.view", "desktop.control", "clipboard.read", "clipboard.write"]);
+    send(${PARTICIPANT}, { id: "1", secret: "a".repeat(64) });
     send(${WORKSPACES}, { active: 1, workspaces: [1, 2, 3, 4].map(id => ({ id, name: String(id) })) });
     send(${WINDOWS}, [{ id: 1, title: 'Capture fixture', app_id: 'fixture', workspace: 1, minimized: false, x: 0, y: 0, w: 1280, h: 720, popups: [] }]);
   }); }
@@ -112,7 +113,7 @@ try {
         await wait(() => { frame = popup.frames().find(f => f.parentFrame()); return !!frame; });
         await frame.waitForFunction(() => !!window.elsewhere?.store && !!window.socket);
         await frame.evaluate(({ ROLE, CONFIG }) => {
-          packet([ROLE, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+          packet([ROLE, 2, 8, 0, 0, 0, 0, 0, 0, 0, 0]);
           packet([CONFIG, ...new TextEncoder().encode(JSON.stringify({ streamId: 1, codec: 'vp8', width: 640, height: 480, scale: 1 }))]);
           elsewhere.setCaptureOnClick(true);
         }, { ROLE, CONFIG });
@@ -150,7 +151,7 @@ try {
       await navigate(`http://${hostname}:${server.address().port}/?check=${++visit}${windowMode ? '&window=1' : ''}#token=test`);
       await wait(() => js(() => !!window.elsewhere?.store && !!window.socket)).catch(async error => { console.error(await js(() => ({ errors: window.errors, text: document.body.innerText, viewer: !!window.elsewhere }))); throw error; });
       await js((ROLE, CONFIG) => {
-        packet([ROLE, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        packet([ROLE, 2, 8, 0, 0, 0, 0, 0, 0, 0, 0]);
         packet([CONFIG, ...new TextEncoder().encode(JSON.stringify({ streamId: 1, codec: 'vp8', width: 1280, height: 720, scale: 1 }))]);
         elsewhere.setCaptureOnClick(true);
       }, ROLE, CONFIG);
@@ -279,7 +280,7 @@ try {
       await wait(() => js(() => !document.pointerLockElement));
       if (name === 'firefox') await wait(() => js(() => !elsewhere.isFullscreen()));
       if (await js(() => elsewhere.isFullscreen())) await js(() => document.exitFullscreen());
-      await js(ROLE => packet([ROLE, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ROLE);
+      await js(ROLE => packet([ROLE, 2, 8, 0, 0, 0, 0, 0, 0, 0, 0]), ROLE);
       await enter();
       await js(() => socket.onclose({ code: 4003, reason: 'check' }));
       await wait(() => js(() => !document.pointerLockElement));

@@ -132,7 +132,8 @@ export function App({ viewer }) {
     { id: 'controls', label: hidden ? 'Show Controls' : 'Hide Controls', available: () => !PIP, run: () => viewer.setControlsHidden(!hidden), focus: 'canvas.stage' },
   ];
   const windowAvailable = useStore(viewer.store, s => s.windows.some(w => w.id === Number(WINDOW) && !w.minimized));
-  const canType = status === 'connected' && permissions.includes('desktop.control') && (windowMode ? windowAvailable : role === 'controller');
+  const desktopInput = useStore(viewer.store, s => s.desktopInput && !s.pipDesktop);
+  const canType = status === 'connected' && permissions.includes('desktop.control') && (windowMode ? windowAvailable : role === 'controller' && desktopInput);
   useEffect(() => { if (!canType) setKeyboard(false); }, [canType]);
   useEffect(() => viewer.setStatsOn(!PIP && sidebar && tab === 'stats' && !hidden), [viewer, sidebar, tab, hidden]);
 

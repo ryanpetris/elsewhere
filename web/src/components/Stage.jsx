@@ -8,6 +8,7 @@ import { hue, windowColor, codecName } from './ui.jsx';
 import { Notifications } from './Notifications.jsx';
 
 export function Stage({ viewer, windowMode, borders, elements, children }) {
+  const pipDesktop = useStore(viewer.store, s => !windowMode && s.pipDesktop);
   const observer = useStore(viewer.store, s => !windowMode && s.role !== 'controller');
   const releasedMouse = useStore(viewer.store, s => s.captureOnClick && !s.locked);
   const el = useRef(null);
@@ -32,7 +33,7 @@ export function Stage({ viewer, windowMode, borders, elements, children }) {
     return () => { ro.disconnect(); dpr.removeEventListener('change', onDpr); };
   }, [viewer]);
   return (
-    <div ref={el} className="viewer-stage relative flex min-w-0 flex-1 items-center justify-center overflow-hidden bg-black">
+    <div ref={el} className="viewer-stage relative isolate flex min-w-0 flex-1 items-center justify-center overflow-hidden bg-black">
       <canvas ref={viewer.attach} tabIndex={-1} className={`stage block outline-none ${windowMode ? '' : 'h-full w-full'} ${observer || !windowMode && releasedMouse ? 'cursor-default!' : ''}`} />
       {(borders || elements) && <Overlay viewer={viewer} size={size} borders={borders} elements={elements} />}
       {!windowMode && <ObserverPointer viewer={viewer} size={size} />}
@@ -40,6 +41,10 @@ export function Stage({ viewer, windowMode, borders, elements, children }) {
       <Notice viewer={viewer} />
       <Notifications viewer={viewer} />
       {children}
+      {pipDesktop && <div data-pip-desktop className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-black/60 text-center text-sm text-white">
+        <p>Desktop is open in picture-in-picture.</p>
+        <button type="button" className="btn btn-primary" onClick={() => viewer.pip.close()}>Return to Viewer</button>
+      </div>}
     </div>
   );
 }

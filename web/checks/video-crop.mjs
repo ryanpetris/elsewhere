@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import { chromium } from 'playwright-core';
 import { execFileSync } from 'node:child_process';
-import { CONFIG, VIDEO, ROLE, PERMISSIONS, MOTION_ABS, REQUEST_KEYFRAME, AUTH } from '../src/protocol.js';
+import { PARTICIPANT, CONFIG, VIDEO, ROLE, PERMISSIONS, MOTION_ABS, REQUEST_KEYFRAME, AUTH } from '../src/protocol.js';
 
 // Saturated padding surrounds four distinct valid edges. VP8 supplies real decoded frames.
 const ivf = execFileSync(
@@ -185,7 +185,8 @@ try {
       let seq = 0,
         streamId = 0;
       probe.configure = (width = 1346, height = 908, scale = 1) => {
-        socket.onmessage({ data: new Uint8Array([tags.ROLE, 2, 0, 1, 0, 0, 0, 0, 0, 0, 0]).buffer });
+        socket.onmessage({ data: new Uint8Array([tags.PARTICIPANT, ...new TextEncoder().encode(JSON.stringify({ id: "1", secret: "a".repeat(64) }))]).buffer });
+        socket.onmessage({ data: new Uint8Array([tags.ROLE, 2, 8, 1, 0, 0, 0, 0, 0, 0, 0]).buffer });
         socket.onmessage({
           data: new Uint8Array([
             tags.CONFIG,
@@ -206,7 +207,7 @@ try {
         socket.onmessage({ data: bytes.buffer });
       };
     },
-    { key, tags: { CONFIG, VIDEO, ROLE, PERMISSIONS, MOTION_ABS, REQUEST_KEYFRAME, AUTH } }
+    { key, tags: { PARTICIPANT, CONFIG, VIDEO, ROLE, PERMISSIONS, MOTION_ABS, REQUEST_KEYFRAME, AUTH } }
   );
   const url = `http://127.0.0.1:${server.address().port}/`;
   const ready = async (frame) => {

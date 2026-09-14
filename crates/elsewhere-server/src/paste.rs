@@ -23,7 +23,7 @@ impl ClipboardPaste for Admission {
                 else { viewers.sessions.get(&self.session).map(|s| &s.key) };
             if !live.is_some_and(|key| Arc::ptr_eq(key, &self.key)) { return Ok(()); }
             let input = self.paste && self.key.has(P::DesktopControl)
-                && (window || viewers.controller == Some(self.session) && viewers.control_epoch == self.epoch);
+                && (window || viewers.drives(self.session) && viewers.control_epoch == self.epoch);
             // Keep input ownership ordered with other inputs and control changes through the actual tap.
             let _owner = app.input_owner.lock().unwrap();
             self.key.require(P::ClipboardWrite)?;

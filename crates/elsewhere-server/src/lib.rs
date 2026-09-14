@@ -150,10 +150,10 @@ pub struct App {
     proxy_strips_prefix: bool,
 }
 
-/// The connected viewers and what they all see. One of them, the controller, drives the pointer and
-/// keyboard and sizes the output; the others watch the same desktop scaled to their own window.
+/// Connections share the desktop. The controlling participant selects one connection for input and sizing.
 pub(crate) struct Viewers {
     sessions: HashMap<u64, ViewerSession>,
+    participants: HashMap<u64, participants::Participant>,
     controller: Option<u64>,
     control_epoch: u64,
     next_request: u64,
@@ -179,7 +179,7 @@ pub(crate) struct Viewers {
 
 impl Default for Viewers {
     fn default() -> Self {
-        Viewers { sessions: HashMap::new(), controller: None, control_epoch: 0, next_request: 1, roster: tokio::sync::watch::channel(Bytes::new()).0, display: display::Settings::default(), output: elsewhere_core::INITIAL_OUTPUT, cursor: tokio::sync::watch::channel(None).0, pointer: tokio::sync::watch::channel(None).0, locked: false, windows: None, window_list: Vec::new(), workspaces: Default::default(), clipboard: Clipboard::default(), clipboard_scope: random_hex(16), next_clipboard_write: 1, next_id: 1 }
+        Viewers { sessions: HashMap::new(), participants: HashMap::new(), controller: None, control_epoch: 0, next_request: 1, roster: tokio::sync::watch::channel(Bytes::new()).0, display: display::Settings::default(), output: elsewhere_core::INITIAL_OUTPUT, cursor: tokio::sync::watch::channel(None).0, pointer: tokio::sync::watch::channel(None).0, locked: false, windows: None, window_list: Vec::new(), workspaces: Default::default(), clipboard: Clipboard::default(), clipboard_scope: random_hex(16), next_clipboard_write: 1, next_id: 1 }
     }
 }
 
@@ -213,6 +213,8 @@ pub(crate) struct WindowViewer { window: u64, key: Key, events: mpsc::Sender<Byt
 
 pub(crate) struct ViewerSession {
     key: Key,
+    participant: u64,
+    pip: bool,
     /// State messages (cursor, windows, clipboard, role) and audio, each with a small queue of its own.
     events: mpsc::Sender<Bytes>,
     audio: mpsc::Sender<Bytes>,
@@ -228,8 +230,6 @@ pub(crate) struct ViewerSession {
     /// without its reference would corrupt the picture until the next one anyway).
     cam_wait_key: bool,
     mixer_subscribed: bool,
-    request: Option<participants::ControlRequest>,
-    request_result: Option<&'static str>,
 }
 
 /// `audio_rx` carries the clients' Opus packets, for every viewer.

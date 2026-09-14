@@ -102,7 +102,7 @@ try {
       'Firefox PiP',
       await js(
           'const w=documentPictureInPicture.window.document.querySelector("iframe").contentWindow; return {status:w.elsewhere.store.get().status,role:w.elsewhere.store.get().role,hidden:w.document.hidden,frames:w.elsewhere().videoSeq,parentRole:elsewhere.store.get().role}'));
-  await wait(() => js('return elsewhere.store.get().role==="participant"'));
+  await wait(() => js('return elsewhere.store.get().role==="controller" && elsewhere.store.get().pipDesktop && !elsewhere.store.get().desktopInput'));
   const before = await js(
       'return documentPictureInPicture.window.document.querySelector("iframe").contentWindow.elsewhere().videoSeq');
   const handles = await wd(route + '/window/handles');
@@ -221,7 +221,8 @@ try {
   console.log('Firefox background frames', before, after);
   await js('elsewhere.pip.close()');
   await wait(() => js('return elsewhere.store.get().role==="controller"'));
-  console.log('Firefox return control');
+  assert.equal(await js('return elsewhere.store.get().pipDesktop'), false);
+  console.log('Firefox return to main presentation');
   await js(
       'const b=document.createElement("button");b.id="window-pip";b.textContent="Window PiP";b.style="position:fixed;top:0;left:0;z-index:9999";b.onclick=()=>elsewhere.pip.open(elsewhere.store.get().windows.find(w=>w.app_id==="pip-firefox").id);document.body.append(b)');
   await click('#window-pip');

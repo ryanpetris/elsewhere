@@ -12,7 +12,7 @@ import { visibleVideoFrame } from './video-frame.js';
 import { startMic, stopMic } from './mic.js';
 import { startCam, stopCam } from './cam.js';
 import { openRtc, rtcEndpoint, RTC_TIMING } from './rtc.js';
-import { WORKSPACES, ROSTER, POINTER_POSITION, REQUEST_CONTROL, CANCEL_CONTROL, APPROVE_CONTROL, DECLINE_CONTROL, PASTE_CLIPBOARD, PERMISSIONS, DISPLAY, CONFIG, VIDEO, CURSOR, POINTER_LOCK, AUDIO, WINDOWS, CLIPBOARD, ROLE, NOTICE, NOTIFICATIONS, STREAM_STATE, RTC, ROLES, CODEC_FAMILIES, EFFORTS, PRESETS, AUTH, HELLO, RESIZE, MOTION_ABS, MOTION_REL, BUTTON, AXIS, KEY, REQUEST_KEYFRAME, BLUR, POINTER_LOCK_LOST, POINTER_LOCK_GAINED, CONTROL, SET_CLIPBOARD, TAKE_CONTROL, NOTIFY, STREAM, DRAG, INPUT, TOUCH, MIC, CAM, RTC_CLIENT, REPORT, BTN, MIXER_STATE, MIXER_LEVELS, MIXER_ERROR, MIXER_CLIENT, SESSION, HANDOFF, FILE_RESULT } from './protocol.js';
+import { PARTICIPANT, WORKSPACES, ROSTER, POINTER_POSITION, REQUEST_CONTROL, CANCEL_CONTROL, APPROVE_CONTROL, DECLINE_CONTROL, PASTE_CLIPBOARD, PERMISSIONS, DISPLAY, CONFIG, VIDEO, CURSOR, POINTER_LOCK, AUDIO, WINDOWS, CLIPBOARD, ROLE, NOTICE, NOTIFICATIONS, STREAM_STATE, RTC, ROLES, CODEC_FAMILIES, EFFORTS, PRESETS, AUTH, HELLO, RESIZE, MOTION_ABS, MOTION_REL, BUTTON, AXIS, KEY, REQUEST_KEYFRAME, BLUR, POINTER_LOCK_LOST, POINTER_LOCK_GAINED, CONTROL, SET_CLIPBOARD, TAKE_CONTROL, NOTIFY, STREAM, DRAG, INPUT, TOUCH, MIC, CAM, RTC_CLIENT, REPORT, BTN, MIXER_STATE, MIXER_LEVELS, MIXER_ERROR, MIXER_CLIENT, SESSION, HANDOFF, FILE_RESULT } from './protocol.js';
 
 const AUDIO_LEAD = 0.06;
 const qualityName = name => PRESETS.includes(name) ? name : 'medium';
@@ -23,7 +23,7 @@ export function createViewer() {
     // 'no-token' | 'connecting' | 'connected' | 'retrying' | 'unauthorized' | 'error' | 'gone' | 'quit' | 'closed'
     status: TOKEN ? 'connecting' : 'no-token',
     reason: '',
-    // The role tracks desktop input ownership; permissions govern feature access.
+    // Role tracks participant ownership; desktopInput identifies its active input connection.
     role: null,
     controlsHidden: false,
     fullscreenControls: false,
@@ -31,6 +31,9 @@ export function createViewer() {
     display: null,
     permissions: [],
     sessionId: null,
+    participantId: null,
+    desktopInput: false,
+    pipDesktop: false,
     roster: null,
     observerPointer: null,
     cursorImage: null,
@@ -78,6 +81,7 @@ export function createViewer() {
   let stage = { w: 0, h: 0 }; // CSS size of the area the canvas lives in
   let quitting = false; // this page asked the desktop to shut down: the socket's end is not a failure
   let playbackEnabled = !PIP;
+  let participantSecret = null;
   let noticeTimer;
   const dropBatches = new Map();
   let mixerSubscribed = false, mixerTimer = 0;
@@ -205,6 +209,11 @@ export function createViewer() {
     if (disposed) return;
     clearTimeout(reconnectTimer);
     if (!TOKEN) { store.set({ status: 'no-token' }); return; }
+    if (PIP && !WINDOW && !window.parent.elsewhereParticipant?.()) {
+      store.set({ status: 'retrying' });
+      reconnectTimer = setTimeout(connect, 1000);
+      return;
+    }
     controlEpoch = 0n;
     store.set({ permissions: [], roster: null, observerPointer: null, cursorImage: null });
     let capabilities;
@@ -243,8 +252,9 @@ export function createViewer() {
       rtcConfig = null;
       recovery('unavailable', 'WebSocket disconnected');
       uploadAbort?.abort();
-      store.set({ display: null, permissions: [], sessionId: null, role: null, roster: null, observerPointer: null, cursorImage: null, playback: null, audioAvailable: false, micAvailable: false, camAvailable: false, rtcAvailable: false, videoVia: 'websocket' });
-      if (e.code === 4001 || e.code === 4004) {
+      store.set({ status: 'retrying', display: null, permissions: [], sessionId: null, participantId: null, desktopInput: false, role: null, roster: null, observerPointer: null, cursorImage: null, playback: null, audioAvailable: false, micAvailable: false, camAvailable: false, rtcAvailable: false, videoVia: 'websocket' });
+      const awaitOpener = e.code === 4004 && PIP && !WINDOW && e.reason === "The opener's participant is no longer connected.";
+      if (e.code === 4001 || e.code === 4004 && !awaitOpener) {
         if (e.code === 4001) forgetToken();
         if (document.fullscreenElement) document.exitFullscreen(); // restore the viewer controls for authentication
         store.set({ status: 'unauthorized', reason: e.reason || 'wrong token', stream: null });
@@ -252,7 +262,6 @@ export function createViewer() {
       }
       if (e.code === 4003) { store.set({ status: 'gone', reason: e.reason }); return; } // the window is gone
       if (quitting) { store.set({ status: 'quit', stream: null }); return; } // we asked for this
-      store.set({ status: 'retrying' });
       reconnectTimer = setTimeout(() => { if (ws === socket) connect(); }, 1000);
     };
   }
@@ -337,7 +346,9 @@ export function createViewer() {
   }
   function sendHello() {
     const { quality, effort } = state().choice;
-    sendText(HELLO, JSON.stringify({ codecs: preferences(), quality, effort }));
+    const participant = !WINDOW && (PIP ? window.parent.elsewhereParticipant?.() : participantSecret && { secret: participantSecret, resume: true });
+    if (PIP && !WINDOW && !participant) { ws.close(); return; }
+    sendText(HELLO, JSON.stringify({ codecs: preferences(), quality, effort, ...(participant && { participant }) }));
   }
   // A new codec, quality or effort for this session, remembered for the next connection.
   function setChoice(patch) {
@@ -573,8 +584,8 @@ export function createViewer() {
       case ROSTER: {
         const roster = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 1)));
         if (BigInt(roster.epoch) < controlEpoch) break;
-        const own = roster.sessions.find(s => s.id === String(state().sessionId));
-        const previous = state().roster?.sessions.find(s => s.id === String(state().sessionId));
+        const own = roster.sessions.find(s => s.id === state().participantId);
+        const previous = state().roster?.sessions.find(s => s.id === state().participantId);
         store.set({ roster });
         if (own?.result && own.result !== previous?.result) {
           const message = { approved: 'Control request approved.', declined: 'Control request declined.', cancelled: 'Control request cancelled.', expired: 'Control request expired.', controller_changed: 'Control request cleared because the controller changed.' }[own.result];
@@ -583,16 +594,26 @@ export function createViewer() {
         break;
       }
       case SESSION: store.set({ sessionId: dv.getBigUint64(1, true) }); break;
+      case PARTICIPANT: {
+        const participant = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 1)));
+        participantSecret = participant.secret;
+        store.set({ participantId: participant.id });
+        break;
+      }
       case ROLE: {
         const epoch = dv.getBigUint64(3, true);
         if (!WINDOW && epoch < controlEpoch) break;
         const role = ROLES[dv.getUint8(1)] ?? 'viewer';
         const features = dv.getUint8(2);
         controlEpoch = dv.getBigUint64(3, true);
-        store.set({ role, audioAvailable: !!(features & 4), micAvailable: !!(features & 1), camAvailable: !!(features & 2) });
-        if (!driving()) forwardedKeys.clear();
+        store.set({ role, desktopInput: !!(features & 8), audioAvailable: !!(features & 4), micAvailable: !!(features & 1), camAvailable: !!(features & 2) });
+        if (!driving()) {
+          forwardedKeys.clear();
+          if (document.pointerLockElement) document.exitPointerLock();
+        }
         if (!(features & 4)) stopPlayback();
         if (!(features & 1)) micStop();
+        if (!(features & 2)) camStop();
         if (role !== 'controller') {
           cancelMixerVolumes();
           if (document.pointerLockElement) document.exitPointerLock(); // only the controller's pointer is the desktop's
@@ -919,13 +940,13 @@ export function createViewer() {
     if (error) notice(`microphone: ${error.message}`);
   };
   async function micStart() {
-    if (state().role !== 'controller' || state().mic) return;
+    if (state().role !== 'controller' || !state().micAvailable || state().mic) return;
     const generation = ++micGeneration;
     store.set({ mic: true }); // The button can cancel capture while permission is pending.
     try {
       const started = await startMic(buf => send(MIC, buf.byteLength, dv => new Uint8Array(dv.buffer, 1).set(new Uint8Array(buf))), micStop);
       if (generation !== micGeneration) return;
-      if (!started || state().role !== 'controller') micStop();
+      if (!started || state().role !== 'controller' || !state().micAvailable) micStop();
     } catch (e) {
       if (generation !== micGeneration) return;
       micStop();
@@ -936,9 +957,10 @@ export function createViewer() {
   // The local webcam the same way (cam.js), one VP8 frame per message.
   const camStop = () => { stopCam(); if (state().cam) store.set({ cam: false }); };
   async function camStart() {
+    if (state().role !== 'controller' || !state().camAvailable || state().cam) return;
     try {
       await startCam(buf => send(CAM, buf.byteLength, dv => new Uint8Array(dv.buffer, 1).set(new Uint8Array(buf))), camStop, () => (ws?.bufferedAmount ?? 0) > 1_000_000);
-      if (state().role === 'controller') store.set({ cam: true });
+      if (state().role === 'controller' && state().camAvailable) store.set({ cam: true });
       else camStop();
     } catch (e) {
       notice(`webcam: ${e.message}`);
@@ -946,9 +968,9 @@ export function createViewer() {
   }
 
   // --- input -----------------------------------------------------------------------------
-  // Only the controller's pointer and keyboard are the desktop's (a window popup drives with any token with `desktop.control`).
+  // The active connection supplies desktop input; window popups require desktop.control and a visible window.
   const windowAvailable = () => state().windows.some(w => w.id === Number(WINDOW) && !w.minimized);
-  const driving = () => can('desktop.control') && (WINDOW ? state().role !== 'viewer' && windowAvailable() : state().role === 'controller');
+  const driving = () => can('desktop.control') && (WINDOW ? state().role !== 'viewer' && windowAvailable() : state().role === 'controller' && state().desktopInput && !state().pipDesktop);
   // A pointer position in the desktop's logical px, through the canvas's on-screen rectangle (which
   // follows the touch zoom); the stream's size is the desktop's, except while a resize is in flight.
   function toDesktop(e) {
@@ -1411,7 +1433,13 @@ export function createViewer() {
     can,
     resumeAudio,
     notice,
-    setPlaybackEnabled(on) { playbackEnabled = on; if (!on) { viewer.panels.close('audio'); stopPlayback(); } },
+    setPlaybackEnabled(on) { if (playbackEnabled === on) return; playbackEnabled = on; if (!on) stopPlayback(); },
+    participant: () => participantSecret && { secret: participantSecret, pip: true },
+    setPipDesktop(on) {
+      if (state().pipDesktop === on) return;
+      if (on) { releaseInput(); if (document.pointerLockElement) document.exitPointerLock(); }
+      store.set({ pipDesktop: on });
+    },
     handoff: id => { if (id != null) send(HANDOFF, 8, dv => dv.setBigUint64(1, BigInt(id), true)); },
     attach,
     dispose,

@@ -106,11 +106,11 @@ pub const RTC_CLIENT: u8 = 0x95;
 pub const REPORT: u8 = 0x96;
 /// JSON typed session-mixer command, at most 4096 bytes.
 pub const MIXER_CLIENT: u8 = 0x97;
-/// `[HANDOFF][u64 target]`: only the current controller may transfer to a live control session.
+/// `[HANDOFF][u64 target]`: only the owning participant may transfer to a live control participant.
 pub const HANDOFF: u8 = 0x98;
 /// Request approval from the current controller; no payload.
 pub const REQUEST_CONTROL: u8 = 0x9B;
-/// `[u64 request][u64 epoch]`: cancel this connection's request.
+/// `[u64 request][u64 epoch]`: cancel this participant's shared request.
 pub const CANCEL_CONTROL: u8 = 0x9C;
 /// `[u64 target][u64 request][u64 epoch]`: decide a live request in this control tenure.
 pub const APPROVE_CONTROL: u8 = 0x9D;
@@ -143,6 +143,14 @@ pub fn session(id: u64) -> Bytes {
 pub const FEATURE_MIC: u8 = 1;
 pub const FEATURE_CAM: u8 = 2;
 pub const FEATURE_AUDIO: u8 = 4;
+pub const FEATURE_INPUT: u8 = 8;
+/// Authenticated desktop participant ID and secret for an opener's PiP and reconnection.
+pub const PARTICIPANT: u8 = 0x19;
+pub fn participant(id: u64, secret: &str) -> Bytes {
+    let mut packet = vec![PARTICIPANT];
+    serde_json::to_writer(&mut packet, &serde_json::json!({ "id": id.to_string(), "secret": secret })).unwrap();
+    packet.into()
+}
 
 pub fn config(info: &StreamInfo, epoch: u64) -> Bytes {
     let json = format!(
@@ -309,7 +317,7 @@ pub fn audio(pts_us: u64, data: &[u8], seq: u16) -> Bytes {
 #[derive(Debug, PartialEq)]
 pub enum ClientMsg {
     /// The browser's decoders and codec, quality and effort choices.
-    Hello { codecs: Vec<Codec>, quality: Preset, effort: EncodingEffort },
+    Hello { codecs: Vec<Codec>, quality: Preset, effort: EncodingEffort, participant: Option<JoinParticipant> },
     Resize { css_w: u16, css_h: u16, dpr: f32 },
     MotionAbs { x: f32, y: f32 },
     MotionRel { dx: f32, dy: f32 },
@@ -357,6 +365,17 @@ pub struct StreamChoice {
     pub codecs: Option<Vec<Codec>>,
     pub quality: Option<String>,
     pub effort: Option<EncodingEffort>,
+    pub participant: Option<JoinParticipant>,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JoinParticipant {
+    pub secret: String,
+    #[serde(default)]
+    pub resume: bool,
+    #[serde(default)]
+    pub pip: bool,
 }
 
 #[derive(Debug, PartialEq, serde::Deserialize)]
@@ -390,7 +409,7 @@ pub fn decode(b: &[u8]) -> Option<ClientMsg> {
     Some(match u8_at(0)? {
         HELLO => {
             let choice: StreamChoice = serde_json::from_slice(&b[1..]).ok()?;
-            ClientMsg::Hello { codecs: choice.codecs?, quality: choice.quality.as_deref().and_then(Preset::named).unwrap_or_default(), effort: choice.effort.unwrap_or_default() }
+            ClientMsg::Hello { codecs: choice.codecs?, quality: choice.quality.as_deref().and_then(Preset::named).unwrap_or_default(), effort: choice.effort.unwrap_or_default(), participant: choice.participant }
         },
         RESIZE => ClientMsg::Resize { css_w: u16_at(1)?, css_h: u16_at(3)?, dpr: f32_at(5)? },
         MOTION_ABS => ClientMsg::MotionAbs { x: f32_at(1)?, y: f32_at(5)? },
@@ -495,7 +514,7 @@ mod tests {
             assert_eq!(preset.quality(8000).bitrate_kbps, kbps);
             let mut hello = vec![HELLO];
             hello.extend(serde_json::to_vec(&serde_json::json!({ "codecs": ["vp8", "h264"], "quality": name })).unwrap());
-            assert_eq!(decode(&hello), Some(ClientMsg::Hello { codecs: vec![Codec::Vp8, Codec::H264], quality: preset, effort: EncodingEffort::Fast }));
+            assert_eq!(decode(&hello), Some(ClientMsg::Hello { codecs: vec![Codec::Vp8, Codec::H264], quality: preset, effort: EncodingEffort::Fast, participant: None }));
             for medium in [2500, 3000, 40000] {
                 let quality = preset.quality(medium);
                 assert_eq!(quality.bitrate_kbps, if preset == Preset::Medium { medium } else { kbps });
@@ -513,7 +532,7 @@ mod tests {
         assert_eq!(Preset::named("auto"), None);
         assert_eq!(Preset::default(), Preset::Medium);
         let packet = |json: &str| { let mut b = vec![HELLO]; b.extend(json.as_bytes()); b };
-        assert_eq!(decode(&packet(r#"{"codecs":["h264"]}"#)), Some(ClientMsg::Hello { codecs: vec![Codec::H264], quality: Preset::Medium, effort: EncodingEffort::Fast }));
+        assert_eq!(decode(&packet(r#"{"codecs":["h264"]}"#)), Some(ClientMsg::Hello { codecs: vec![Codec::H264], quality: Preset::Medium, effort: EncodingEffort::Fast, participant: None }));
         assert_eq!(decode(&packet(r#"{"codecs":["unknown"]}"#)), None);
         assert_eq!(decode(&packet(r#"{}"#)), None);
         assert_eq!(decode(&packet(r#"{"codecs":null}"#)), None);

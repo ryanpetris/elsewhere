@@ -94,15 +94,13 @@ impl App {
         {
             let mut viewers = self.viewers.lock().unwrap();
             let removed: Vec<_> = viewers.sessions.iter().filter_map(|(&session, s)| (s.key.metadata.id == id).then_some(session)).collect();
-            let controlled = viewers.controller.is_some_and(|s| removed.contains(&s));
+            let controlled = viewers.active_session().is_some_and(|s| removed.contains(&s));
+            self.remove_viewers(&mut viewers, &removed);
             for session in removed {
-                viewers.sessions.remove(&session);
                 let _ = self.commands.send(Command::ViewerStream { key: session, sink: None });
                 rtc_keys.push(session);
             }
             if controlled {
-                let next = viewers.sessions.iter().filter(|(_, s)| s.key.has(P::DesktopControl)).map(|(&id, _)| id).min();
-                self.set_controller(&mut viewers, next);
                 let _ = self.commands.send(Command::Drag(elsewhere_core::Drag::Cancel));
             }
             self.mixer_audience(&viewers);
@@ -252,12 +250,16 @@ mod tests {
         {
             let mut viewers = rig.app.viewers.lock().unwrap();
             viewers.sessions.insert(0, crate::ws::tests::viewer(admin.clone()));
-            viewers.sessions.insert(1, crate::ws::tests::viewer(admin.clone()));
+            let mut second = crate::ws::tests::viewer(admin.clone());
+            second.participant = 1;
+            viewers.sessions.insert(1, second);
+            viewers.participants.insert(0, crate::participants::Participant::new(0, &admin));
+            viewers.participants.insert(1, crate::participants::Participant::new(1, &admin));
             viewers.controller = Some(0);
             rig.app.request_control(&mut viewers, 1);
-            viewers.sessions.get_mut(&1).unwrap().request.as_mut().unwrap().elapse();
+            viewers.participants.get_mut(&1).unwrap().request.as_mut().unwrap().elapse();
         }
-        until(|| rig.app.viewers.lock().unwrap().sessions[&1].request_result == Some("expired")).await;
+        until(|| rig.app.viewers.lock().unwrap().participants[&1].request_result == Some("expired")).await;
         until(|| !rig.app.active_tokens.lock().unwrap().contains_key(&keys[2].metadata.id)).await;
         assert!(keys[2].cancelled.is_cancelled());
 

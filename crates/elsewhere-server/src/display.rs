@@ -62,7 +62,7 @@ impl App {
         };
         let geometry = if settings.resolution == viewers.display.resolution { None } else {
             match settings.resolution {
-                Resolution::Auto => viewers.controller.and_then(|id| viewers.sessions.get(&id)).and_then(|s| s.size),
+                Resolution::Auto => viewers.active_session().and_then(|id| viewers.sessions.get(&id)).and_then(|s| s.size),
                 Resolution::Fixed { width, height } => Some(OutputGeometry { width_px: width, height_px: height, scale: 1.0, ..viewers.output }),
             }
         };
