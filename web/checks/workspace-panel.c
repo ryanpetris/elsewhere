@@ -7,13 +7,13 @@
 #include "ext-workspace-v1-client-protocol.h"
 
 static struct ext_workspace_manager_v1 *manager;
-struct workspace { struct ext_workspace_handle_v1 *handle; unsigned number; unsigned active; unsigned caps; };
+struct workspace { struct ext_workspace_handle_v1 *handle; unsigned number; unsigned active; unsigned caps; char name[257]; };
 static struct workspace workspaces[8];
 static struct ext_workspace_group_handle_v1 *workspace_group;
 static unsigned removed_count;
 static unsigned count, done_count;
-static void ws_id(void *data, struct ext_workspace_handle_v1 *ws, const char *id) { (void)data; (void)ws; (void)id; }
-static void ws_name(void *data, struct ext_workspace_handle_v1 *ws, const char *name) { (void)ws; ((struct workspace *)data)->number = atoi(name); }
+static void ws_id(void *data, struct ext_workspace_handle_v1 *ws, const char *id) { (void)ws; ((struct workspace *)data)->number = atoi(id); }
+static void ws_name(void *data, struct ext_workspace_handle_v1 *ws, const char *name) { (void)ws; snprintf(((struct workspace *)data)->name, sizeof(((struct workspace *)data)->name), "%s", name); }
 static void ws_coordinates(void *data, struct ext_workspace_handle_v1 *ws, struct wl_array *coords) { (void)data; (void)ws; assert(coords->size == 4); }
 static void ws_state(void *data, struct ext_workspace_handle_v1 *ws, uint32_t state) { (void)ws; ((struct workspace *)data)->active = !!(state & EXT_WORKSPACE_HANDLE_V1_STATE_ACTIVE); }
 static void ws_caps(void *data, struct ext_workspace_handle_v1 *ws, uint32_t caps) { (void)ws; ((struct workspace *)data)->caps = caps; }
@@ -40,7 +40,7 @@ static void removed(void *data, struct wl_registry *registry, uint32_t name) { (
 static const struct wl_registry_listener registry_listener = { global, removed };
 static unsigned active(void) { unsigned result = 0; for (unsigned i = 0; i < count; i++) if (workspaces[i].active) { assert(!result); result = workspaces[i].number; } return result; }
 int main(int argc, char **argv) {
-    assert(argc == 2); unsigned target = atoi(argv[1]); assert(target >= 1 && target <= 4);
+    assert(argc == 2 || argc == 4); unsigned target = atoi(argv[1]); assert(target >= 1 && target <= 4);
     struct wl_display *display = wl_display_connect(NULL); assert(display);
     struct wl_registry *registry = wl_display_get_registry(display);
     wl_registry_add_listener(registry, &registry_listener, NULL);
@@ -50,6 +50,14 @@ int main(int argc, char **argv) {
     struct workspace *target_ws = NULL;
     for (unsigned i = 0; i < count; i++) { assert(workspaces[i].caps == (EXT_WORKSPACE_HANDLE_V1_WORKSPACE_CAPABILITIES_ACTIVATE | EXT_WORKSPACE_HANDLE_V1_WORKSPACE_CAPABILITIES_REMOVE)); if (workspaces[i].number == target) target_ws = &workspaces[i]; }
     assert(target_ws);
+    if (argc == 4) {
+        FILE *ready = fopen(argv[3], "w"); assert(ready); fputs("ready", ready); fclose(ready);
+        while (strcmp(target_ws->name, argv[2])) { assert(wl_display_dispatch(display) >= 0); }
+        assert(active() == before && count == 4);
+        puts("{\"renamed\":true}");
+        wl_display_disconnect(display);
+        return 0;
+    }
     ext_workspace_handle_v1_activate(target_ws->handle);
     assert(wl_display_roundtrip(display) >= 0); assert(active() == before);
     ext_workspace_manager_v1_commit(manager);

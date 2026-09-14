@@ -158,10 +158,14 @@ settings yourself when using MCP. See the generated reference for the matching H
 
 Read `GET /api/workspaces` (MCP `workspaces`) for the shared active ID and workspace IDs/names.
 Each window reports `workspace`, separate from `minimized`. `POST /api/control` accepts
-`createworkspace`, `deleteworkspace` with `workspace`, `switchworkspace` with `workspace`, and
-`movetoworkspace` with `id` and `workspace`. MCP provides `create_workspace`, `delete_workspace`,
+`createworkspace` with optional `name`, `renameworkspace` with `workspace` and `name`,
+`deleteworkspace` with `workspace`, `switchworkspace` with `workspace`, and
+`movetoworkspace` with `id` and `workspace`. MCP provides `create_workspace` with optional `name`, `rename_workspace`, `delete_workspace`,
 `switch_workspace`, and `move_to_workspace`. Reads require `desktop.view`, mutations
-`desktop.control`. IDs remain stable; workspace count has no configured limit. Deleting a populated
+`desktop.control`. Sessions start with one workspace. Names allow at most 256 UTF-8 bytes and no
+control characters. Creation uses the ID for a missing or blank name; rename requires a nonblank
+name and preserves ID, window membership and active workspace. Names update in all viewers.
+IDs remain stable; workspace count has no configured limit. Deleting a populated
 workspace moves its windows to the first remaining workspace. The last workspace cannot be deleted.
 Moving a dialog moves its parent/transient family without switching desktops. Explicit activation
 switches to the window's workspace and focuses it. Window-relative input can reach inactive

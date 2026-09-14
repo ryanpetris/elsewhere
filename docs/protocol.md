@@ -293,14 +293,17 @@ Wait results include `matched`, `elapsed_ms`, `attempts`, the last observed `ele
 
 ### Control message
 
-`{"id": <window id>, "op": "<op>", ...}`; `id` is omitted for `switchworkspace`, `spawn`, `launch` and `quit`.
+`{"id": <window id>, "op": "<op>", ...}`; `id` is omitted for workspace creation, renaming, deletion and switching, and for `spawn`, `launch` and `quit`.
 
 | `op` | Effect |
 |---|---|
 | `activate` | switch to the window’s workspace, unminimize if needed, raise, focus |
 | `focus` | focus only if mapped on the active workspace; never switch or restore |
-| `switchworkspace` (`workspace`) | switch the shared desktop to 1–4 |
-| `movetoworkspace` (`workspace`) | move the window’s parent/transient family to 1–4 without switching |
+| `createworkspace` (`name`, optional) | create a named workspace, using its ID when the name is missing or blank |
+| `renameworkspace` (`workspace`, `name`) | rename an existing workspace without changing its ID, windows or active state |
+| `deleteworkspace` (`workspace`) | delete a workspace and move its windows to the first remaining workspace; retain the last workspace |
+| `switchworkspace` (`workspace`) | switch the shared desktop to an existing workspace |
+| `movetoworkspace` (`workspace`) | move the window’s parent/transient family to an existing workspace without switching |
 | `close` | ask the client to close (`xdg_toplevel.close` / `WM_DELETE_WINDOW`) |
 | `minimize`, `unminimize` | |
 | `maximize`, `unmaximize`, `fullscreen`, `unfullscreen` | through the same paths as the client's own requests; a minimized window is restored first |
@@ -371,7 +374,8 @@ work area. Application fullscreen requests remain available in either mode.
 of `{id, name}` entries. It is replayed to desktop and window sessions. Every `WindowInfo` has a
 `workspace` ID; the full window list includes inactive and minimized windows.
 
-`Control` accepts `createworkspace` with an optional `name`, `deleteworkspace` with `workspace`,
+`Control` accepts `createworkspace` with an optional `name`, `renameworkspace` with `workspace`
+and `name`, `deleteworkspace` with `workspace`,
 `switchworkspace` with `workspace`, and `movetoworkspace` with `id` and `workspace`.
 All require `desktop.control`; desktop WebSocket switching also requires controller status.
 Deleting a populated workspace moves its windows to the first remaining workspace. The last

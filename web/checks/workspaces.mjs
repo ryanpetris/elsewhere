@@ -49,7 +49,14 @@ const sendControl = (client, command) => client.socket.send(new Uint8Array([CONT
 try {
   await wait('server', async () => { try { return (await fetch(origin)).ok; } catch { return false; } });
   token = await createToken(root);
-  assert.deepEqual(await api('/api/workspaces'), { active: 1, workspaces: [1, 2, 3, 4].map(id => ({ id, name: String(id) })) });
+  assert.deepEqual(await api('/api/workspaces'), { active: 1, workspaces: [{ id: 1, name: '1' }] });
+  await control({ op: 'createworkspace', name: 'Research α' });
+  await wait('named creation', async () => (await api('/api/workspaces')).workspaces.some(w => w.id === 2 && w.name === 'Research α'));
+  await control({ op: 'renameworkspace', workspace: 2, name: '2' });
+  for (let id = 3; id <= 4; id++) {
+    await control({ op: 'createworkspace' });
+    await wait('additional workspace', async () => (await api('/api/workspaces')).workspaces.some(w => w.id === id));
+  }
   const empty = await snapshot();
   const ids = [];
   for (let workspace = 1; workspace <= 4; workspace++) {
@@ -289,6 +296,14 @@ try {
   await delay(150); assert.equal((await native()).child_events, childEvents, 'parent change invalidates the hovered hidden child before wheel/button input');
   const readKey = await createToken(root, ['desktop.view']);
   const writeKey = await createToken(root, ['desktop.control']);
+  for (const op of ['createworkspace', 'renameworkspace']) {
+    assert.equal((await request('/api/control', 'POST', { op, workspace: 1, name: 'Denied' }, readKey)).status, 403);
+    for (const name of ['x'.repeat(257), 'α'.repeat(129), 'bad\nname']) {
+      assert.equal((await request('/api/control', 'POST', { op, workspace: 1, name })).status, 400);
+    }
+  }
+  assert.equal((await request('/api/control', 'POST', { op: 'renameworkspace', workspace: 1, name: '  ' })).status, 400);
+  assert.equal((await request('/api/control', 'POST', { op: 'renameworkspace', workspace: 99999, name: 'Missing' })).status, 400);
   assert.equal((await request('/api/workspaces', 'GET', undefined, writeKey)).status, 403);
   assert.equal((await request('/api/control', 'POST', { op: 'switchworkspace', workspace: 1 }, readKey)).status, 403);
   assert.equal((await request('/api/control', 'POST', { op: 'switchworkspace', workspace: 1 }, writeKey)).status, 202);
@@ -309,6 +324,12 @@ try {
   };
   const readMcp = await mcp(readKey), writeMcp = await mcp(writeKey);
   assert(!(await readMcp('workspaces')).isError);
+  assert((await readMcp('rename_workspace', { workspace: 1, name: 'Denied' })).isError);
+  assert((await writeMcp('rename_workspace', { workspace: 1, name: '' })).isError);
+  assert(!(await writeMcp('rename_workspace', { workspace: 1, name: 'MCP name' })).isError);
+  await wait('MCP rename', async () => (await api('/api/workspaces')).workspaces[0].name === 'MCP name');
+  assert(JSON.stringify(await readMcp('workspaces')).includes('MCP name'));
+  await control({ op: 'renameworkspace', workspace: 1, name: '1' });
   assert.equal((await writeMcp('workspaces')).isError, true);
   assert.equal((await readMcp('switch_workspace', { workspace: 1 })).isError, true);
   assert(!(await writeMcp('switch_workspace', { workspace: 1 })).isError);
@@ -343,6 +364,14 @@ try {
   await wait('panel protocol activation', async () => { try { return JSON.parse(await readFile(root + '/panel.json', 'utf8')).active === 2; } catch { return false; } });
   assert.deepEqual(JSON.parse(await readFile(root + '/panel.json', 'utf8')), { before: 1, active: 2, count: 4, commit_boundary: true });
   await wait('panel shared state', () => sockets.every(s => s.workspaces.active === 2));
+  await control({ op: 'spawn', cmd: `${root}/panel 2 'Panel name' ${root}/rename-ready > ${root}/rename-panel.json` });
+  await wait('rename panel ready', async () => { try { return await readFile(root + '/rename-ready', 'utf8'); } catch { return false; } });
+  const beforeRename = await windows();
+  await control({ op: 'renameworkspace', workspace: 2, name: 'Panel name' });
+  await wait('native panel rename event', async () => { try { return JSON.parse(await readFile(root + '/rename-panel.json', 'utf8')).renamed; } catch { return false; } });
+  await wait('rename broadcast', () => sockets.every(s => s.workspaces.workspaces.find(w => w.id === 2).name === 'Panel name'));
+  assert.equal((await api('/api/workspaces')).active, 2);
+  assert.deepEqual((await windows()).map(w => [w.id, w.workspace]), beforeRename.map(w => [w.id, w.workspace]));
   for (const client of sockets) client.socket.close();
   await wait('sockets closed', () => sockets.every(s => s.socket.readyState === WebSocket.CLOSED));
 
@@ -373,6 +402,42 @@ try {
   await page.getByRole('combobox', { name: 'Workspace', exact: true }).selectOption('2');
   await reader.waitForFunction(() => elsewhere.store.get().workspaces.active === 2);
   await reader.reload(); await reader.waitForFunction(() => elsewhere.store.get().workspaces.active === 2);
+  assert(await reader.getByText('workspace Panel name', { exact: true }).count() > 0, 'view-only window rows use workspace names');
+  await control({ op: 'renameworkspace', workspace: 2, name: 'x'.repeat(256) });
+  const namedBadge = reader.getByText('workspace ' + 'x'.repeat(256), { exact: true }).first();
+  await namedBadge.waitFor();
+  assert(await namedBadge.evaluate(el => el.getBoundingClientRect().width <= el.parentElement.getBoundingClientRect().width), 'long workspace names fit view-only badges');
+  await control({ op: 'renameworkspace', workspace: 2, name: 'Panel name' });
+  assert.equal(await reader.getByRole('button', { name: 'Rename Workspace', exact: true }).count(), 0);
+  assert.equal(await reader.getByRole('button', { name: 'New Workspace', exact: true }).count(), 0);
+  const promptAction = async (label, value) => {
+    page.once('dialog', dialog => value === null ? dialog.dismiss() : dialog.accept(value));
+    await page.getByRole('button', { name: label, exact: true }).click();
+  };
+  await page.getByRole('combobox', { name: 'Workspace', exact: true }).selectOption('1');
+  await wait('starting workspace active', async () => (await api('/api/workspaces')).active === 1);
+  const membership = (await windows()).map(w => [w.id, w.workspace]);
+  await promptAction('Rename Workspace', 'x'.repeat(256));
+  await reader.waitForFunction(() => elsewhere.store.get().workspaces.workspaces[0].name.length === 256);
+  assert(await moveSelector.evaluate(el => el.getBoundingClientRect().width <= el.parentElement.getBoundingClientRect().width), 'long workspace names fit the window move control');
+  await promptAction('Rename Workspace', 'Main α');
+  await reader.waitForFunction(() => elsewhere.store.get().workspaces.workspaces[0].name === 'Main α');
+  assert.equal(await page.getByRole('combobox', { name: 'Workspace', exact: true }).locator('option:checked').textContent(), 'Workspace Main α');
+  assert((await moveSelector.locator('option').allTextContents()).some(s => s.includes('Main α')));
+  assert.equal((await api('/api/workspaces')).active, 1);
+  assert.deepEqual((await windows()).map(w => [w.id, w.workspace]), membership);
+  assert(JSON.stringify(await readMcp('workspaces')).includes('Main α'));
+  await promptAction('New Workspace', null);
+  assert.equal((await api('/api/workspaces')).workspaces.length, 4);
+  await promptAction('New Workspace', 'Planning β');
+  await reader.waitForFunction(() => elsewhere.store.get().workspaces.workspaces.some(w => w.name === 'Planning β'));
+  const named = (await api('/api/workspaces')).workspaces.find(w => w.name === 'Planning β');
+  assert(named.id > 4);
+  assert.equal((await api('/api/workspaces')).active, 1);
+  await control({ op: 'deleteworkspace', workspace: named.id });
+  await wait('named workspace deletion', async () => (await api('/api/workspaces')).workspaces.length === 4);
+  await page.getByRole('combobox', { name: 'Workspace', exact: true }).selectOption('2');
+  await wait('viewer restores workspace', async () => (await api('/api/workspaces')).active === 2);
   const popup = await browser.newPage();
   await popup.goto(origin + '/?window=' + animated.id + '#token=' + token);
   await popup.waitForFunction(() => elsewhere.store.get().status === 'connected');
@@ -388,8 +453,9 @@ try {
   await switchTo(latest);
   await control({ op: 'deleteworkspace', workspace: latest });
   await wait('populated workspace deletion', async () => (await api('/api/workspaces')).active === 1 && (await info(dialog.id)).workspace === 1);
-  assert(!(await writeMcp('create_workspace')).isError);
+  assert(!(await writeMcp('create_workspace', { name: 'MCP created' })).isError);
   await wait('MCP creation', async () => (await api('/api/workspaces')).workspaces.at(-1).id > latest);
+  assert.equal((await api('/api/workspaces')).workspaces.at(-1).name, 'MCP created');
   assert((await readMcp('create_workspace')).isError);
   for (const entry of (await api('/api/workspaces')).workspaces.slice(1)) await control({ op: 'deleteworkspace', workspace: entry.id });
   await wait('one workspace', async () => (await api('/api/workspaces')).workspaces.length === 1);

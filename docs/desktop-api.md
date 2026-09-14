@@ -750,10 +750,16 @@ fullscreen, kiosk and resolution changes, including minimized windows.
 array of `{ "id": 1, "name": "1" }` entries. Every window reports its `workspace` ID independently
 of minimization. Reads require `desktop.view`.
 
-`POST /api/control` accepts `createworkspace` with an optional `name`, `deleteworkspace` with a
+A new session starts with one workspace.
+
+`POST /api/control` accepts `createworkspace` with an optional `name`, `renameworkspace` with
+`workspace` and `name`, `deleteworkspace` with a
 `workspace` ID, `switchworkspace` with a `workspace` ID, and `movetoworkspace` with `id` and
-`workspace`. MCP exposes `create_workspace`, `delete_workspace`, `switch_workspace`, and
+`workspace`. MCP exposes `create_workspace` with an optional `name`, `rename_workspace`, `delete_workspace`, `switch_workspace`, and
 `move_to_workspace`. Workspaces have no configured count limit. IDs remain stable across deletion.
+Names allow at most 256 UTF-8 bytes and no control characters. Creation uses the ID for a missing
+or blank name; renaming requires a nonblank name. Renaming preserves the ID, window membership,
+and active workspace, and updates connected viewers and native panels. Invalid names return 400.
 Deleting a workspace moves its windows to the first remaining workspace; the last workspace cannot
 be deleted. Invalid IDs and deletion of the last workspace return 400 over HTTP/MCP.
 

@@ -166,7 +166,7 @@ pub struct WorkspaceState {
     pub workspaces: Vec<Workspace>,
 }
 impl Default for WorkspaceState {
-    fn default() -> Self { Self { active: 1, workspaces: (1..=4).map(|id| Workspace { id, name: id.to_string() }).collect() } }
+    fn default() -> Self { Self { active: 1, workspaces: vec![Workspace { id: 1, name: "1".into() }] } }
 }
 
 /// One window as the desktop API reports it.
@@ -224,6 +224,7 @@ pub enum ControlOp {
     Focus,
     SwitchWorkspace { workspace: u32 },
     CreateWorkspace { name: Option<String> },
+    RenameWorkspace { workspace: u32, name: String },
     DeleteWorkspace { workspace: u32 },
     MoveToWorkspace { workspace: u32 },
     Activate,

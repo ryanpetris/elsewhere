@@ -45,7 +45,7 @@ pub struct Workspaces {
 }
 
 impl Default for Workspaces {
-    fn default() -> Self { Self { active: 1, input: 1, entries: elsewhere_core::WorkspaceState::default().workspaces, next_id: Some(5), focus: Default::default(), bindings: Vec::new() } }
+    fn default() -> Self { Self { active: 1, input: 1, entries: elsewhere_core::WorkspaceState::default().workspaces, next_id: Some(2), focus: Default::default(), bindings: Vec::new() } }
 }
 
 impl Workspaces {
@@ -143,6 +143,20 @@ impl State {
         for binding in &mut self.workspaces.bindings { binding.add(&self.dh, &entry, self.workspaces.active); }
         self.workspaces.entries.push(entry);
         self.workspaces.publish();
+        let _ = self.events.send(elsewhere_core::Event::Workspaces(self.workspace_state()));
+    }
+
+    pub fn rename_workspace(&mut self, workspace: u32, name: String) {
+        if name.trim().is_empty() || name.len() > 256 || name.chars().any(char::is_control) { return; }
+        let Some(entry) = self.workspaces.entries.iter_mut().find(|entry| entry.id == workspace) else { return; };
+        if entry.name == name { return; }
+        entry.name = name;
+        for binding in &self.workspaces.bindings {
+            for (id, handle) in &binding.handles {
+                if *id == workspace && handle.is_alive() { handle.name(entry.name.clone()); }
+            }
+            binding.manager.done();
+        }
         let _ = self.events.send(elsewhere_core::Event::Workspaces(self.workspace_state()));
     }
 

@@ -74,6 +74,14 @@ pub struct WorkspaceArg { pub workspace: u32 }
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct CreateWorkspaceArg { pub name: Option<String> }
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RenameWorkspaceArg { pub workspace: u32, pub name: String }
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct MoveWorkspaceArg { pub window: u64, pub workspace: u32 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -293,9 +301,14 @@ impl Mcp {
         json(self.app.workspaces())
     }
 
-    #[tool(description = "Create a workspace. Requires desktop.control; read workspaces afterwards for its ID.")]
-    fn create_workspace(&self, Extension(parts): Extension<Parts>) -> ToolResult {
-        self.control(&parts, 0, ControlOp::CreateWorkspace { name: None })
+    #[tool(description = "Create a workspace with an optional name, at most 256 UTF-8 bytes without control characters. A missing or blank name uses its ID. Requires desktop.control; read workspaces afterwards for its ID.")]
+    fn create_workspace(&self, Extension(parts): Extension<Parts>, Parameters(args): Parameters<CreateWorkspaceArg>) -> ToolResult {
+        self.control(&parts, 0, ControlOp::CreateWorkspace { name: args.name })
+    }
+
+    #[tool(description = "Rename a workspace, preserving its ID, windows and active state. Names must be nonblank, at most 256 UTF-8 bytes, and contain no control characters. Requires desktop.control; read workspaces afterwards.")]
+    fn rename_workspace(&self, Extension(parts): Extension<Parts>, Parameters(args): Parameters<RenameWorkspaceArg>) -> ToolResult {
+        self.control(&parts, 0, ControlOp::RenameWorkspace { workspace: args.workspace, name: args.name })
     }
 
     #[tool(description = "Delete a workspace and move its windows to the first remaining workspace. The last workspace cannot be deleted. Requires desktop.control; read workspaces afterwards.")]

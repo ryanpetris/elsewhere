@@ -90,7 +90,7 @@ desktop has nowhere to come back from.
 
 ## Workspaces
 
-The pager and the viewer switch the same shared desktop. The session starts with four workspaces; workspaces can be created and deleted without a configured count limit. Panels remain shared. Tasklists discover windows from every workspace; activating a task
+The pager and the viewer switch the same shared desktop. The session starts with one workspace; workspaces can be named, renamed, created and deleted without a configured count limit. Panels remain shared. Tasklists discover windows from every workspace; activating a task
 switches to its workspace and restores it if minimized. The ext-workspace protocol does not move
 individual windows: use the viewer’s window list or the HTTP/MCP move operation for that.
 

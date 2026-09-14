@@ -142,7 +142,11 @@ another action is needed.
 ## Workspaces
 
 `workspaces` returns the shared active workspace ID and the workspace IDs and names. `windows`
-reports each window's `workspace`. Reads require `desktop.view`. `create_workspace` adds a workspace;
+reports each window's `workspace`. Reads require `desktop.view`. `create_workspace` adds a workspace
+with an optional `name`; `rename_workspace` takes `workspace` and `name`. Names allow at most
+256 UTF-8 bytes and no control characters. Creation uses the ID for a missing or blank name;
+renaming requires a nonblank name and preserves ID, membership and active workspace.
+Sessions start with one workspace.
 `delete_workspace` takes `workspace` and moves its windows to the first remaining workspace. The
 last workspace cannot be deleted. IDs remain stable and there is no configured count limit.
 

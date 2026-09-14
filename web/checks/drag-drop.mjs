@@ -54,6 +54,8 @@ try {
     catch { return false; }
   }, 'server startup');
   token = await createToken(root);
+  await api('control', {op: 'createworkspace'});
+  await wait(async () => (await api('workspaces')).workspaces.some(w => w.id === 2), 'second workspace');
   socket = new WebSocket(origin.replace('http', 'ws') + '/ws');
   socket.binaryType = 'arraybuffer';
   socket.addEventListener('message', ({data}) => packets.push(Buffer.from(data)));

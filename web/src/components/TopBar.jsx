@@ -1,5 +1,5 @@
 // The top bar: brand and context, the launchers, the connection state, and the viewer's own controls.
-import { Plus, Minus, CircleHelp, PanelTopClose, PictureInPicture2, CornerUpLeft, Expand, Eye, Hand, Keyboard, LayoutGrid, MousePointer2, PanelRightClose, PanelRightOpen, Power, Settings } from 'lucide-react';
+import { Plus, Minus, Pencil, CircleHelp, PanelTopClose, PictureInPicture2, CornerUpLeft, Expand, Eye, Hand, Keyboard, LayoutGrid, MousePointer2, PanelRightClose, PanelRightOpen, Power, Settings } from 'lucide-react';
 import { Participants } from './Participants.jsx';
 import { useStore } from '../store.js';
 import { WINDOW, PIP } from '../api.js';
@@ -74,6 +74,17 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, fullscreen, onF
   const permissions = useStore(viewer.store, s => s.permissions);
   const acts = permission => !windowMode && status === 'connected' && permissions.includes(permission);
   const title = windowMode ? windowTitle || `Window ${WINDOW}` : 'Elsewhere';
+  const nameWorkspace = rename => {
+    const workspace = workspaces.active;
+    const current = workspaces.workspaces.find(entry => entry.id === workspace)?.name;
+    const name = prompt(rename ? 'Rename Workspace' : 'Workspace Name', rename ? current : '');
+    if (name === null) return;
+    if ((rename && !name.trim()) || new TextEncoder().encode(name).length > 256 || /[\p{Cc}]/u.test(name)) {
+      viewer.notice('Invalid workspace name.');
+      return;
+    }
+    viewer.control(rename ? { op: 'renameworkspace', workspace, name } : { op: 'createworkspace', name });
+  };
   if (PIP) return (
     <header className="flex h-9 shrink-0 items-center gap-2 border-b border-line bg-surface px-2 text-xs">
       <span className={`size-2 shrink-0 rounded-full ${dot}`} title={text} />
@@ -112,7 +123,8 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, fullscreen, onF
           {workspaces.workspaces.map(entry => <option key={entry.id} value={entry.id}>Workspace {entry.name}</option>)}
         </select>
         {permissions.includes('desktop.control') && <>
-          <IconButton icon={Plus} label="New Workspace" disabled={status !== 'connected'} onClick={() => viewer.control({ op: 'createworkspace' })} />
+          <IconButton icon={Plus} label="New Workspace" disabled={status !== 'connected'} onClick={() => nameWorkspace(false)} />
+          <IconButton icon={Pencil} label="Rename Workspace" disabled={status !== 'connected'} onClick={() => nameWorkspace(true)} />
           <IconButton icon={Minus} label="Delete Workspace" disabled={status !== 'connected' || workspaces.workspaces.length <= 1} onClick={() => viewer.control({ op: 'deleteworkspace', workspace: workspaces.active })} />
         </>}
       </div>}

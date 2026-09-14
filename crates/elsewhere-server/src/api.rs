@@ -359,7 +359,7 @@ impl App {
     /// A window action, spawn, launch or quit. Fire-and-forget: the compositor ignores unknown ids and
     /// impossible requests.
     pub fn control(&self, msg: ControlMsg) -> Result<(), ApiError> {
-        if let ControlOp::SwitchWorkspace { workspace } | ControlOp::MoveToWorkspace { workspace } | ControlOp::DeleteWorkspace { workspace } = &msg.op {
+        if let ControlOp::SwitchWorkspace { workspace } | ControlOp::MoveToWorkspace { workspace } | ControlOp::RenameWorkspace { workspace, .. } | ControlOp::DeleteWorkspace { workspace } = &msg.op {
             if !self.workspaces().workspaces.iter().any(|entry| entry.id == *workspace) {
                 return Err(ApiError::InvalidInput("unknown workspace".into()));
             }
@@ -367,7 +367,10 @@ impl App {
         if let ControlOp::DeleteWorkspace { .. } = &msg.op {
             if self.workspaces().workspaces.len() == 1 { return Err(ApiError::InvalidInput("the last workspace cannot be deleted".into())); }
         }
-        if let ControlOp::CreateWorkspace { name: Some(name) } = &msg.op {
+        if let ControlOp::RenameWorkspace { name, .. } = &msg.op {
+            if name.trim().is_empty() { return Err(ApiError::InvalidInput("invalid workspace name".into())); }
+        }
+        if let ControlOp::CreateWorkspace { name: Some(name) } | ControlOp::RenameWorkspace { name, .. } = &msg.op {
             if name.len() > 256 || name.chars().any(char::is_control) { return Err(ApiError::InvalidInput("invalid workspace name".into())); }
         }
         let cmd = self.command_for(msg)?;

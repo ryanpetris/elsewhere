@@ -37,7 +37,7 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
 | `POST /api/windows/{id}/elements/wait` | **ElementWait** | desktop.view; **ElementWaitResult**, including matched=false on timeout; same error statuses as action |
 | `GET /api/windows/{id}/snapshot.png` | one optional `width`, `height`, or `percentage`; default native | PNG of the window; `404`, `429` another snapshot in flight, `500` render failed, `503` |
 | `GET /api/screenshot.png` | same sizing as window snapshots; default native | PNG of the whole output; `429`, `500`, `503` as for a window |
-| `POST /api/control` | **Control** | `400` for an out-of-range workspace; `202`; fire-and-forget; `404` unknown application (`launch`); `503` compositor gone |
+| `POST /api/control` | **Control** | `400` for an unknown workspace, invalid name, or deleting the last workspace; `202`; fire-and-forget; `404` unknown application (`launch`); `503` compositor gone |
 | `POST /api/input` | **Input** | `202`, with `{"warning": …}` when a click aims past the desktop's edge at an X11 window (Xwayland pins it to the edge); `404` unknown window; `503` compositor gone |
 | `GET /api/clipboard/state` | | metadata: `observation`, `operation`, `present`, `mime`, `size`, `preview`; preview is empty, loading, available, unavailable or restricted; opaque identifiers are scoped to this server process |
 | `GET /api/clipboard` | optional `If-Match` with quoted observation | current bytes with Content-Type and ETag; `clipboard.read` and `files.download` required for file lists; `204` no selection, `409` bytes unavailable, `412` observation changed |
@@ -747,6 +747,28 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
       },
       "required": [
         "op"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "op": {
+          "type": "string",
+          "const": "renameworkspace"
+        },
+        "workspace": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "op",
+        "workspace",
+        "name"
       ]
     },
     {
@@ -1985,11 +2007,20 @@ Put text on the desktop clipboard, for pasting into an application (images go th
 
 ### `create_workspace`
 
-Create a workspace. Requires desktop.control; read workspaces afterwards for its ID.
+Create a workspace with an optional name, at most 256 UTF-8 bytes without control characters. A missing or blank name uses its ID. Requires desktop.control; read workspaces afterwards for its ID.
 
 ```json
 {
-  "properties": {},
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
   "type": "object"
 }
 ```
@@ -2447,6 +2478,32 @@ The desktop notifications currently shown (id, app, summary, body, actions, time
 ```json
 {
   "properties": {},
+  "type": "object"
+}
+```
+
+### `rename_workspace`
+
+Rename a workspace, preserving its ID, windows and active state. Names must be nonblank, at most 256 UTF-8 bytes, and contain no control characters. Requires desktop.control; read workspaces afterwards.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "workspace": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "workspace",
+    "name"
+  ],
   "type": "object"
 }
 ```

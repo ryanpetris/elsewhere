@@ -125,7 +125,7 @@ function WinIcon({ w }) {
 
 function WindowRow({ viewer, w, acts, eligible, dpr }) {
   const workspaces = useStore(viewer.store, s => s.workspaces);
-  const badges = [!acts && `workspace ${w.workspace}`, w.fullscreen && 'fullscreen', w.maximized && 'maximized', w.minimized && 'minimized'].filter(Boolean);
+  const badges = [!acts && `workspace ${workspaces.workspaces.find(entry => entry.id === w.workspace)?.name ?? w.workspace}`, w.fullscreen && 'fullscreen', w.maximized && 'maximized', w.minimized && 'minimized'].filter(Boolean);
   const act = (op, e) => { e.stopPropagation(); viewer.control({ id: w.id, op }); };
   return (
     <div
@@ -150,7 +150,7 @@ function WindowRow({ viewer, w, acts, eligible, dpr }) {
           {acts && <select aria-label={`Move ${w.title || w.app_id} to workspace`} value={w.workspace} onClick={e => e.stopPropagation()} onChange={e => viewer.control({ id: w.id, op: 'movetoworkspace', workspace: Number(e.target.value) })} className="rounded bg-surface-3 text-xs">
             {workspaces.workspaces.map(entry => <option key={entry.id} value={entry.id}>Workspace {entry.name}</option>)}
           </select>}
-          {badges.map(b => <span key={b} className="shrink-0 rounded bg-surface-4 px-1 text-[10px] text-ink-3">{b}</span>)}
+          {badges.map(b => <span key={b} className="max-w-full shrink-0 truncate rounded bg-surface-4 px-1 text-[10px] text-ink-3">{b}</span>)}
         </div>
       </div>
       <div onClick={e => e.stopPropagation()} className="flex w-full justify-end items-center gap-px rounded-md bg-surface-3 p-0.5">

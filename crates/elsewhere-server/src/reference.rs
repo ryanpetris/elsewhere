@@ -36,7 +36,7 @@ const ROUTES: &str = "\
 | `POST /api/windows/{id}/elements/wait` | **ElementWait** | desktop.view; **ElementWaitResult**, including matched=false on timeout; same error statuses as action |
 | `GET /api/windows/{id}/snapshot.png` | one optional `width`, `height`, or `percentage`; default native | PNG of the window; `404`, `429` another snapshot in flight, `500` render failed, `503` |
 | `GET /api/screenshot.png` | same sizing as window snapshots; default native | PNG of the whole output; `429`, `500`, `503` as for a window |
-| `POST /api/control` | **Control** | `400` for an out-of-range workspace; `202`; fire-and-forget; `404` unknown application (`launch`); `503` compositor gone |
+| `POST /api/control` | **Control** | `400` for an unknown workspace, invalid name, or deleting the last workspace; `202`; fire-and-forget; `404` unknown application (`launch`); `503` compositor gone |
 | `POST /api/input` | **Input** | `202`, with `{\"warning\": …}` when a click aims past the desktop's edge at an X11 window (Xwayland pins it to the edge); `404` unknown window; `503` compositor gone |
 | `GET /api/clipboard/state` | | metadata: `observation`, `operation`, `present`, `mime`, `size`, `preview`; preview is empty, loading, available, unavailable or restricted; opaque identifiers are scoped to this server process |
 | `GET /api/clipboard` | optional `If-Match` with quoted observation | current bytes with Content-Type and ETag; `clipboard.read` and `files.download` required for file lists; `204` no selection, `409` bytes unavailable, `412` observation changed |
