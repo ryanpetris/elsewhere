@@ -14,6 +14,15 @@
 
 - Comments and documentation should describe current behaviour. Do not narrate changes.
 
+## UI copy
+
+- Do not add explanatory UI copy, helper text, or implementation disclaimers unless absolutely
+  necessary for the user to complete a task or make a meaningful decision. Necessity alone does
+  not authorize adding it: obtain explicit maintainer approval for the exact wording and placement
+  before implementation. This includes explanatory tooltips and API-specific instructions shown
+  in the UI. Ordinary control labels and concise feedback about an action’s result do not require
+  this additional approval.
+
 ## Changes before v1.0.0
 
 - Before Elsewhere v1.0.0, do not add migrations, compatibility layers, legacy fallbacks, or
