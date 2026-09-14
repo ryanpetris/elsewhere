@@ -659,6 +659,7 @@ read it with `useSyncExternalStore` and send actions back through the engine.
   existing grants; local controls remain available without `apps.launch`. Window popups offer fullscreen
   and control visibility actions. Opening Search releases desktop input and pointer capture.
   Read-only users can search windows; activation requires control permission. Panels open inside fullscreen.
+  The Help menu lists viewer and Search keyboard shortcuts.
   Icons use authenticated fetches and cached blob URLs. The **power menu** requires `server.manage`,
   confirms, then sends `quit`; an accepted shutdown ends reconnection.
 - **Windows tab**: one row per window, top-most first, minimized last: a thumbnail, a colour dot, the

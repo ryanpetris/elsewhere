@@ -137,7 +137,7 @@ try {
   await page.keyboard.press('Control+Alt+Shift+h');
   assert.deepEqual(await page.evaluate(() => sent.filter(p => [0x87, 0x89].includes(p[0]))), [[0x87, 29, 0, 1], [0x87, 56, 0, 1], [0x87, 42, 0, 1], [0x89]], 'hide shortcut releases modifiers through BLUR');
   await page.keyboard.press('Control+Alt+Shift+h');
-  for (const name of ['Settings', 'About Elsewhere', 'Search']) {
+  for (const name of ['Settings', 'About Elsewhere', 'Search', 'Help']) {
     const button = page.getByRole('button', { name, exact: true });
     await button.focus(); await resetPackets();
     await page.keyboard.press('Enter');

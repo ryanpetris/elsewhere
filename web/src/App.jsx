@@ -9,6 +9,7 @@ import { Sidebar } from './components/Sidebar.jsx';
 import { StatusBar } from './components/StatusBar.jsx';
 import { TokenForm } from './components/TokenForm.jsx';
 import { Launcher, PowerMenu } from './components/Launcher.jsx';
+import { Help } from './components/Help.jsx';
 import { About } from './components/About.jsx';
 import { Settings } from './components/Settings.jsx';
 import { MixerPanel } from './components/MixerPanel.jsx';
@@ -140,6 +141,7 @@ export function App({ viewer }) {
       /></div>
       {menu === 'about' && !hidden && <About viewer={viewer} onClose={closeMenu} />}
       {menu === 'apps' && <Launcher viewer={viewer} actions={paletteActions} onClose={closeMenu} />}
+      {menu === 'help' && <Help viewer={viewer} onClose={closeMenu} />}
       {menu === 'power' && <PowerMenu viewer={viewer} onClose={closeMenu} />}
       {menu === 'settings' && !windowMode && !hidden && <Settings viewer={viewer} borders={borders} onBorders={setBorders} elements={elements} onElements={setElements} onClose={closeMenu} />}
       <div className="relative flex min-h-0 flex-1">

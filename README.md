@@ -89,7 +89,7 @@ returns focus. Window IDs distinguish matching titles. Applications launch a new
 activate an existing window, including a minimized one. Viewer actions open Files, Terminal,
 Settings, Windows and Statistics, toggle Fullscreen, or Show/Hide Controls. Results follow live
 windows and permissions. Read-only users can search windows. Opening panels preserves fullscreen.
-Window popups offer Fullscreen and Show/Hide Controls only. Opening the
+The **Help** menu lists keyboard shortcuts. Window popups offer Fullscreen and Show/Hide Controls only. Opening the
 Search menu releases held desktop input and mouse capture; search and composition stay in the viewer.
 
 Any number of people can watch at once, each with a stream scaled to their own window. The first to

@@ -1,5 +1,5 @@
 // The top bar: brand and context, the launchers, the connection state, and the viewer's own controls.
-import { Plus, Minus, PanelTopClose, PictureInPicture2, CornerUpLeft, Expand, Eye, Hand, Keyboard, LayoutGrid, MousePointer2, PanelRightClose, PanelRightOpen, Power, Settings } from 'lucide-react';
+import { Plus, Minus, CircleHelp, PanelTopClose, PictureInPicture2, CornerUpLeft, Expand, Eye, Hand, Keyboard, LayoutGrid, MousePointer2, PanelRightClose, PanelRightOpen, Power, Settings } from 'lucide-react';
 import { Participants } from './Participants.jsx';
 import { useStore } from '../store.js';
 import { WINDOW, PIP } from '../api.js';
@@ -130,6 +130,7 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, fullscreen, onF
           </>
         )}
         {viewer.pip.supported && <IconButton icon={PictureInPicture2} label="Picture-in-Picture" onClick={() => viewer.pip.open()} />}
+        <IconButton data-menu-trigger id="help-toggle" icon={CircleHelp} label="Help" active={menu === 'help'} aria-controls="viewer-help" aria-haspopup="dialog" aria-expanded={menu === 'help'} onClick={() => onMenu('help')} />
         <IconButton id="hide-controls" icon={PanelTopClose} label="Hide Controls (Ctrl+Alt+Shift+H)" onClick={onHideControls} />
         <IconButton icon={Expand} label={fullscreen ? 'Exit Fullscreen' : 'Fullscreen'} onClick={onFullscreen} />
         {acts('server.manage') && (

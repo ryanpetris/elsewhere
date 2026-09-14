@@ -150,6 +150,11 @@ try {
   await input.press('Enter');
   await page.locator('#viewer-settings').waitFor();
   await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Help', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Help', exact: true }).waitFor();
+  assert.match(await page.getByRole('dialog', { name: 'Help', exact: true }).innerText(), /Ctrl\+Alt\+Shift\+H/);
+  await page.keyboard.press('Escape');
+  assert(await page.locator('#help-toggle').evaluate(el => el === document.activeElement));
   const before = requests;
   for (let i = 0; i < 10; i++) { await open(); await input.press('Escape'); }
   assert.equal(requests, before, 'no application requests without apps.launch');
