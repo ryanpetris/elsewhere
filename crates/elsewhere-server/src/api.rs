@@ -163,7 +163,7 @@ impl App {
         let page = tokio::select! {
             biased;
             _ = key.ended() => return Err(ApiError::Unauthorized),
-            result = tokio::time::timeout(Duration::from_secs(2), read) => result.map_err(|_| error("tree_timeout", "accessibility tree read exceeded two seconds"))??,
+            result = tokio::time::timeout(Duration::from_secs(5), read) => result.map_err(|_| error("tree_timeout", "accessibility tree read exceeded five seconds"))??,
         };
         let (live, _) = self.window(id).map_err(|_| error("window_missing", "desktop window disappeared during the read"))?;
         if live.pid != win.pid || self.element_windows(&live) != windows { return Err(error("window_changed", "application windows changed during the read")); }
@@ -214,7 +214,10 @@ impl App {
             key.with(&[DesktopControl], || self.control(ControlMsg { id, op }))?;
         } else {
             let conn = page.connection.as_ref().ok_or_else(|| error("bus_unavailable", "no accessibility connection"))?;
-            element = tokio::time::timeout(Duration::from_secs(1), elements::refresh(conn, &element)).await.map_err(|_| error("tree_timeout", "target revalidation exceeded one second"))??;
+            element = tokio::select! { biased;
+                _ = key.ended() => return Err(ApiError::Unauthorized),
+                result = tokio::time::timeout(Duration::from_secs(5), elements::refresh(conn, &element)) => result.map_err(|_| error("tree_timeout", "target revalidation exceeded five seconds"))??,
+            };
             match element.enabled { Some(true) => {}, Some(false) => return Err(error("disabled", "the target is disabled")), None => return Err(error("state_unavailable", "enabled state is unavailable")) }
             if text.is_some() && element.editable != Some(true) { return Err(error("unsupported", "the target does not advertise editable text")); }
             key.require(DesktopControl)?;
@@ -224,8 +227,8 @@ impl App {
                 if root != frame && live.popups != win.popups { return Err(error("window_changed", "the popup changed before dispatch")); }
             }
             let mut dispatched = false;
-            tokio::time::timeout(Duration::from_secs(1), elements::perform(conn, key, &element, action.as_deref(), text.as_deref(), &mut dispatched)).await
-                .map_err(|_| if dispatched { error("uncertain", "the dispatched operation exceeded one second; it may still complete; do not retry automatically") } else { error("tree_timeout", "action validation exceeded one second before dispatch") })??;
+            tokio::time::timeout(Duration::from_secs(10), elements::perform(conn, key, &element, action.as_deref(), text.as_deref(), &mut dispatched)).await
+                .map_err(|_| if dispatched { error("uncertain", "the dispatched operation exceeded ten seconds; it may still complete; do not retry automatically") } else { error("tree_timeout", "action validation exceeded ten seconds before dispatch") })??;
         }
         self.element_refs.lock().unwrap().issue(&win, &mut element);
         Ok(element)
@@ -235,7 +238,7 @@ impl App {
         use crate::elements::{self, error, WaitResult};
         key.require(crate::tokens::Permission::DesktopView)?;
         if !self.elements { return Err(ApiError::Disabled("started without --elements")); }
-        if request.timeout_ms > 10000 { return Err(error("invalid", "wait timeout must be at most 10000 milliseconds")); }
+        if request.timeout_ms > 300000 { return Err(error("invalid", "wait timeout must be at most 300000 milliseconds")); }
         let (window, _) = self.window(id).map_err(|_| error("window_missing", "no such desktop window"))?;
         self.element_reference(&window, &request.target)?;
         let _permit = self.element_slots.try_acquire().map_err(|_| error("busy", "sixteen accessibility operations are already active"))?;
@@ -258,7 +261,7 @@ impl App {
                 };
                 if reference.is_some() && matches!(element.target, Some(elements::Target::Node { .. })) {
                     let conn = page.connection.as_ref().ok_or_else(|| error("bus_unavailable", "no accessibility connection"))?;
-                    element = tokio::time::timeout(Duration::from_secs(1), elements::refresh(conn, &element)).await.map_err(|_| error("tree_timeout", "target revalidation exceeded one second"))??;
+                    element = tokio::time::timeout(Duration::from_secs(5), elements::refresh(conn, &element)).await.map_err(|_| error("tree_timeout", "target revalidation exceeded five seconds"))??;
                 }
                 Ok((win, Some(element)))
             };

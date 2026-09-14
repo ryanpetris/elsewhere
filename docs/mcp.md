@@ -88,15 +88,14 @@ with the HTTP routes in `api.rs`. All require `--elements`. Reads and waits use
 viewer control ownership. The generated reference documents input and result schemas.
 
 An exact role/name selector must match one element in a complete, unambiguous window tree.
-References expire 30 seconds after their last issuance and retain the window ID, process ID, accessibility bus
+References expire five minutes after their last issuance and retain the window ID, process ID, accessibility bus
 identity, frame and object. The cache holds at most 4096 entries. Dispatch checks live
 ownership and capabilities again. Compositor buttons use existing window control commands.
 There is no coordinate fallback.
 
 Up to 16 accessibility operations run concurrently. Tree walks visit at most 3000 objects
 and return at most 500 application elements; reaching a bound marks the tree incomplete.
-A read has a two-second deadline; after a frame is matched, tree traversal stops at its 1.5-second deadline and returns a marked partial tree. Connection or window-matching failure can still return an error because no application ownership has been established. Mutation revalidation and dispatch each have a one-second
-deadline. Waits have a total deadline of at most ten seconds, with 100 ms between reads.
+A read, including traversal, has a five-second deadline. A traversal bound returns a marked partial tree. Connection or window-matching failure can return an error because application ownership has not been established. Mutation revalidation has a five-second deadline; dispatch and acknowledgement have ten seconds. Waits default to 30 seconds and allow up to five minutes, with 100 ms between reads.
 They own their polling futures, with no background wait workers or persistent subscriptions.
 MCP cancellation drops the operation; token expiry and revocation stop reads and waits.
 An already dispatched mutation may finish after cancellation or a transport error. Its

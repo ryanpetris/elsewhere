@@ -84,7 +84,7 @@ impl Target {
 
 #[derive(Clone, Serialize, JsonSchema)]
 pub struct Element {
-    /// Opaque reference valid for 30 seconds, within this window and server process.
+    /// Opaque reference valid for five minutes, within this window and server process.
     pub reference: Option<String>,
     /// Null means the toolkit did not provide the state.
     pub enabled: Option<bool>,
@@ -148,11 +148,11 @@ pub enum Condition { Present, Enabled, Disabled, Checked, Unchecked, Focused, Un
 pub struct ElementWait {
     pub target: Selector,
     pub condition: Condition,
-    /// 0 through 10000 milliseconds, including tree reads. Default 2000.
+    /// 0 through 300000 milliseconds, including tree reads. Default 30000.
     #[serde(default = "wait_timeout")]
     pub timeout_ms: u64,
 }
-fn wait_timeout() -> u64 { 2000 }
+fn wait_timeout() -> u64 { 30000 }
 
 #[derive(Serialize, JsonSchema)]
 pub struct WaitResult { pub matched: bool, pub elapsed_ms: u64, pub attempts: u32, pub element: Option<Element>, pub last_error: Option<WaitError> }
@@ -188,7 +188,7 @@ impl References {
             None => uuid::Uuid::new_v4().to_string(),
         };
         if self.0.len() >= 4096 { self.0.pop_front(); }
-        self.0.push_back((id.clone(), Reference { window: window.id, pid: window.pid, target: target.clone(), element: element.clone(), expires: now + Duration::from_secs(30) }));
+        self.0.push_back((id.clone(), Reference { window: window.id, pid: window.pid, target: target.clone(), element: element.clone(), expires: now + Duration::from_secs(300) }));
         element.reference = Some(id);
     }
 }
@@ -354,7 +354,7 @@ pub async fn elements(win: &WindowInfo, scale: f64, lone_window: bool) -> Result
 }
 
 async fn app_elements(win: &WindowInfo, scale: f64, lone_window: bool) -> Result<Page> {
-    let deadline = tokio::time::Instant::now() + Duration::from_millis(1500);
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(4500);
     // ponytail: a fresh bus connection per request; cache one if requests ever get frequent
     let conn = a11y_bus().await?;
     let dbus = zbus::fdo::DBusProxy::new(&conn).await?;

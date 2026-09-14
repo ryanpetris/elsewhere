@@ -102,11 +102,11 @@ pub struct ElementWaitArgs {
     pub window: u64,
     pub target: crate::elements::Selector,
     pub condition: crate::elements::Condition,
-    /// Maximum 10000 milliseconds. Default 2000.
+    /// Maximum 300000 milliseconds. Default 30000.
     #[serde(default = "element_wait_timeout")]
     pub timeout_ms: u64,
 }
-fn element_wait_timeout() -> u64 { 2000 }
+fn element_wait_timeout() -> u64 { 30000 }
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -336,7 +336,7 @@ impl Mcp {
         }
     }
 
-    #[tool(description = "Wait up to 10000 ms for a unique exact role/name or live reference to be present, enabled, disabled, checked, unchecked, focused, or unfocused. Requires --elements and desktop.view. Polls with a 100 ms pause between reads, stops on cancellation or token expiry/revocation, and returns matched=false on timeout with attempts, elapsed_ms, and last observed element. Ambiguity and stale references are errors. Unavailable application/state, bus, window-mapping and incomplete-tree failures are retried and returned in last_error on timeout.")]
+    #[tool(description = "Wait up to 300000 ms (default 30000 ms) for a unique exact role/name or live reference to be present, enabled, disabled, checked, unchecked, focused, or unfocused. Requires --elements and desktop.view. Polls with a 100 ms pause between reads, stops on cancellation or token expiry/revocation, and returns matched=false on timeout with attempts, elapsed_ms, and last observed element. Ambiguity and stale references are errors. Unavailable application/state, bus, window-mapping and incomplete-tree failures are retried and returned in last_error on timeout.")]
     async fn element_wait(&self, Extension(parts): Extension<Parts>, Parameters(args): Parameters<ElementWaitArgs>, context: RequestContext<RoleServer>) -> ToolResult {
         let key = match self.require_key(&parts, P::DesktopView) { Ok(key) => key, Err(e) => return done(Err(e)) };
         let request = crate::elements::ElementWait { target: args.target, condition: args.condition, timeout_ms: args.timeout_ms };

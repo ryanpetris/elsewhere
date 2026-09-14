@@ -166,7 +166,7 @@ try {
       assert.equal((await pending).status, 401); assert(Date.now() - revokeStart < 1000);
       const expiring = (await api('/api/tokens', 'POST', { label: 'Semantic expiry', permissions: ['desktop.view'], expires_at_ms: Date.now() + 500 })).body;
       assert.equal((await api(path + '/wait', 'POST', missing, expiring.token)).status, 401);
-      assert.equal((await api(path + '/wait', 'POST', { ...missing, timeout_ms: 10001 })).status, 400);
+      assert.equal((await api(path + '/wait', 'POST', { ...missing, timeout_ms: 300001 })).status, 400);
       const heldKey = (await api('/api/tokens', 'POST', { label: 'Semantic MCP', permissions: ['desktop.view'] })).body;
       const mcp = (method, params, id, session, auth = token) => fetch(origin + '/mcp', { method: 'POST', headers: { Authorization: 'Bearer ' + auth, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', ...(session && { 'Mcp-Session-Id': session }) }, body: JSON.stringify({ jsonrpc: '2.0', ...(id !== undefined && { id }), method, params }) });
       const init = await mcp('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'semantic-check', version: '1' } }, 1);

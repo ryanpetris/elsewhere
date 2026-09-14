@@ -34,7 +34,7 @@ For example, `/elsewhere/alice/api/windows` and `/elsewhere/alice/mcp` address t
    failure even when compositor decorations remain readable.
 3. **Use semantic actions** (`POST /api/windows/{id}/elements/action`, tool `element_action`)
    with `{ "target": { "reference": "..." }, "action": "<advertised name>" }`.
-   References expire 30 seconds after their last issuance and belong to the returned window and live application.
+   References expire five minutes after their last issuance and belong to the returned window and live application.
    Alternatively use `target: { "role": "button", "name": "Save" }`, which must match
    exactly one element in a complete tree. Text replacement uses `/elements/text` or
    `element_text` with `target` and `text`. MCP also takes `window`.
@@ -44,7 +44,7 @@ For example, `/elsewhere/alice/api/windows` and `/elsewhere/alice/mcp` address t
    Text edits also read back the value unless it is a masked password field. Read again to confirm
    action results. A reference can be evicted by the bounded cache; handle `stale` by reading again.
 4. **Wait for a state** (`POST /api/windows/{id}/elements/wait`, tool `element_wait`) with
-   `target`, `condition`, and optional `timeout_ms`, default 2000, maximum 10000.
+   `target`, `condition`, and optional `timeout_ms`, default 30000, maximum 300000.
    Conditions are `present`, `enabled`, `disabled`, `checked`, `unchecked`, `focused`, and
    `unfocused`. Reads and waits require `desktop.view`. A timeout returns `matched: false`,
    elapsed time, read attempts, and the last observed element. Missing exact selectors can

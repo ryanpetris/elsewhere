@@ -1189,7 +1189,7 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
           "type": "string"
         },
         "reference": {
-          "description": "Opaque reference valid for 30 seconds, within this window and server process.",
+          "description": "Opaque reference valid for five minutes, within this window and server process.",
           "type": [
             "string",
             "null"
@@ -1280,7 +1280,7 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
       "type": "string"
     },
     "reference": {
-      "description": "Opaque reference valid for 30 seconds, within this window and server process.",
+      "description": "Opaque reference valid for five minutes, within this window and server process.",
       "type": [
         "string",
         "null"
@@ -1443,10 +1443,10 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
       "$ref": "#/$defs/Selector"
     },
     "timeout_ms": {
-      "description": "0 through 10000 milliseconds, including tree reads. Default 2000.",
+      "description": "0 through 300000 milliseconds, including tree reads. Default 30000.",
       "type": "integer",
       "format": "uint64",
-      "default": 2000,
+      "default": 30000,
       "minimum": 0
     }
   },
@@ -1602,7 +1602,7 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
           "type": "string"
         },
         "reference": {
-          "description": "Opaque reference valid for 30 seconds, within this window and server process.",
+          "description": "Opaque reference valid for five minutes, within this window and server process.",
           "type": [
             "string",
             "null"
@@ -2057,7 +2057,7 @@ Replace all text in an editable UI element by window-bound reference or unique e
 
 ### `element_wait`
 
-Wait up to 10000 ms for a unique exact role/name or live reference to be present, enabled, disabled, checked, unchecked, focused, or unfocused. Requires --elements and desktop.view. Polls with a 100 ms pause between reads, stops on cancellation or token expiry/revocation, and returns matched=false on timeout with attempts, elapsed_ms, and last observed element. Ambiguity and stale references are errors. Unavailable application/state, bus, window-mapping and incomplete-tree failures are retried and returned in last_error on timeout.
+Wait up to 300000 ms (default 30000 ms) for a unique exact role/name or live reference to be present, enabled, disabled, checked, unchecked, focused, or unfocused. Requires --elements and desktop.view. Polls with a 100 ms pause between reads, stops on cancellation or token expiry/revocation, and returns matched=false on timeout with attempts, elapsed_ms, and last observed element. Ambiguity and stale references are errors. Unavailable application/state, bus, window-mapping and incomplete-tree failures are retried and returned in last_error on timeout.
 
 ```json
 {
@@ -2117,8 +2117,8 @@ Wait up to 10000 ms for a unique exact role/name or live reference to be present
       "$ref": "#/$defs/Selector"
     },
     "timeout_ms": {
-      "default": 2000,
-      "description": "Maximum 10000 milliseconds. Default 2000.",
+      "default": 30000,
+      "description": "Maximum 300000 milliseconds. Default 30000.",
       "format": "uint64",
       "minimum": 0,
       "type": "integer"

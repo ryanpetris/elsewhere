@@ -282,9 +282,9 @@ popup placement. Compositor decorations use `title bar` and `push button`, with 
 
 With `--elements`, POST `/api/windows/{id}/elements/action`, `/text`, or `/wait` takes a
 `target` that is either `{reference}` or exact `{role, name}`. Action adds an advertised
-`action`; text adds UTF-8 `text`; wait adds `condition` and optional `timeout_ms` up to 10000.
+`action`; text adds UTF-8 `text`; wait adds `condition` and optional `timeout_ms`, default 30000 and maximum 300000.
 Reads and waits require `desktop.view`; mutations require `desktop.control`, independently
-of viewer control ownership. References expire 30 seconds after their last issuance, are
+of viewer control ownership. References expire five minutes after their last issuance, are
 window/application-bound, and remain usable beyond a truncated prefix after live revalidation.
 There is no coordinate or keyboard fallback and no automatic retry of uncertain mutations.
 Wait results include `matched`, `elapsed_ms`, `attempts`, the last observed `element` and
