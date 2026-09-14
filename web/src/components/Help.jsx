@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
-import { Popover } from './Launcher.jsx';
+import { Popover } from './SearchMenu.jsx';
 import { IconButton } from './ui.jsx';
 
 export function Help({ viewer, onClose }) {
@@ -18,6 +18,7 @@ export function Help({ viewer, onClose }) {
       <IconButton ref={close} icon={X} label="Close Help" onClick={onClose} />
     </div>
     <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-2 p-3 text-xs">
+      <dt>Open Search</dt><dd><kbd className="kbd">Ctrl+Alt+Shift+S</kbd></dd>
       <dt>Show / hide controls</dt><dd><kbd className="kbd">Ctrl+Alt+Shift+H</kbd></dd>
       <dt>Release mouse capture</dt><dd><kbd className="kbd">Esc</kbd></dd>
       <dt>Release captured keyboard</dt><dd><kbd className="kbd">Hold Esc</kbd></dd>

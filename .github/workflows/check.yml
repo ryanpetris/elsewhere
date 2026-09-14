@@ -43,7 +43,7 @@ jobs:
           npm run check:visualiser
           npm run check:panel-windows
           npm run check:viewer-disposal
-          npm run check:command-palette
+          npm run check:search
           ELSEWHERE_BINARY="$PWD/../target/release/elsewhere" npm run check:participants
           node checks/settings.mjs
       - name: Software broadcast and TLS checks

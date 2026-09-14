@@ -107,7 +107,7 @@ try {
   await reader.waitForFunction(() => elsewhere.store.get().status === 'connected');
   assert.deepEqual(await reader.evaluate(() => elsewhere.store.get().permissions), ['desktop.view']);
   for (const selector of ['#terminal-toggle', '#power-toggle', '#clipboard-toggle']) assert.equal(await reader.locator(selector).count(), 0);
-  assert.equal(await reader.locator('#apps-toggle').count(), 1);
+  assert.equal(await reader.locator('#search-toggle').count(), 1);
   const victim = await create(['desktop.view', 'desktop.control']);
   const pending = await connect(victim.token, { hold: true });
   await pending.waitForFunction(() => boot.held.length > 0);

@@ -8,7 +8,7 @@ import { Stage } from './components/Stage.jsx';
 import { Sidebar } from './components/Sidebar.jsx';
 import { StatusBar } from './components/StatusBar.jsx';
 import { TokenForm } from './components/TokenForm.jsx';
-import { Launcher, PowerMenu } from './components/Launcher.jsx';
+import { SearchMenu, PowerMenu } from './components/SearchMenu.jsx';
 import { Help } from './components/Help.jsx';
 import { About } from './components/About.jsx';
 import { Settings } from './components/Settings.jsx';
@@ -60,6 +60,7 @@ export function App({ viewer }) {
   const [tab, setTab] = useState('windows');
   const filesOpen = useStore(viewer.store, s => s.filesOpen);
   useEffect(() => { if (filesOpen) { viewer.setControlsHidden(false); setSidebar(true); setTab('files'); } }, [filesOpen]);
+  const searchInvoker = useRef(null);
   const [menu, setMenu] = useState(null); // One top-bar menu at a time.
   useEffect(() => { if (['no-token', 'unauthorized'].includes(status)) setMenu(null); }, [status]);
   const toolbar = useRef(null);
@@ -80,8 +81,8 @@ export function App({ viewer }) {
   }, [focusAfterClose]);
   const closeMenu = (event, focus) => {
     setMenu(current => current === menu ? null : current);
-    if (menu === 'apps') {
-      setFocusAfterClose({ target: focus || (event?.type === 'keydown' || event?.detail === 0 ? '#apps-toggle' : 'canvas.stage') });
+    if (menu === 'search') {
+      setFocusAfterClose({ target: focus || (event?.type === 'keydown' || event?.detail === 0 ? searchInvoker.current : 'canvas.stage') });
       return;
     }
     if (event?.type === 'keydown' || event?.detail === 0) document.getElementById(`${menu}-toggle`)?.focus();
@@ -96,11 +97,18 @@ export function App({ viewer }) {
     return () => document.removeEventListener('fullscreenchange', on);
   }, [viewer]);
   useEffect(() => viewer.setElementsOn(elements && !windowMode && !PIP), [viewer, elements, windowMode]);
-  const openPalette = () => {
+  const openSearch = () => {
+    if (['no-token', 'unauthorized'].includes(viewer.store.get().status)) return;
+    if (menu === 'search') { closeMenu({ type: 'keydown' }); return; }
+    searchInvoker.current = document.activeElement;
     viewer.releaseInput();
     if (document.pointerLockElement) document.exitPointerLock();
-    setMenu('apps');
+    setMenu('search');
   };
+  useEffect(() => {
+    viewer.openSearch = openSearch;
+    return () => { viewer.openSearch = null; };
+  }, [viewer, menu]);
   const revealControls = async current => {
     if (!current()) return false;
     viewer.setControlsHidden(false);
@@ -111,7 +119,7 @@ export function App({ viewer }) {
     const state = viewer.store.get();
     return !windowMode && !PIP && state.status === 'connected' && state.permissions.includes(permission);
   };
-  const paletteActions = [
+  const searchActions = [
     { id: 'files', label: 'Files', available: () => available('files.browse'), run: current => showPanel('files', current), focus: 'aside button[aria-label="Files"]' },
     { id: 'terminal', label: 'Terminal', available: () => available('commands.execute'), run: async current => {
       const module = await import('./components/TerminalPanel.jsx');
@@ -136,11 +144,11 @@ export function App({ viewer }) {
         sidebar={sidebar} onSidebar={() => setSidebar(!sidebar)}
         fullscreen={fullscreen} onFullscreen={() => viewer.isFullscreen() ? document.exitFullscreen().catch(() => {}) : viewer.fullscreen()}
         onHideControls={() => viewer.setControlsHidden(true)}
-        menu={menu} onMenu={m => { if (m === 'apps' && menu !== 'apps') openPalette(); else if (m === null || menu === m) closeMenu({ type: 'click', detail: 1 }); else setMenu(m); }}
+        menu={menu} onMenu={m => { if (m === 'search' && menu !== 'search') openSearch(); else if (m === null || menu === m) closeMenu({ type: 'click', detail: 1 }); else setMenu(m); }}
         keyboard={keyboard} onKeyboard={toggleKeyboard} canType={canType}
       /></div>
       {menu === 'about' && !hidden && <About viewer={viewer} onClose={closeMenu} />}
-      {menu === 'apps' && <Launcher viewer={viewer} actions={paletteActions} onClose={closeMenu} />}
+      {menu === 'search' && <SearchMenu viewer={viewer} actions={searchActions} onClose={closeMenu} />}
       {menu === 'help' && <Help viewer={viewer} onClose={closeMenu} />}
       {menu === 'power' && <PowerMenu viewer={viewer} onClose={closeMenu} />}
       {menu === 'settings' && !windowMode && !hidden && <Settings viewer={viewer} borders={borders} onBorders={setBorders} elements={elements} onElements={setElements} onClose={closeMenu} />}

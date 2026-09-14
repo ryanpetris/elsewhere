@@ -4,7 +4,7 @@ import { Clipboard, ClipboardCheck, ClipboardX, Download, FileText, LoaderCircle
 import { useStore } from '../store.js';
 import { downloadClipboardFile } from '../api.js';
 import { CLIPBOARD_IMAGE_BYTES, CLIPBOARD_IMAGE_PIXELS } from '../clipboard.js';
-import { Popover } from './Launcher.jsx';
+import { Popover } from './SearchMenu.jsx';
 import { IconButton, cx } from './ui.jsx';
 
 const sizeLabel = size => size == null ? '' : size < 1024 ? `${size} bytes` : `${(size / 1024).toFixed(1)} KiB`;

@@ -24,7 +24,7 @@ export const Popover = forwardRef(function Popover({ onClose, onKeyDown, classNa
   );
 });
 
-export function Launcher({ viewer, actions, onClose }) {
+export function SearchMenu({ viewer, actions, onClose }) {
   const windows = useStore(viewer.store, s => s.windows);
   const permissions = useStore(viewer.store, s => s.permissions);
   const status = useStore(viewer.store, s => s.status);
@@ -102,8 +102,8 @@ export function Launcher({ viewer, actions, onClose }) {
       }} className="left-2 max-h-[75vh] w-[27rem] max-w-[calc(100vw-1rem)] sm:left-3">
       <label className="flex items-center gap-2.5 border-b border-line px-3 py-2.5">
         <Search className="size-4 shrink-0 text-ink-3" />
-        <input ref={input} autoFocus value={q} aria-label="Search" role="combobox" aria-expanded="true" aria-controls="command-results"
-          aria-activedescendant={selected ? `command-${selected.key}` : undefined}
+        <input ref={input} autoFocus value={q} aria-label="Search" role="combobox" aria-expanded="true" aria-controls="search-results"
+          aria-activedescendant={selected ? `search-${selected.key}` : undefined}
           onChange={e => { setQ(e.target.value); setSelection(null); setError(''); }}
           onFocus={viewer.releaseInput}
           onCompositionStart={() => { composing.current = true; }}
@@ -121,13 +121,13 @@ export function Launcher({ viewer, actions, onClose }) {
       {loadFailed && <div role="alert" className="flex items-center gap-2 px-3 py-2 text-sm text-warn">Applications could not load.<button type="button" className="btn btn-outline btn-sm" onClick={() => { input.current?.focus(); setAttempt(value => value + 1); }}>Retry</button></div>}
       {error && <p role="alert" className="px-3 py-2 text-sm text-warn">{error}</p>}
       {canLaunch && apps === null && <p role="status" className="px-3 py-2 text-sm text-ink-4">Loading applications…</p>}
-      <div ref={list} id="command-results" role="listbox" aria-label="Results" className="min-h-0 flex-1 overflow-y-auto p-2">
+      <div ref={list} id="search-results" role="listbox" aria-label="Results" className="min-h-0 flex-1 overflow-y-auto p-2">
         {!ordered.length && <p className="px-2 py-8 text-center text-sm text-ink-4">Nothing matches.</p>}
         {groups.filter(([, entries]) => entries.length).map(([label, entries]) => (
           <section key={label} role="group" aria-label={label} className="mb-1.5">
             <h3 className="eyebrow px-2 pt-2 pb-1">{label}</h3>
             {entries.map(entry => (
-              <button key={entry.key} id={`command-${entry.key}`} role="option" aria-selected={selected?.key === entry.key}
+              <button key={entry.key} id={`search-${entry.key}`} role="option" aria-selected={selected?.key === entry.key}
                 type="button" disabled={entry.kind === 'window' && !permissions.includes('desktop.control')} tabIndex={-1} data-entry={entry.key} onClick={() => invoke(entry)}
                 onMouseMove={() => setSelection(entry.key)}
                 className={cx('flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors', selected?.key === entry.key ? 'bg-surface-3' : 'hover:bg-surface-2')}>

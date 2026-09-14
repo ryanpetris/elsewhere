@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { Users, MousePointer2, X } from 'lucide-react';
 import { useStore } from '../store.js';
-import { Popover } from './Launcher.jsx';
+import { Popover } from './SearchMenu.jsx';
 
 export function Participants({ viewer, menu, onMenu }) {
   const roster = useStore(viewer.store, s => s.roster);

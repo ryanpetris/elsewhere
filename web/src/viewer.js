@@ -1247,9 +1247,15 @@ export function createViewer() {
     canvas?.focus({ preventScroll: true });
     if (hidden) notice('Ctrl+Alt+Shift+H to show controls.', 'success');
   }
-  let controlsKey = false;
+  let controlsKey = false, searchKey = false;
   const controlsShortcut = e => {
     if (PIP || disposed) return;
+    if (e.code === 'KeyS' && (searchKey || e.ctrlKey && e.altKey && e.shiftKey && !e.metaKey)) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      if (e.type === 'keydown' && !e.repeat) { searchKey = true; viewer.openSearch?.(); }
+      if (e.type === 'keyup') searchKey = false;
+      return;
+    }
     if (e.code !== 'KeyH' || !(controlsKey || e.ctrlKey && e.altKey && e.shiftKey && !e.metaKey)) return;
     e.preventDefault(); e.stopImmediatePropagation();
     if (e.type === 'keydown' && !e.repeat) {
@@ -1297,7 +1303,7 @@ export function createViewer() {
   // a deferred paste chord must not fire after its modifier was released; no key is held during a native
   // drag, and the release would let go of the drag while its files are still uploading
   const releaseInput = () => { forwardedKeys.clear(); pendingPaste = null; clearTimeout(pasteTimer); clearPasteTarget(); send(BLUR, 0); };
-  const blur = () => { controlsKey = false; if (keyboardPending) releaseKeyboard(); pendingPaste = null; if (!dragging) releaseInput(); };
+  const blur = () => { controlsKey = false; searchKey = false; if (keyboardPending) releaseKeyboard(); pendingPaste = null; if (!dragging) releaseInput(); };
   window.addEventListener('blur', blur);
   document.addEventListener('visibilitychange', () => { if (document.hidden) blur(); });
   if (WINDOW) window.addEventListener('focus', () => sendControl({ id: +WINDOW, op: 'focus' }));

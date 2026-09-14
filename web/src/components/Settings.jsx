@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Maximize, MousePointer2, ScanSearch, SquareDashed } from 'lucide-react';
 import { api } from '../api.js';
 import { useStore } from '../store.js';
-import { Popover } from './Launcher.jsx';
+import { Popover } from './SearchMenu.jsx';
 
 function Toggle({ inputRef, icon: Icon, label, description, id, checked, onChange, disabled = false }) {
   return (

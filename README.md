@@ -83,7 +83,7 @@ controls. Use the highlighted **Show Controls** button at the left of the status
 mode belongs to this viewer and resets on reload; hidden terminal sessions stay open. Browser tabs and
 the address bar stay visible in windowed mode.
 
-Open **Search** from the toolbar. Search Applications, Windows, and Viewer actions by name,
+Open **Search** from the toolbar or with **Ctrl+Alt+Shift+S**. Search Applications, Windows, and Viewer actions by name,
 application description or window application ID. Arrow keys select, Enter invokes, and Escape
 returns focus. Window IDs distinguish matching titles. Applications launch a new instance; Windows
 activate an existing window, including a minimized one. Viewer actions open Files, Terminal,

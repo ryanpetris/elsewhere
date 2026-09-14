@@ -652,8 +652,8 @@ read it with `useSyncExternalStore` and send actions back through the engine.
   through viewer.type, composition waits for compositionend, and line breaks and deletions use
   viewer.key. Both methods send Input (0x91), the InputMsg of POST /api/input, through the WebSocket
   and the compositor's keymap in order with pointer input. View-only sessions have no keyboard control.
-- **Search** (`Launcher.jsx`): applications from `GET /api/applications`, live windows and
-  viewer actions in separate groups, opened from the toolbar.
+- **Search** (`SearchMenu.jsx`): applications from `GET /api/applications`, live windows and
+  viewer actions in separate groups, opened from the toolbar or with Ctrl+Alt+Shift+S.
   Substring search matches names, descriptions and application IDs. Arrow keys select and Enter invokes;
   Escape restores the invoking control. IDs distinguish duplicate names. Launch and activation use their
   existing grants; local controls remain available without `apps.launch`. Window popups offer fullscreen

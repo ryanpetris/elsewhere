@@ -10,7 +10,7 @@ const server = createServer(async (req, res) => {
   const path = new URL(req.url, 'http://localhost').pathname;
   if (path.startsWith('/api/')) {
     res.setHeader('Content-Type', 'application/json');
-    if (path === '/api/applications') { requests++; if (failApps) { res.writeHead(503); return res.end('{}'); } return res.end(JSON.stringify(Array.from({ length: 500 }, (_, i) => ({ id: `app${i}`, name: i < 2 ? 'Duplicate application' : `Application ${i}`, comment: 'Palette fixture', categories: [] })))); }
+    if (path === '/api/applications') { requests++; if (failApps) { res.writeHead(503); return res.end('{}'); } return res.end(JSON.stringify(Array.from({ length: 500 }, (_, i) => ({ id: `app${i}`, name: i < 2 ? 'Duplicate application' : `Application ${i}`, comment: 'Search fixture', categories: [] })))); }
     if (path === '/api/control') { launches++; if (delayLaunch) { finishLaunch = () => res.end('{}'); return; } return res.end('{}'); }
     if (path.endsWith('/icon')) { res.writeHead(404); return res.end('{}'); }
     return res.end('[]');
@@ -42,8 +42,8 @@ try {
   await page.evaluate(permissions => elsewhere.store.set({ status: 'connected', permissions, role: 'controller', windows: [
     { id: 1, title: 'Duplicate', app_id: 'fixture', z: 1 }, { id: 2, title: 'Duplicate', app_id: 'fixture', minimized: true, z: 2 },
   ] }), permissions);
-  const input = page.getByRole('combobox', { name: 'Search' });
-  const open = async () => { await page.locator('#apps-toggle').click(); await input.waitFor(); };
+  const input = page.getByRole('combobox', { name: 'Search', exact: true });
+  const open = async () => { await page.locator('#search-toggle').click(); await input.waitFor(); };
   const begin = performance.now();
   await open();
   await page.locator('[data-entry="app:app499"]').waitFor();
@@ -60,6 +60,28 @@ try {
   await input.press('Enter');
   await input.waitFor({ state: 'hidden' });
   assert.equal(launches, 1);
+  const shortcut = 'Control+Alt+Shift+S';
+  for (const mode of ['visible', 'hidden', 'fullscreen']) {
+    if (mode === 'hidden') await page.evaluate(() => elsewhere.setControlsHidden(true));
+    if (mode === 'fullscreen') {
+      await page.evaluate(() => elsewhere.setControlsHidden(false));
+      await page.getByRole('button', { name: 'Fullscreen', exact: true }).click();
+      await page.waitForFunction(() => !!document.fullscreenElement);
+    }
+    await page.locator('canvas.stage').focus();
+    const start = await page.evaluate(() => sent.length);
+    await page.keyboard.down('Control'); await page.keyboard.down('Alt'); await page.keyboard.down('Shift');
+    await page.keyboard.down('s'); await input.waitFor();
+    await page.keyboard.down('s');
+    assert(await input.isVisible(), 'key repeat keeps Search open');
+    await page.keyboard.up('Shift'); await page.keyboard.up('Alt'); await page.keyboard.up('Control'); await page.keyboard.up('s');
+    await page.keyboard.press(shortcut); await input.waitFor({ state: 'hidden' });
+    assert(await page.locator('canvas.stage').evaluate(el => el === document.activeElement));
+    assert.equal(await page.evaluate(({ start, key }) => sent.slice(start).filter(b => b[0] === key && b[1] === 31 && b[2] === 0).length, { start, key: KEY }), 0, 'Search chord stays local');
+    if (mode === 'fullscreen') { assert(await page.evaluate(() => !!document.fullscreenElement)); await page.evaluate(() => document.exitFullscreen()); }
+  }
+  await page.evaluate(() => elsewhere.setControlsHidden(false));
+
   await open();
   await input.fill('fixture · #');
   await input.press('ArrowDown');
@@ -73,7 +95,7 @@ try {
   assert.equal(await page.evaluate(tag => sent.filter(bytes => bytes[0] === tag).length, CONTROL), 1);
   await page.locator('canvas.stage').focus();
   await page.keyboard.down('a');
-  await open();
+  await page.keyboard.press(shortcut); await input.waitFor();
   const afterOpen = await page.evaluate(() => sent.length);
   await input.fill('Settings');
   await input.dispatchEvent('compositionstart');
@@ -110,7 +132,7 @@ try {
   await input.press('Escape'); await open();
   finishLaunch(); delayLaunch = false;
   await page.waitForTimeout(50);
-  assert(await input.isVisible(), 'an old launch cannot dismiss a reopened palette');
+  assert(await input.isVisible(), 'an old launch cannot dismiss a reopened search');
   await input.fill('Duplicate');
   await page.evaluate(() => elsewhere.store.set({ windows: elsewhere.store.get().windows.map(w => ({ ...w, title: 'Renamed window' })) }));
   await page.waitForFunction(() => !document.querySelector('[data-entry^="window:"]'));
@@ -140,11 +162,11 @@ try {
   assert.equal(await page.locator('[data-entry="action:terminal"]').count(), 0);
   await input.press('Escape');
   await page.evaluate(() => elsewhere.setControlsHidden(false));
-  await page.locator('#apps-toggle').click();
+  await page.locator('#search-toggle').click();
   await input.press('Tab'); assert(await input.evaluate(el => el === document.activeElement));
   await input.press('Escape');
   await input.waitFor({ state: 'hidden' });
-  assert(await page.locator('#apps-toggle').evaluate(el => el === document.activeElement));
+  assert(await page.locator('#search-toggle').evaluate(el => el === document.activeElement));
   await open();
   await input.fill('settings');
   await input.press('Enter');
@@ -152,7 +174,7 @@ try {
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Help', exact: true }).click();
   await page.getByRole('dialog', { name: 'Help', exact: true }).waitFor();
-  assert.match(await page.getByRole('dialog', { name: 'Help', exact: true }).innerText(), /Ctrl\+Alt\+Shift\+H/);
+  assert.match(await page.getByRole('dialog', { name: 'Help', exact: true }).innerText(), /Ctrl\+Alt\+Shift\+S/);
   await page.keyboard.press('Escape');
   assert(await page.locator('#help-toggle').evaluate(el => el === document.activeElement));
   const before = requests;
@@ -165,8 +187,9 @@ try {
   assert.deepEqual(await page.getByRole('option').allTextContents(), ['Fullscreen', 'Hide Controls']);
   await input.press('Escape');
   await page.evaluate(() => elsewhere.store.set({ status: 'unauthorized', permissions: [] }));
-  await page.waitForFunction(() => !document.getElementById('apps-toggle'));
-  assert.equal(await input.count(), 0, 'authorization form keeps the palette unavailable');
+  await page.waitForFunction(() => !document.getElementById('search-toggle'));
+  await page.keyboard.press(shortcut);
+  assert.equal(await input.count(), 0, 'authorization form keeps the search unavailable');
   assert.deepEqual(errors, []);
-  console.log('Palette search, stale selection, grants, composition, held input, hidden controls, settings, popup and repeated opening passed');
+  console.log('Search shortcut, stale selection, grants, composition, held input, hidden controls, settings, popup and repeated opening passed');
 } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }

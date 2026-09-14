@@ -7,7 +7,7 @@ import { useStore } from '../store.js';
 import { EFFORTS, PRESETS, TRANSPORTS } from '../protocol.js';
 import { IconButton, codecName, cx } from './ui.jsx';
 import { ClipboardControl } from './Clipboard.jsx';
-import { Popover } from './Launcher.jsx';
+import { Popover } from './SearchMenu.jsx';
 
 const PRESET_LABEL = { 'very-low': 'Very Low', low: 'Low', medium: 'Medium', high: 'High', max: 'Max' };
 const EFFORT_LABEL = { fast: 'Fast', balanced: 'Balanced', high: 'High' };

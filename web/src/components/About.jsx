@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { ExternalLink, GitBranch, ScrollText, X } from 'lucide-react';
-import { Popover } from './Launcher.jsx';
+import { Popover } from './SearchMenu.jsx';
 import { IconButton } from './ui.jsx';
 
 export function About({ viewer, onClose }) {
