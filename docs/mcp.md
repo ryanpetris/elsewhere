@@ -93,10 +93,26 @@ identity, frame and object. The cache holds at most 4096 entries. Dispatch check
 ownership and capabilities again. Compositor buttons use existing window control commands.
 There is no coordinate fallback.
 
-Up to 16 accessibility operations run concurrently. Tree walks visit at most 3000 objects
-and return at most 500 application elements; reaching a bound marks the tree incomplete.
-A read, including traversal, has a five-second deadline. A traversal bound returns a marked partial tree. Connection or window-matching failure can return an error because application ownership has not been established. Mutation revalidation has a five-second deadline; dispatch and acknowledgement have ten seconds. Waits default to 30 seconds and allow up to five minutes, with 100 ms between reads.
-They own their polling futures, with no background wait workers or persistent subscriptions.
+Pending accessibility requests have no fixed count limit. The scheduler batches tree reads by
+window, with at most eight scans active and one per window. Each application has at most two active scans, one
+reference revalidation and one mutation. Revalidation and mutations each have four active slots.
+Admission rotates between competing tokens, including every token waiting for a shared reference
+check. Windows belonging to an application without a process ID are scheduled separately.
+
+Ready work starts on arrival, completion or permit release. A 100 ms sweep prunes abandoned work
+while requests are pending. New reads and waits use scans started after their arrival. Mutations
+obtain admission before scanning, so queued mutations retain neither old trees nor bus connections.
+Completed observations are not cached for later requests. Reference waits share revalidation
+results within an observation; queued reference checks retain target metadata and open their bus
+connection only when admitted.
+
+Tree walks visit at most 3000 objects and return at most 500 application elements; reaching a
+bound marks the tree incomplete. Once admitted, a scan has a five-second deadline. A traversal
+bound returns a marked partial tree. Connection or window-matching failure can return an error
+because application ownership has not been established. Mutation revalidation has a five-second
+deadline; dispatch and acknowledgement have ten seconds. Waits default to 30 seconds and allow
+up to five minutes. Repeat observations use a shared 100 ms schedule. Their deadlines and cancellation
+remain independent of admission and scan completion. Polling intervals may stretch under load.
 MCP cancellation drops the operation; token expiry and revocation stop reads and waits.
 An already dispatched mutation may finish after cancellation or a transport error. Its
 outcome is uncertain, so callers must inspect state and must not retry automatically.

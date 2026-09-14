@@ -31,7 +31,7 @@ const ROUTES: &str = "\
 | `POST /api/notifications/{id}` | `{\"action\": \"default\" \\| \"<key>\"}`, or `{}` to dismiss | click, invoke an action of, or dismiss a notification; `202`, `404` |
 | `GET /api/notifications/{id}/icon` | | the notification's picture (the application's, else its launcher's); `404` none |
 | `GET /api/windows/{id}/elements` | | desktop.view; **Elements**; `501` without `--elements`, `503` tree unreadable, `404` unknown window |
-| `POST /api/windows/{id}/elements/action` | **ElementAction** | desktop.control; **Element** validated before dispatch; invokes one advertised action; `400/401/403/404/409/422/429/501/503` with error and code |
+| `POST /api/windows/{id}/elements/action` | **ElementAction** | desktop.control; **Element** validated before dispatch; invokes one advertised action; `400/401/403/404/409/422/501/503` with error and code |
 | `POST /api/windows/{id}/elements/text` | **ElementText** | desktop.control; **Element** validated before dispatch; replaces editable text; same error statuses as action |
 | `POST /api/windows/{id}/elements/wait` | **ElementWait** | desktop.view; **ElementWaitResult**, including matched=false on timeout; same error statuses as action |
 | `GET /api/windows/{id}/snapshot.png` | one optional `width`, `height`, or `percentage`; default native | PNG of the window; `404`, `429` another snapshot in flight, `500` render failed, `503` |

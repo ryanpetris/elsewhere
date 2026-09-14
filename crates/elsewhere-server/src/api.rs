@@ -27,7 +27,7 @@ pub fn clipboard_limit(mime: &str) -> usize {
 
 use crate::{App, apps, elements::Page};
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum ApiError {
     Element { code: &'static str, message: String },
     Broadcast { code: &'static str, message: String },
@@ -65,7 +65,7 @@ impl ApiError {
                 "invalid" => StatusCode::BAD_REQUEST, "missing" | "stale" | "window_missing" => StatusCode::NOT_FOUND,
                 "ambiguous" | "ambiguous_window" | "disabled" | "incomplete_tree" | "window_changed" => StatusCode::CONFLICT,
                 "unsupported" | "state_unavailable" | "rejected" => StatusCode::UNPROCESSABLE_ENTITY,
-                "busy" => StatusCode::TOO_MANY_REQUESTS, "cancelled" => StatusCode::REQUEST_TIMEOUT,
+                "cancelled" => StatusCode::REQUEST_TIMEOUT,
                 _ => StatusCode::SERVICE_UNAVAILABLE,
             },
             ApiError::Broadcast { code, .. } => match *code { "invalid" => StatusCode::BAD_REQUEST, "missing" => StatusCode::NOT_FOUND, "conflict" => StatusCode::CONFLICT, "busy" => StatusCode::TOO_MANY_REQUESTS, _ => StatusCode::SERVICE_UNAVAILABLE },
@@ -141,7 +141,13 @@ impl App {
         windows
     }
 
-    async fn element_scan(&self, key: &crate::Key, id: u64) -> Result<(WindowInfo, Page), ApiError> {
+    async fn element_observation(self: &std::sync::Arc<Self>, key: &crate::Key, id: u64) -> Result<std::sync::Arc<crate::element_scheduler::Observation>, ApiError> {
+        if !self.elements { return Err(ApiError::Disabled("started without --elements")); }
+        let (window, _) = self.window(id).map_err(|_| crate::elements::error("window_missing", "no such desktop window"))?;
+        self.element_scheduler().scan(key, id, crate::element_scheduler::Application::of(&window)).await
+    }
+
+    pub(crate) async fn element_scan(&self, id: u64) -> Result<(WindowInfo, Page), ApiError> {
         use crate::elements::error;
         if !self.elements { return Err(ApiError::Disabled("started without --elements")); }
         let (win, scale, windows) = {
@@ -157,11 +163,8 @@ impl App {
             page.windows = windows.clone();
             Ok(page)
         };
-        let page = tokio::select! {
-            biased;
-            _ = key.ended() => return Err(ApiError::Unauthorized),
-            result = tokio::time::timeout(Duration::from_secs(5), read) => result.map_err(|_| error("tree_timeout", "accessibility tree read exceeded five seconds"))??,
-        };
+        let page = tokio::time::timeout(Duration::from_secs(5), read).await
+            .map_err(|_| error("tree_timeout", "accessibility tree read exceeded five seconds"))??;
         let (live, _) = self.window(id).map_err(|_| error("window_missing", "desktop window disappeared during the read"))?;
         if live.pid != win.pid || self.element_windows(&live) != windows { return Err(error("window_changed", "application windows changed during the read")); }
         Ok((win, page))
@@ -181,25 +184,26 @@ impl App {
     }
 
     /// Current accessibility state, with bounded references scoped to this window.
-    pub async fn elements(&self, key: &crate::Key, id: u64) -> Result<Page, ApiError> {
+    pub async fn elements(self: &std::sync::Arc<Self>, key: &crate::Key, id: u64) -> Result<Page, ApiError> {
         key.require(crate::tokens::Permission::DesktopView)?;
-        let _permit = self.element_slots.try_acquire().map_err(|_| crate::elements::error("busy", "sixteen accessibility operations are already active"))?;
-        let (win, mut page) = self.element_scan(key, id).await?;
+        let observation = self.element_observation(key, id).await?;
+        let (win, mut page) = (&observation.window, observation.page.clone());
         let mut refs = self.element_refs.lock().unwrap();
         for element in &mut page.elements { refs.issue(&win, element); }
         Ok(page)
     }
 
     /// Execute one advertised semantic mutation, without coordinate fallback or retries.
-    pub async fn element_mutation(&self, key: &crate::Key, id: u64, selector: crate::elements::Selector, action: Option<String>, text: Option<String>) -> Result<crate::elements::Element, ApiError> {
+    pub async fn element_mutation(self: &std::sync::Arc<Self>, key: &crate::Key, id: u64, selector: crate::elements::Selector, action: Option<String>, text: Option<String>) -> Result<crate::elements::Element, ApiError> {
         use crate::elements::{self, error, Target};
         use crate::tokens::Permission::DesktopControl;
         key.require(DesktopControl)?;
         if text.as_ref().is_some_and(|t| t.len() > 65536) || action.as_ref().is_some_and(|a| a.len() > 256) { return Err(error("invalid", "text exceeds 65536 bytes or action name exceeds 256 bytes")); }
-        let _permit = self.element_slots.try_acquire().map_err(|_| error("busy", "sixteen accessibility operations are already active"))?;
         let (initial, _) = self.window(id).map_err(|_| error("window_missing", "no such desktop window"))?;
         self.element_reference(&initial, &selector)?;
-        let (win, page) = self.element_scan(key, id).await?;
+        let _permit = self.element_scheduler().mutation(key, crate::element_scheduler::Application::of(&initial)).await?;
+        let observation = self.element_observation(key, id).await?;
+        let (win, page) = (&observation.window, &observation.page);
         let reference = self.element_reference(&win, &selector)?;
         let mut element = elements::select(&page, &selector, reference.as_ref())?;
         let _admission = key.admit_dispatch().await?;
@@ -231,14 +235,13 @@ impl App {
         Ok(element)
     }
 
-    pub async fn element_wait(&self, key: &crate::Key, id: u64, request: crate::elements::ElementWait) -> Result<crate::elements::WaitResult, ApiError> {
+    pub async fn element_wait(self: &std::sync::Arc<Self>, key: &crate::Key, id: u64, request: crate::elements::ElementWait) -> Result<crate::elements::WaitResult, ApiError> {
         use crate::elements::{self, error, WaitResult};
         key.require(crate::tokens::Permission::DesktopView)?;
         if !self.elements { return Err(ApiError::Disabled("started without --elements")); }
         if request.timeout_ms > 300000 { return Err(error("invalid", "wait timeout must be at most 300000 milliseconds")); }
         let (window, _) = self.window(id).map_err(|_| error("window_missing", "no such desktop window"))?;
         self.element_reference(&window, &request.target)?;
-        let _permit = self.element_slots.try_acquire().map_err(|_| error("busy", "sixteen accessibility operations are already active"))?;
         let started = tokio::time::Instant::now();
         let deadline = started + Duration::from_millis(request.timeout_ms);
         let mut attempts = 0;
@@ -249,7 +252,8 @@ impl App {
         while tokio::time::Instant::now() < deadline {
             attempts += 1;
             let observe = async {
-                let (win, page) = self.element_scan(key, id).await?;
+                let observation = self.element_observation(key, id).await?;
+                let (win, page) = (observation.window.clone(), &observation.page);
                 let reference = self.element_reference(&win, &request.target)?;
                 let mut element = match elements::select(&page, &request.target, reference.as_ref()) {
                     Ok(element) => element,
@@ -257,8 +261,11 @@ impl App {
                     Err(error) => return Err(error),
                 };
                 if reference.is_some() && matches!(element.target, Some(elements::Target::Node { .. })) {
-                    let conn = page.connection.as_ref().ok_or_else(|| error("bus_unavailable", "no accessibility connection"))?;
-                    element = tokio::time::timeout(Duration::from_secs(5), elements::refresh(conn, &element)).await.map_err(|_| error("tree_timeout", "target revalidation exceeded five seconds"))??;
+                    if let elements::Selector::Reference { reference } = &request.target {
+                        let cell = observation.reference(reference);
+                        drop(observation);
+                        element = self.element_scheduler().refresh(key, crate::element_scheduler::Application::of(&win), cell, element).await?;
+                    }
                 }
                 Ok((win, Some(element)))
             };
@@ -289,7 +296,7 @@ impl App {
                 },
                 Err(error) => return Err(error),
             }
-            tokio::select! { biased; _ = key.ended() => return Err(ApiError::Unauthorized), _ = tokio::time::sleep_until(deadline.min(tokio::time::Instant::now() + Duration::from_millis(100))) => {} }
+            tokio::select! { biased; _ = key.ended() => return Err(ApiError::Unauthorized), _ = tokio::time::sleep_until(deadline.min(self.element_scheduler().next_poll())) => {} }
         }
         if let (Some(win), Some(element)) = (last_window, &mut last) { self.element_refs.lock().unwrap().issue(&win, element); }
         Ok(WaitResult { matched: false, elapsed_ms: started.elapsed().as_millis() as u64, attempts, element: last, last_error })

@@ -213,8 +213,10 @@ the mechanism.
 - **Walk.** Depth first from the toplevel, in document order; a node whose state lacks SHOWING is skipped
   with its whole subtree (this cuts a Firefox window from about 1700 nodes to about 400). Nodes whose
   role is interactive (buttons, toggles, links, text fields, menus, tabs, sliders, list and tree items,
-  scroll bars, headings) and whose extents are non-empty are returned; at most 500 from at most 3000
-  visited. One request takes tens of milliseconds locally; the handler gives up after 2 s.
+  scroll bars, headings) are returned even when their geometry is unavailable; check `bounds_available`
+  before using coordinates. The walk returns at most 500 elements from at most 3000 visited objects.
+  Requests share scans by window. An admitted scan has a five-second deadline; queued requests do not
+  occupy active scan capacity.
 - **Coordinates.** Only window-relative extents are usable: the screen variant is all zeros on Wayland,
   since clients don't know where they are. Toolkits disagree on what "window" means. GTK 4 measures from
   the xdg geometry; GTK 3 and Chromium from the whole surface including the client-side shadow; Firefox

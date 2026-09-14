@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 kind, result_path = sys.argv[1:3]
+behavior = sys.argv[3] if len(sys.argv) > 3 else ""
 state = {"clicks": 0, "checked": False, "text": ""}
 def record(**values):
     state.update(values)
@@ -15,7 +16,7 @@ if kind == "gtk":
     import gi
     gi.require_version("Gtk", "3.0")
     from gi.repository import Gtk, Gdk, GLib
-    win = Gtk.Window(title="Semantic gtk")
+    win = Gtk.Window(title="Semantic gtk" + (" " + behavior if behavior else ""))
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
     win.add(box)
     def button(label, callback):
@@ -33,6 +34,26 @@ if kind == "gtk":
     entry = Gtk.Entry()
     entry.get_accessible().set_name("Message")
     entry.connect("changed", lambda w: record(text=w.get_text()))
+    if behavior == "slow":
+        import time
+        entry.connect("changed", lambda w: time.sleep(4) if w.get_text().startswith("slow") else None)
+    if behavior == "deferred":
+        delaying = [False]
+        def defer(widget):
+            text = widget.get_text()
+            if delaying[0] or not text.startswith("deferred"):
+                return
+            delaying[0] = True
+            widget.set_text("pending")
+            record(waiting=True)
+            def finish():
+                button("Commit", lambda _: record(wrong=True)).show()
+                widget.set_text(text)
+                record(duplicate=True)
+                delaying[0] = False
+                return False
+            GLib.timeout_add(1000, finish)
+        entry.connect("changed", defer)
     box.pack_start(entry, False, False, 0)
     secret = Gtk.Entry()
     secret.set_visibility(False)

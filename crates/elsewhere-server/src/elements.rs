@@ -107,7 +107,7 @@ pub struct Element {
 
 /// `level`: `none` (the app isn't on the bus), `app` (on the bus, but no toplevel matches this window),
 /// `frame` (the toplevel is there but empty; Chromium without --force-renderer-accessibility), `full`.
-#[derive(Serialize, JsonSchema)]
+#[derive(Clone, Serialize, JsonSchema)]
 pub struct Page {
     pub level: &'static str,
     pub toolkit: Option<String>,
@@ -169,7 +169,7 @@ pub(crate) struct Reference {
     expires: Instant,
 }
 
-/// A bounded cache of 30-second references. Reads and waits allocate only when returning a result.
+/// A bounded cache of five-minute references. Reads and waits allocate only when returning a result.
 #[derive(Default)]
 pub(crate) struct References(VecDeque<(String, Reference)>);
 impl References {
@@ -355,7 +355,7 @@ pub async fn elements(win: &WindowInfo, scale: f64, lone_window: bool) -> Result
 
 async fn app_elements(win: &WindowInfo, scale: f64, lone_window: bool) -> Result<Page> {
     let deadline = tokio::time::Instant::now() + Duration::from_millis(4500);
-    // ponytail: a fresh bus connection per request; cache one if requests ever get frequent
+    // ponytail: a fresh bus connection per scan; reuse if connection setup becomes a bottleneck
     let conn = a11y_bus().await?;
     let dbus = zbus::fdo::DBusProxy::new(&conn).await?;
     let registry = ("org.a11y.atspi.Registry".to_string(), OwnedObjectPath::try_from("/org/a11y/atspi/accessible/root")?);
@@ -538,7 +538,7 @@ fn is_null(r: &Ref) -> bool {
 }
 
 /// `AT_SPI_BUS_ADDRESS`, else the session bus tells us where the accessibility bus is.
-async fn a11y_bus() -> Result<Connection> {
+pub(crate) async fn a11y_bus() -> Result<Connection> {
     let addr = match std::env::var("AT_SPI_BUS_ADDRESS") {
         Ok(a) if !a.is_empty() => a,
         _ => {

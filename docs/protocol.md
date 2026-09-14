@@ -270,8 +270,8 @@ no Action interface or no advertised actions.
 `frame` when the matching toplevel is empty, `full`, or `ambiguous`. Compositor decorations
 can be listed at any level. A truncated tree cannot prove exact role/name uniqueness.
 The walk visits at most 3000 nodes and lists at most 500 application elements. After window
-matching, traversal stops at its 1.5-second deadline and returns a marked partial tree.
-The enclosing two-second deadline covers connection and window matching as well.
+matching, traversal stops at its 4.5-second deadline and returns a marked partial tree.
+The enclosing five-second scan deadline covers connection and window matching as well.
 
 Application roles include `button`, `toggle`, `switch`, `checkbox`, `radio`, `link`, `entry`,
 `text`, `password`, `combobox`, `menu`, `menuitem`, `tab`, `slider`, `spinbutton`, `listitem`,

@@ -319,7 +319,7 @@ impl Mcp {
         json(self.app.windows())
     }
 
-    #[tool(description = "Read live UI elements: exact role and name, window-relative bounds, nullable enabled/focused/checked/editable states, advertised action names, and 30-second window-bound references. Check truncated and unavailable; level full alone does not establish a complete tree. Requires --elements and desktop.view.")]
+    #[tool(description = "Read live UI elements: exact role and name, window-relative bounds, nullable enabled/focused/checked/editable states, advertised action names, and five-minute window-bound references. Check truncated and unavailable; level full alone does not establish a complete tree. Requires --elements and desktop.view.")]
     async fn elements(&self, Extension(parts): Extension<Parts>, Parameters(WindowArg { window }): Parameters<WindowArg>, context: RequestContext<RoleServer>) -> ToolResult {
         let key = match self.require_key(&parts, P::DesktopView) { Ok(key) => key, Err(e) => return done(Err(e)) };
         tokio::select! { biased;
@@ -346,7 +346,7 @@ impl Mcp {
         }
     }
 
-    #[tool(description = "Wait up to 300000 ms (default 30000 ms) for a unique exact role/name or live reference to be present, enabled, disabled, checked, unchecked, focused, or unfocused. Requires --elements and desktop.view. Polls with a 100 ms pause between reads, stops on cancellation or token expiry/revocation, and returns matched=false on timeout with attempts, elapsed_ms, and last observed element. Ambiguity and stale references are errors. Unavailable application/state, bus, window-mapping and incomplete-tree failures are retried and returned in last_error on timeout.")]
+    #[tool(description = "Wait up to 300000 ms (default 30000 ms) for a unique exact role/name or live reference to be present, enabled, disabled, checked, unchecked, focused, or unfocused. Requires --elements and desktop.view. Repeat checks use a shared 100 ms schedule. Stops on cancellation or token expiry/revocation, and returns matched=false on timeout with attempts, elapsed_ms, and last observed element. Ambiguity and stale references are errors. Unavailable application/state, bus, window-mapping and incomplete-tree failures are retried and returned in last_error on timeout.")]
     async fn element_wait(&self, Extension(parts): Extension<Parts>, Parameters(args): Parameters<ElementWaitArgs>, context: RequestContext<RoleServer>) -> ToolResult {
         let key = match self.require_key(&parts, P::DesktopView) { Ok(key) => key, Err(e) => return done(Err(e)) };
         let request = crate::elements::ElementWait { target: args.target, condition: args.condition, timeout_ms: args.timeout_ms };

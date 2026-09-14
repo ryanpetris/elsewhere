@@ -32,7 +32,7 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
 | `POST /api/notifications/{id}` | `{"action": "default" \| "<key>"}`, or `{}` to dismiss | click, invoke an action of, or dismiss a notification; `202`, `404` |
 | `GET /api/notifications/{id}/icon` | | the notification's picture (the application's, else its launcher's); `404` none |
 | `GET /api/windows/{id}/elements` | | desktop.view; **Elements**; `501` without `--elements`, `503` tree unreadable, `404` unknown window |
-| `POST /api/windows/{id}/elements/action` | **ElementAction** | desktop.control; **Element** validated before dispatch; invokes one advertised action; `400/401/403/404/409/422/429/501/503` with error and code |
+| `POST /api/windows/{id}/elements/action` | **ElementAction** | desktop.control; **Element** validated before dispatch; invokes one advertised action; `400/401/403/404/409/422/501/503` with error and code |
 | `POST /api/windows/{id}/elements/text` | **ElementText** | desktop.control; **Element** validated before dispatch; replaces editable text; same error statuses as action |
 | `POST /api/windows/{id}/elements/wait` | **ElementWait** | desktop.view; **ElementWaitResult**, including matched=false on timeout; same error statuses as action |
 | `GET /api/windows/{id}/snapshot.png` | one optional `width`, `height`, or `percentage`; default native | PNG of the window; `404`, `429` another snapshot in flight, `500` render failed, `503` |
@@ -2146,7 +2146,7 @@ Replace all text in an editable UI element by window-bound reference or unique e
 
 ### `element_wait`
 
-Wait up to 300000 ms (default 30000 ms) for a unique exact role/name or live reference to be present, enabled, disabled, checked, unchecked, focused, or unfocused. Requires --elements and desktop.view. Polls with a 100 ms pause between reads, stops on cancellation or token expiry/revocation, and returns matched=false on timeout with attempts, elapsed_ms, and last observed element. Ambiguity and stale references are errors. Unavailable application/state, bus, window-mapping and incomplete-tree failures are retried and returned in last_error on timeout.
+Wait up to 300000 ms (default 30000 ms) for a unique exact role/name or live reference to be present, enabled, disabled, checked, unchecked, focused, or unfocused. Requires --elements and desktop.view. Repeat checks use a shared 100 ms schedule. Stops on cancellation or token expiry/revocation, and returns matched=false on timeout with attempts, elapsed_ms, and last observed element. Ambiguity and stale references are errors. Unavailable application/state, bus, window-mapping and incomplete-tree failures are retried and returned in last_error on timeout.
 
 ```json
 {
@@ -2229,7 +2229,7 @@ Wait up to 300000 ms (default 30000 ms) for a unique exact role/name or live ref
 
 ### `elements`
 
-Read live UI elements: exact role and name, window-relative bounds, nullable enabled/focused/checked/editable states, advertised action names, and 30-second window-bound references. Check truncated and unavailable; level full alone does not establish a complete tree. Requires --elements and desktop.view.
+Read live UI elements: exact role and name, window-relative bounds, nullable enabled/focused/checked/editable states, advertised action names, and five-minute window-bound references. Check truncated and unavailable; level full alone does not establish a complete tree. Requires --elements and desktop.view.
 
 ```json
 {

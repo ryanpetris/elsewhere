@@ -7,6 +7,7 @@ mod display;
 mod auth;
 mod apps;
 mod elements;
+mod element_scheduler;
 mod mcp;
 pub mod broadcast;
 mod mixer;
@@ -139,7 +140,7 @@ pub struct App {
     drops_dir: PathBuf,
     elements: bool,
     element_refs: Mutex<elements::References>,
-    element_slots: tokio::sync::Semaphore,
+    element_scheduler: std::sync::OnceLock<element_scheduler::Scheduler>,
     version: &'static str,
     tls: bool,
     port: u16,
@@ -273,7 +274,7 @@ pub async fn run(cfg: Config, commands: calloop::channel::Sender<Command>, audio
         drops_dir: files::drops_dir(),
         elements: cfg.elements,
         element_refs: Mutex::default(),
-        element_slots: tokio::sync::Semaphore::new(16),
+        element_scheduler: Default::default(),
         version: cfg.version,
         tls: cfg.tls,
         port: cfg.listen.port(),

@@ -102,7 +102,7 @@ mod tests {
                 broadcasts: Mutex::default(), audio_available: false.into(), mixer: None, mic: None, cam: None, rtc: None, cam_dead: Default::default(),
                 window_viewers: Mutex::default(), snapshot_lock: Arc::new(tokio::sync::Semaphore::new(1)), notifications: Mutex::default(),
                 next_notification: 1.into(), notify_bus: std::sync::OnceLock::new(), files_dir: root.join("files"), drops_dir: root.join("drops"),
-                element_refs: Mutex::default(), element_slots: tokio::sync::Semaphore::new(16), elements: false, version: "", tls: false, port: 0, url_prefix: String::new(), proxy_strips_prefix: false,
+                element_refs: Mutex::default(), element_scheduler: Default::default(), elements: false, version: "", tls: false, port: 0, url_prefix: String::new(), proxy_strips_prefix: false,
             });
             Self { app, commands: receiver, root }
         }

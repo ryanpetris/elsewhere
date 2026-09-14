@@ -49,7 +49,7 @@ For example, `/elsewhere/alice/api/windows` and `/elsewhere/alice/mcp` address t
    `unfocused`. Reads and waits require `desktop.view`. A timeout returns `matched: false`,
    elapsed time, read attempts, and the last observed element. Missing exact selectors can
    appear later; stale references and ambiguity fail explicitly. Unavailable application/state, bus, mapping
-   and incomplete-tree failures are retried within the deadline and reported in `last_error`. Waits pause 100 ms between reads and stop on cancellation or token expiry/revocation.
+   and incomplete-tree failures are retried within the deadline and reported in `last_error`. Repeat checks use a shared 100 ms schedule and stop on cancellation or token expiry/revocation.
    For applications without semantic support, choose input operations explicitly and confirm
    with a snapshot. Window-relative coordinates still work with `/api/input` and `click`.
 5. **Take a snapshot when you need to see** (`GET /api/windows/{id}/snapshot.png`, tool `snapshot`;
@@ -112,7 +112,7 @@ For example, `/elsewhere/alice/api/windows` and `/elsewhere/alice/mcp` address t
 
 Semantic errors include a `code`: `missing`, `stale`, `ambiguous`, `ambiguous_window`,
 `disabled`, `unsupported`, `incomplete_tree`, `state_unavailable`, `bus_unavailable`,
-`window_missing`, `window_unavailable`, `window_changed`, `tree_timeout`, `busy`, `rejected`,
+`window_missing`, `window_unavailable`, `window_changed`, `tree_timeout`, `rejected`,
 `invalid`, `cancelled`, or `uncertain`. A dispatched action cannot be undone by cancelling or timing out its response.
 Never automatically retry an uncertain mutation; inspect the application first.
 MCP tools return failures as tool errors.
