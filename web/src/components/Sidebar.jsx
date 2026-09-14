@@ -131,7 +131,7 @@ function WindowRow({ viewer, w, acts, eligible, dpr }) {
     <div
       onClick={() => acts && viewer.activate(w.id)}
       className={cx(
-        'group relative flex items-center gap-3 px-3 py-2 transition-colors hover:bg-surface-2',
+        'group relative flex flex-wrap items-center gap-3 px-3 py-2 transition-colors hover:bg-surface-2',
         acts && 'cursor-pointer',
         w.focused && 'bg-accent/8 before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-r before:bg-accent',
         w.minimized && 'opacity-55',
@@ -153,8 +153,7 @@ function WindowRow({ viewer, w, acts, eligible, dpr }) {
           {badges.map(b => <span key={b} className="shrink-0 rounded bg-surface-4 px-1 text-[10px] text-ink-3">{b}</span>)}
         </div>
       </div>
-      {/* the actions float over the row's end on hover, so titles keep the width */}
-      <div className="absolute top-1/2 right-2 flex -translate-y-1/2 items-center gap-px rounded-md border border-line-2 bg-surface-3 p-0.5 opacity-0 shadow-pop transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+      <div onClick={e => e.stopPropagation()} className="flex w-full justify-end items-center gap-px rounded-md bg-surface-3 p-0.5">
         <IconButton className="hover:bg-surface-4!" size="xs" icon={ExternalLink} label="Open in New Window" onClick={e => {
           e.stopPropagation();
           // The window's size plus its top and status bars, so it shows 1:1.

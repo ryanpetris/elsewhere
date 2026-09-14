@@ -661,7 +661,7 @@ read it with `useSyncExternalStore` and send actions back through the engine.
   Icons use authenticated fetches and cached blob URLs. The **power menu** requires `server.manage`,
   confirms, then sends `quit`; an accepted shutdown ends reconnection.
 - **Windows tab**: one row per window, top-most first, minimized last: a thumbnail, a colour dot, the
-  title, the app id and size, state badges, and (on hover) buttons to open the window in its own popup
+  title, the app id and size, state badges, and buttons to open the window in its own popup
   (a window stream), snapshot, maximize/restore, minimize/restore (restore uses `activate`, so the window
   also gets the keyboard), close. Clicking a row switches to the window’s workspace and activates it. The command box at the top spawns
   programs; focusing it releases any key held in the compositor, and keys typed into any text field of
