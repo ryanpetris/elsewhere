@@ -1,5 +1,5 @@
 // The top bar: brand and context, the launchers, the connection state, and the viewer's own controls.
-import { PanelTopClose, PictureInPicture2, CornerUpLeft, Expand, Eye, Hand, Keyboard, LayoutGrid, MousePointer2, PanelRightClose, PanelRightOpen, Power, Settings } from 'lucide-react';
+import { Plus, Minus, PanelTopClose, PictureInPicture2, CornerUpLeft, Expand, Eye, Hand, Keyboard, LayoutGrid, MousePointer2, PanelRightClose, PanelRightOpen, Power, Settings } from 'lucide-react';
 import { Participants } from './Participants.jsx';
 import { useStore } from '../store.js';
 import { WINDOW, PIP } from '../api.js';
@@ -107,9 +107,15 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, o
           </span>
         )}
       </div>
-      {!windowMode && <select aria-label="Workspace" value={workspaces.active} disabled={status !== 'connected' || role !== 'controller' || !permissions.includes('desktop.control')} onChange={e => viewer.control({ op: 'switchworkspace', workspace: Number(e.target.value) })} className="mx-2 rounded border border-line bg-surface-2 px-2 py-1 text-xs text-ink disabled:opacity-50 max-sm:mx-1 max-sm:px-1 max-sm:text-[10px]">
-        {Array.from({ length: workspaces.count }, (_, i) => <option key={i + 1} value={i + 1}>Workspace {i + 1}</option>)}
-      </select>}
+      {!windowMode && <div className="mx-1 flex items-center gap-0.5">
+        <select aria-label="Workspace" value={workspaces.active} disabled={status !== 'connected' || role !== 'controller' || !permissions.includes('desktop.control')} onChange={e => viewer.control({ op: 'switchworkspace', workspace: Number(e.target.value) })} className="max-w-40 rounded border border-line bg-surface-2 px-2 py-1 text-xs text-ink disabled:opacity-50 max-sm:max-w-24 max-sm:px-1 max-sm:text-[10px]">
+          {workspaces.workspaces.map(entry => <option key={entry.id} value={entry.id}>Workspace {entry.name}</option>)}
+        </select>
+        {permissions.includes('desktop.control') && <>
+          <IconButton icon={Plus} label="New Workspace" disabled={status !== 'connected'} onClick={() => viewer.control({ op: 'createworkspace' })} />
+          <IconButton icon={Minus} label="Delete Workspace" disabled={status !== 'connected' || workspaces.workspaces.length <= 1} onClick={() => viewer.control({ op: 'deleteworkspace', workspace: workspaces.active })} />
+        </>}
+      </div>}
       <div className="ml-auto flex shrink-0 items-center sm:gap-0.5">
         {locked && <Capture />}
         <Role role={role} windowMode={windowMode} />

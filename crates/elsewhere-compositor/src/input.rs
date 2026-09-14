@@ -116,12 +116,18 @@ impl State {
             }
             Command::Input(msg) => self.input(msg),
             Command::WindowInput { window, command } => {
-                if self.window_by_id(window).is_some_and(|w| self.on_active_workspace(&w) && self.space.element_location(&w).is_some()) {
+                if let Some(window) = self.window_by_id(window).filter(|w| self.space.element_location(w).is_some()) {
+                    self.set_input_workspace(self.window_workspace(&window));
                     self.handle_command(*command);
                 }
             }
+            Command::DesktopInput(command) => {
+                self.set_input_workspace(self.workspaces.active);
+                self.handle_command(*command);
+            }
             Command::SetClipboard { mime, data, operation } => self.set_clipboard(mime, data, operation),
             Command::PasteClipboard { mime, data, operation, shift_insert, window, admission } => admission.execute(Box::new(|input| {
+                if input && window.is_none() { self.set_input_workspace(self.workspaces.active); }
                 let input = input && window.is_none_or(|id| self.active.as_ref().is_some_and(|w| window_id(w) == id && self.space.element_location(w).is_some()));
                 if input { self.release_all(); }
                 self.set_clipboard(mime, data, Some(operation));
@@ -182,12 +188,12 @@ impl State {
     /// API/MCP input. Window-relative coordinates use the window's geometry as it is now, and a click's
     /// motion and buttons go out together, so nothing can slip in between.
     fn input(&mut self, msg: InputMsg) {
-        let at = |st: &Self, x: f64, y: f64, window: Option<u64>| -> Option<Point<f64, Logical>> {
+        let at = |st: &mut Self, x: f64, y: f64, window: Option<u64>| -> Option<Point<f64, Logical>> {
             match window {
                 Some(id) => {
                     let target = st.window_by_id(id)?;
-                    if !st.on_active_workspace(&target) { return None; }
                     let geo = st.space.element_geometry(&target)?; // None while minimized
+                    st.set_input_workspace(st.window_workspace(&target));
                     Some((geo.loc.x as f64 + x, geo.loc.y as f64 + y).into())
                 }
                 None => Some((x, y).into()),
@@ -534,7 +540,7 @@ impl State {
     /// Raise and activate `window` (none: just deactivate everything) and give it the keyboard.
     pub fn focus_window(&mut self, window: Option<&Window>, serial: Serial) {
         self.pending_initial_focus = None;
-        let window = window.filter(|w| self.on_active_workspace(w) && self.space.element_location(w).is_some());
+        let window = window.filter(|w| self.on_input_workspace(w) && self.space.element_location(w).is_some());
         self.active = window.cloned();
         self.dirty = true; // the bars follow the focus
         let keyboard = self.seat.get_keyboard().unwrap();
@@ -567,6 +573,7 @@ impl State {
 
     /// Layer surface under `pos` on the layers drawn above the windows (Overlay, Top) or below them (Bottom, Background).
     fn layer_under(&self, pos: Point<f64, Logical>, above: bool) -> Option<(LayerSurface, WlSurface, Point<f64, Logical>)> {
+        if self.workspaces.input != self.workspaces.active { return None; }
         let layers = layer_map_for_output(&self.output);
         let (a, b) = if above { (Layer::Overlay, Layer::Top) } else { (Layer::Bottom, Layer::Background) };
         let hidden_top = above && self.fullscreen_window_mapped(); // panels are under a fullscreen window

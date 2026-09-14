@@ -34,7 +34,6 @@ pub enum ApiError {
     File { code: &'static str, message: String },
     InvalidSize(&'static str),
     InvalidInput(String),
-    InactiveWindow,
     /// The feature is switched off (`--elements`).
     Disabled(&'static str),
     /// No live token authorized the request.
@@ -79,7 +78,6 @@ impl ApiError {
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
             },
             ApiError::InvalidInput(_) => StatusCode::BAD_REQUEST,
-            ApiError::InactiveWindow => StatusCode::CONFLICT,
             ApiError::InvalidSize(_) => StatusCode::BAD_REQUEST,
             ApiError::Disabled(_) => StatusCode::NOT_IMPLEMENTED,
             ApiError::Unauthorized => StatusCode::UNAUTHORIZED,
@@ -98,7 +96,6 @@ impl std::fmt::Display for ApiError {
         match self {
             ApiError::Element { message, .. } | ApiError::Broadcast { message, .. } | ApiError::File { message, .. } => f.write_str(message),
             ApiError::InvalidInput(why) => f.write_str(why),
-            ApiError::InactiveWindow => f.write_str("This window is on an inactive workspace. Activate the window explicitly with op: activate before sending input."),
             ApiError::InvalidSize(why) => f.write_str(why),
             ApiError::Disabled(what) => f.write_str(what),
             ApiError::Unauthorized => f.write_str("invalid or expired token"),
@@ -124,7 +121,7 @@ impl IntoResponse for ApiError {
 pub const X11_EDGE: &str = "That part of the window is past the desktop's edge, where X11 programs can't take clicks: move or shrink the window, or enlarge the desktop.";
 
 impl App {
-    pub fn workspaces(&self) -> elsewhere_core::WorkspaceState { self.viewers.lock().unwrap().workspaces }
+    pub fn workspaces(&self) -> elsewhere_core::WorkspaceState { self.viewers.lock().unwrap().workspaces.clone() }
 
     /// The window list the viewers were last sent.
     pub fn windows(&self) -> Vec<WindowInfo> {
@@ -355,6 +352,17 @@ impl App {
     /// A window action, spawn, launch or quit. Fire-and-forget: the compositor ignores unknown ids and
     /// impossible requests.
     pub fn control(&self, msg: ControlMsg) -> Result<(), ApiError> {
+        if let ControlOp::SwitchWorkspace { workspace } | ControlOp::MoveToWorkspace { workspace } | ControlOp::DeleteWorkspace { workspace } = &msg.op {
+            if !self.workspaces().workspaces.iter().any(|entry| entry.id == *workspace) {
+                return Err(ApiError::InvalidInput("unknown workspace".into()));
+            }
+        }
+        if let ControlOp::DeleteWorkspace { .. } = &msg.op {
+            if self.workspaces().workspaces.len() == 1 { return Err(ApiError::InvalidInput("the last workspace cannot be deleted".into())); }
+        }
+        if let ControlOp::CreateWorkspace { name: Some(name) } = &msg.op {
+            if name.len() > 256 || name.chars().any(char::is_control) { return Err(ApiError::InvalidInput("invalid workspace name".into())); }
+        }
         let cmd = self.command_for(msg)?;
         self.send(cmd)
     }
@@ -362,11 +370,6 @@ impl App {
     /// The compositor's command for a control request: a launcher becomes its Exec line, quit ends the
     /// desktop, the rest is the window action itself.
     pub fn command_for(&self, msg: ControlMsg) -> Result<Command, ApiError> {
-        if let ControlOp::SwitchWorkspace { workspace } | ControlOp::MoveToWorkspace { workspace } = &msg.op {
-            if !(1..=elsewhere_core::WORKSPACE_COUNT).contains(workspace) {
-                return Err(ApiError::InvalidInput("workspace must be between 1 and 4".into()));
-            }
-        }
         Ok(match msg.op {
             ControlOp::Launch { app } => Command::Control(ControlMsg { id: 0, op: ControlOp::Spawn { cmd: apps::exec(&app).ok_or(ApiError::NoSuchApp)? } }),
             ControlOp::Quit => Command::Quit,
@@ -429,16 +432,11 @@ impl App {
     /// compositor resolves it against the live geometry, this only answers 404 for an unknown id.
     pub(crate) fn authorized_input(&self, key: &crate::Key, msg: InputMsg) -> Result<(), ApiError> {
         if let InputMsg::Move { window: Some(id), .. } | InputMsg::Click { window: Some(id), .. } = &msg {
-            self.require_active_window(*id)?;
+            self.window(*id)?;
         }
-        self.send_input(key, u64::MAX, Command::Input(msg))
-    }
-
-    pub(crate) fn require_active_window(&self, id: u64) -> Result<(), ApiError> {
-        let v = self.viewers.lock().unwrap();
-        let window = v.window_list.iter().find(|w| w.id == id).ok_or(ApiError::NotFound)?;
-        if window.workspace != v.workspaces.active { return Err(ApiError::InactiveWindow); }
-        Ok(())
+        let desktop = matches!(msg, InputMsg::Move { window: None, .. } | InputMsg::Click { window: None, .. });
+        let command = Command::Input(msg);
+        self.send_input(key, u64::MAX, if desktop { Command::DesktopInput(Box::new(command)) } else { command })
     }
 
     pub(crate) fn send(&self, cmd: Command) -> Result<(), ApiError> {

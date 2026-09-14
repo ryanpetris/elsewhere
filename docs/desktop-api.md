@@ -742,23 +742,28 @@ fullscreen, kiosk and resolution changes, including minimized windows.
 
 ## Workspaces
 
-`GET /api/workspaces` and MCP `workspaces` return `{ "active": 1, "count": 4 }`.
-The `workspace` field in every window identifies its numbered desktop, independently of `minimized`.
-Reads require `desktop.view`.
+`GET /api/workspaces` and MCP `workspaces` return the shared `active` ID and a `workspaces`
+array of `{ "id": 1, "name": "1" }` entries. Every window reports its `workspace` ID independently
+of minimization. Reads require `desktop.view`.
 
-Send `{ "op": "switchworkspace", "workspace": 2 }` to `POST /api/control` to switch,
-or `{ "op": "movetoworkspace", "id": 7, "workspace": 2 }` to move a window and its transient
-family without switching. MCP exposes `switch_workspace` and `move_to_workspace`. Numbers must be
-1–4; invalid numbers return 400. Control requests return 202 when queued; inspect state afterwards.
-HTTP/MCP mutations require `desktop.control`, independently of the viewer’s controller role.
-Desktop WebSocket switch/move requests additionally require the current controller.
+`POST /api/control` accepts `createworkspace` with an optional `name`, `deleteworkspace` with a
+`workspace` ID, `switchworkspace` with a `workspace` ID, and `movetoworkspace` with `id` and
+`workspace`. MCP exposes `create_workspace`, `delete_workspace`, `switch_workspace`, and
+`move_to_workspace`. Workspaces have no configured count limit. IDs remain stable across deletion.
+Deleting a workspace moves its windows to the first remaining workspace; the last workspace cannot
+be deleted. Invalid IDs and deletion of the last workspace return 400 over HTTP/MCP.
 
-Activating a window explicitly switches to its desktop, restores it if minimized, and focuses it.
-Ordinary window-relative input never switches desktops: HTTP/MCP rejects an inactive target with
-409; window streams receive a notice and offer **Activate on Desktop**. The compositor also checks
-membership when queued input executes. Opening or focusing a window viewer sends a conditional `focus` operation: it focuses only a
-window already mapped on the active workspace, never switching or restoring one. Window streams and snapshots keep working on inactive workspaces. Captured
-inactive windows continue receiving frame callbacks; uncaptured inactive windows can idle.
+Mutations require `desktop.control`. Desktop WebSocket workspace switching additionally requires
+the current controller; moving windows does not. Operations return 202 when queued, so read state
+to confirm completion. Moves preserve geometry, minimization, and transient families.
+
+Explicit activation switches the displayed workspace, restores a minimized window, and focuses it.
+Window viewers and window-relative API input can interact with other workspaces without switching
+the displayed workspace. The compositor routes the shared seat to the input workspace and releases
+held input and grabs when that context changes. Desktop viewer input returns to the displayed
+workspace. Untargeted API keys follow the shared keyboard focus. The `focus` operation focuses a
+mapped window without switching or restoring it. Streams and snapshots remain available on all
+workspaces. Captured inactive windows receive frame callbacks; uncaptured inactive windows can idle.
 
 Workspace selection is shared, replayed on reconnect, and lasts for the running session. Workspaces
 organize a single desktop; they do not partition access or conceal windows from authorized viewers.

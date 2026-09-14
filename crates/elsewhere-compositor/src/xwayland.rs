@@ -110,8 +110,9 @@ impl XwmHandler for State {
             rect.loc = self.work_area().loc + smithay::utils::Point::from((40 + 30 * n, 40 + elsewhere_core::decoration::BAR + 30 * n));
             self.place_x11(&win, &window, rect);
         }
-        win.set_activated(self.on_active_workspace(&win));
-        if self.on_active_workspace(&win) { self.pending_initial_focus = None; self.active = Some(win); } // mapped activated: that is what the desktop API reports as focused
+        if !self.on_input_workspace(&win) { self.workspaces.focus.insert(self.window_workspace(&win), win.clone()); }
+        win.set_activated(self.on_input_workspace(&win));
+        if self.on_input_workspace(&win) { self.pending_initial_focus = None; self.active = Some(win); } // mapped activated: that is what the desktop API reports as focused
     }
 
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, window: X11Surface) {

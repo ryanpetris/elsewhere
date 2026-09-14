@@ -12,7 +12,7 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
 | Method and path | Body or query | Result |
 |---|---|---|
 | `GET /api/windows` | | JSON array of **Window**, including workspace membership |
-| `GET /api/workspaces` | | desktop.view; **Workspaces** with active number and fixed count |
+| `GET /api/workspaces` | | desktop.view; **Workspaces** with active ID and workspace IDs/names |
 | `GET /api/broadcasts/capabilities` | | broadcast encoder availability and limits |
 | `POST /api/broadcasts/start` | **BroadcastStart** | broadcasts.manage + desktop.view, plus audio.listen for desktop audio; runtime status without connection credentials |
 | `GET /api/broadcasts` | | runtime statuses; no saved configurations or credentials |
@@ -38,7 +38,7 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
 | `GET /api/windows/{id}/snapshot.png` | one optional `width`, `height`, or `percentage`; default native | PNG of the window; `404`, `429` another snapshot in flight, `500` render failed, `503` |
 | `GET /api/screenshot.png` | same sizing as window snapshots; default native | PNG of the whole output; `429`, `500`, `503` as for a window |
 | `POST /api/control` | **Control** | `400` for an out-of-range workspace; `202`; fire-and-forget; `404` unknown application (`launch`); `503` compositor gone |
-| `POST /api/input` | **Input** | `202`, with `{"warning": …}` when a click aims past the desktop's edge at an X11 window (Xwayland pins it to the edge); `404` unknown window; `409` inactive workspace (activate explicitly); `503` compositor gone |
+| `POST /api/input` | **Input** | `202`, with `{"warning": …}` when a click aims past the desktop's edge at an X11 window (Xwayland pins it to the edge); `404` unknown window; `503` compositor gone |
 | `GET /api/clipboard/state` | | metadata: `observation`, `operation`, `present`, `mime`, `size`, `preview`; preview is empty, loading, available, unavailable or restricted; opaque identifiers are scoped to this server process |
 | `GET /api/clipboard` | optional `If-Match` with quoted observation | current bytes with Content-Type and ETag; `clipboard.read` and `files.download` required for file lists; `204` no selection, `409` bytes unavailable, `412` observation changed |
 | `PUT /api/clipboard` | UTF-8 text body, a PNG with `Content-Type: image/png`, or `file://` URIs with `text/uri-list` | queues a desktop clipboard change; `202` with an opaque `operation` confirmed by matching metadata after installation; `413` over 1 MiB (text) or 16 MiB (PNG) |
@@ -64,16 +64,36 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
       "format": "uint32",
       "minimum": 0
     },
-    "count": {
-      "type": "integer",
-      "format": "uint32",
-      "minimum": 0
+    "workspaces": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Workspace"
+      }
     }
   },
   "required": [
     "active",
-    "count"
-  ]
+    "workspaces"
+  ],
+  "$defs": {
+    "Workspace": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ]
+    }
+  }
 }
 ```
 
@@ -699,6 +719,42 @@ rejected before that with a plain-text message: `400` invalid JSON, `415` missin
         "op": {
           "type": "string",
           "const": "switchworkspace"
+        },
+        "workspace": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "op",
+        "workspace"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "op": {
+          "type": "string",
+          "const": "createworkspace"
+        }
+      },
+      "required": [
+        "op"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string",
+          "const": "deleteworkspace"
         },
         "workspace": {
           "type": "integer",
@@ -1927,6 +1983,39 @@ Put text on the desktop clipboard, for pasting into an application (images go th
 }
 ```
 
+### `create_workspace`
+
+Create a workspace. Requires desktop.control; read workspaces afterwards for its ID.
+
+```json
+{
+  "properties": {},
+  "type": "object"
+}
+```
+
+### `delete_workspace`
+
+Delete a workspace and move its windows to the first remaining workspace. The last workspace cannot be deleted. Requires desktop.control; read workspaces afterwards.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "workspace": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "workspace"
+  ],
+  "type": "object"
+}
+```
+
 ### `element_action`
 
 Invoke exactly one advertised UI action by window-bound reference or unique exact role and name. Requires --elements and desktop.control, independently of viewer control. Never clicks coordinates or retries. A cancelled or uncertain dispatched action may still complete; inspect state before deciding what to do next. Returns the validated target state from before dispatch.
@@ -2293,7 +2382,7 @@ Move the pointer without clicking (hover, or the middle of a drag).
 
 ### `move_to_workspace`
 
-Move a window and its transient family to workspace 1 through 4, retaining geometry and minimized state. Does not switch desktops. Requires desktop.control; check windows afterwards.
+Move a window and its transient family to an existing workspace, retaining geometry and minimized state. Does not switch desktops. Requires desktop.control; check windows afterwards.
 
 ```json
 {
@@ -2526,7 +2615,7 @@ Start a program as a client of this desktop (`sh -c cmd`). Its window appears in
 
 ### `switch_workspace`
 
-Switch the shared desktop to workspace 1 through 4. Releases held input and restores that workspace's focus. Requires desktop.control; check workspaces afterwards.
+Switch the shared desktop to an existing workspace. Releases held input and restores that workspace's focus. Requires desktop.control; check workspaces afterwards.
 
 ```json
 {
@@ -2620,7 +2709,7 @@ The windows on the desktop: id, title, app_id, icon (name the client set; its pi
 
 ### `workspaces`
 
-Read the shared active workspace number and the fixed workspace count. Requires desktop.view.
+Read the shared active workspace number and workspace IDs and names. Requires desktop.view.
 
 ```json
 {

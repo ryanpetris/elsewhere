@@ -297,7 +297,10 @@ impl CompositorHandler for State {
                         self.active.as_ref() == Some(&window) && !window.x11_surface().is_some_and(|x| x.is_override_redirect())
                     };
                     if self.pending_initial_focus.as_ref() == Some(&window) { self.pending_initial_focus = None; }
-                    if initial_focus && self.on_active_workspace(&window) && self.space.element_location(&window).is_some() {
+                    if initial_focus && !self.on_input_workspace(&window) && self.space.element_location(&window).is_some() {
+                        self.workspaces.focus.insert(self.window_workspace(&window), window.clone());
+                    }
+                    if initial_focus && self.on_input_workspace(&window) && self.space.element_location(&window).is_some() {
                         if self.exclusive_layer_focused() {
                             self.active = Some(window.clone());
                         } else {
@@ -349,6 +352,19 @@ impl CompositorHandler for State {
 struct FirstBuffer;
 
 impl State {
+    pub(crate) fn focus_exclusive_layer(&mut self) -> bool {
+        if self.workspaces.input != self.workspaces.active { return false; }
+        let surface = {
+            let layers = layer_map_for_output(&self.output);
+            layers.layers_on(Layer::Overlay).rev().chain(layers.layers_on(Layer::Top).rev())
+                .find(|layer| layer.cached_state().keyboard_interactivity == KeyboardInteractivity::Exclusive)
+                .map(|layer| layer.wl_surface().clone())
+        };
+        let Some(surface) = surface else { return false; };
+        self.seat.get_keyboard().unwrap().set_focus(self, Some(surface.into()), SERIAL_COUNTER.next_serial());
+        true
+    }
+
     /// A Top or Overlay layer surface with exclusive keyboard interactivity (a launcher) holds the keyboard.
     pub(crate) fn exclusive_layer_focused(&self) -> bool {
         let Some(focus) = self.seat.get_keyboard().and_then(|k| k.current_focus()) else { return false };
@@ -384,7 +400,7 @@ fn ensure_initial_configure(surface: &WlSurface, state: &mut State) {
             layer.layer_surface().send_configure();
         }
         // launchers take the keyboard while they are up; the panels only ask on demand (handled on click)
-        if layer.cached_state().keyboard_interactivity == KeyboardInteractivity::Exclusive && matches!(layer.layer(), Layer::Top | Layer::Overlay) {
+        if state.workspaces.input == state.workspaces.active && layer.cached_state().keyboard_interactivity == KeyboardInteractivity::Exclusive && matches!(layer.layer(), Layer::Top | Layer::Overlay) {
             let keyboard = state.seat.get_keyboard().unwrap();
             keyboard.set_focus(state, Some(layer.wl_surface().clone().into()), SERIAL_COUNTER.next_serial());
         }
@@ -452,7 +468,7 @@ impl XdgShellHandler for State {
         let seat: Seat<State> = Seat::from_resource(&seat).unwrap();
         let kind = PopupKind::Xdg(surface);
         let Some(root) = find_popup_root_surface(&kind).ok() else { return };
-        if self.window_for(&root).is_some_and(|w| !self.on_active_workspace(&w)) {
+        if self.window_for(&root).is_some_and(|w| !self.on_input_workspace(&w)) {
             let _ = smithay::desktop::PopupManager::dismiss_popup(&root, &kind);
             return;
         }

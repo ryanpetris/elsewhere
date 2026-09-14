@@ -559,7 +559,7 @@ impl State {
 
     /// The top-most window that isn't an X11 menu or tooltip: what gets the focus when its holder goes.
     pub fn top_window(&self) -> Option<Window> {
-        self.space.elements().rev().filter(|w| self.on_active_workspace(w)).find(|w| w.x11_surface().is_none_or(|x| !x.is_override_redirect())).cloned()
+        self.space.elements().rev().filter(|w| self.on_input_workspace(w)).find(|w| w.x11_surface().is_none_or(|x| !x.is_override_redirect())).cloned()
     }
 
     /// Hide a window until a taskbar (or its own client) asks for it back; focus moves to the top-most window left.

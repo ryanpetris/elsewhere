@@ -123,7 +123,7 @@ pub async fn forward_events(app: Arc<App>, mut rx: mpsc::UnboundedReceiver<Event
                 Bytes::from(vec![protocol::POINTER_LOCK, locked as u8])
             }
             Event::Workspaces(state) => {
-                v.workspaces = state;
+                v.workspaces = state.clone();
                 protocol::workspaces(&state)
             }
             Event::Windows(list) => {
@@ -648,10 +648,6 @@ pub async fn window_session(mut socket: WebSocket, app: Arc<App>, id: u64) {
                     };
                     if let Some(mut cmd) = cmd {
                         if is_input(&cmd) || matches!(cmd, Command::ResumePointerLock) {
-                            if let Err(error) = app.require_active_window(id) {
-                                let _ = etx.try_send(protocol::notice(&error.to_string()));
-                                continue;
-                            }
                             cmd = Command::WindowInput { window: id, command: Box::new(cmd) };
                         }
                         // under the lock a revocation clears, so nothing slips through behind one
@@ -850,7 +846,7 @@ impl App {
                 }
                 Some(Command::RequestFullFrame)
             }
-            ClientMsg::Control(m) if matches!(&m.op, ControlOp::SwitchWorkspace { .. } | ControlOp::MoveToWorkspace { .. }) && !controls => {
+            ClientMsg::Control(m) if matches!(&m.op, ControlOp::SwitchWorkspace { .. }) && !controls => {
                 let _ = v.sessions[&id].events.try_send(protocol::notice("Workspace changes require the current desktop controller."));
                 None
             }
@@ -1203,13 +1199,16 @@ mod tests {
 }
 
 fn is_input(command: &Command) -> bool {
-    matches!(command, Command::WindowInput { .. } | Command::Input(_) | Command::Key { .. } | Command::PointerMotionRelative { .. } | Command::PointerMotionAbsolute { .. } | Command::PointerButton { .. } | Command::PointerAxis { .. } | Command::Touch { .. })
+    matches!(command, Command::Drag(_) | Command::ResumePointerLock | Command::WindowInput { .. } | Command::Input(_) | Command::Key { .. } | Command::PointerMotionRelative { .. } | Command::PointerMotionAbsolute { .. } | Command::PointerButton { .. } | Command::PointerAxis { .. } | Command::Touch { .. })
 }
 
 impl App {
     fn session_command(&self, key: &Key, session: u64, command: Command) {
         if matches!(command, Command::ReleaseAllInput) { self.release_input(key, session); return; }
-        if is_input(&command) { let _ = self.send_input(key, session, command); }
+        if is_input(&command) {
+            let command = if matches!(command, Command::WindowInput { .. }) { command } else { Command::DesktopInput(Box::new(command)) };
+            let _ = self.send_input(key, session, command);
+        }
         else { let _ = self.commands.send(command); }
     }
 }

@@ -367,15 +367,18 @@ work area. Application fullscreen requests remain available in either mode.
 
 ## Workspace state
 
-`Workspaces` (`0x18`) carries UTF-8 JSON `{ "active": 1, "count": 4 }` and is replayed to desktop
-and window sessions. Every `WindowInfo` has a `workspace` number. The full window list includes
-inactive and minimized windows; only the active workspace contributes desktop hit tests and rendering.
-`Control` accepts `switchworkspace` with `workspace`, and `movetoworkspace` with `id` and `workspace`.
-Desktop sessions need current controller status and `desktop.control` for those operations. Explicit
-window activation can switch desktops using existing window-control authorization. Ordinary input
-cannot activate an inactive target; window streams receive a notice. Stream playback continues.
+`Workspaces` (`0x18`) carries UTF-8 JSON with an `active` workspace ID and a `workspaces` array
+of `{id, name}` entries. It is replayed to desktop and window sessions. Every `WindowInfo` has a
+`workspace` ID; the full window list includes inactive and minimized windows.
 
-`Control` operation `focus` conditionally focuses a window already mapped on the active workspace.
-Window tabs use it for browser focus changes; unlike `activate`, it never switches or restores.
+`Control` accepts `createworkspace` with an optional `name`, `deleteworkspace` with `workspace`,
+`switchworkspace` with `workspace`, and `movetoworkspace` with `id` and `workspace`.
+All require `desktop.control`; desktop WebSocket switching also requires controller status.
+Deleting a populated workspace moves its windows to the first remaining workspace. The last
+workspace is retained. Native ext-workspace clients can create, remove, and activate on commit.
 
-Window sockets accept workspace controls with `desktop.control`. Explicit window activation uses the existing window-control authorization on every socket and can switch the shared workspace, including for participants.
+Window viewers and window-relative input route the shared seat to the target workspace without
+changing the displayed workspace. Desktop viewer input restores displayed-workspace routing.
+Changing the input workspace releases held input and grabs. Streams continue on all workspaces.
+The `focus` operation focuses a mapped window without switching or restoring it; explicit `activate`
+switches to its workspace and restores it if minimized.

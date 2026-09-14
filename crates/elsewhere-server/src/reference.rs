@@ -11,7 +11,7 @@ const ROUTES: &str = "\
 | Method and path | Body or query | Result |
 |---|---|---|
 | `GET /api/windows` | | JSON array of **Window**, including workspace membership |
-| `GET /api/workspaces` | | desktop.view; **Workspaces** with active number and fixed count |
+| `GET /api/workspaces` | | desktop.view; **Workspaces** with active ID and workspace IDs/names |
 | `GET /api/broadcasts/capabilities` | | broadcast encoder availability and limits |
 | `POST /api/broadcasts/start` | **BroadcastStart** | broadcasts.manage + desktop.view, plus audio.listen for desktop audio; runtime status without connection credentials |
 | `GET /api/broadcasts` | | runtime statuses; no saved configurations or credentials |
@@ -37,7 +37,7 @@ const ROUTES: &str = "\
 | `GET /api/windows/{id}/snapshot.png` | one optional `width`, `height`, or `percentage`; default native | PNG of the window; `404`, `429` another snapshot in flight, `500` render failed, `503` |
 | `GET /api/screenshot.png` | same sizing as window snapshots; default native | PNG of the whole output; `429`, `500`, `503` as for a window |
 | `POST /api/control` | **Control** | `400` for an out-of-range workspace; `202`; fire-and-forget; `404` unknown application (`launch`); `503` compositor gone |
-| `POST /api/input` | **Input** | `202`, with `{\"warning\": …}` when a click aims past the desktop's edge at an X11 window (Xwayland pins it to the edge); `404` unknown window; `409` inactive workspace (activate explicitly); `503` compositor gone |
+| `POST /api/input` | **Input** | `202`, with `{\"warning\": …}` when a click aims past the desktop's edge at an X11 window (Xwayland pins it to the edge); `404` unknown window; `503` compositor gone |
 | `GET /api/clipboard/state` | | metadata: `observation`, `operation`, `present`, `mime`, `size`, `preview`; preview is empty, loading, available, unavailable or restricted; opaque identifiers are scoped to this server process |
 | `GET /api/clipboard` | optional `If-Match` with quoted observation | current bytes with Content-Type and ETag; `clipboard.read` and `files.download` required for file lists; `204` no selection, `409` bytes unavailable, `412` observation changed |
 | `PUT /api/clipboard` | UTF-8 text body, a PNG with `Content-Type: image/png`, or `file://` URIs with `text/uri-list` | queues a desktop clipboard change; `202` with an opaque `operation` confirmed by matching metadata after installation; `413` over 1 MiB (text) or 16 MiB (PNG) |

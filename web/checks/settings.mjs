@@ -39,7 +39,7 @@ try {
       return Promise.resolve({ status: request.status, json: () => window.holdElements ? new Promise(resolve => { request.finish = () => resolve(page); }) : Promise.resolve(page) });
     };
     window.windowsFrame = (id = 1, title = 'Focused application') => {
-      const windows = [{ id, title, app_id: 'overlay-test', focused: true, minimized: false, x: 20, y: 20, w: 400, h: 250, decoration: 0, geo_x: 0, geo_y: 0, updated_ms: 1, content_revision: 1, popups: [] }];
+      const windows = [{ id, title, workspace: 1, app_id: 'overlay-test', focused: true, minimized: false, x: 20, y: 20, w: 400, h: 250, decoration: 0, geo_x: 0, geo_y: 0, updated_ms: 1, content_revision: 1, popups: [] }];
       const json = new TextEncoder().encode(JSON.stringify(windows)), packet = new Uint8Array(json.length + 1);
       packet[0] = 6; packet.set(json, 1); window.socket.onmessage({ data: packet.buffer });
     };
@@ -163,6 +163,10 @@ try {
   assert(await elements.evaluate(el => el === document.activeElement));
   await elements.press('Space');
   await page.waitForFunction(() => elsewhere.store.get().elements?.status === 200 && document.querySelectorAll('.box-border').length === 2);
+  await page.evaluate(() => elsewhere.store.set({ windows: elsewhere.store.get().windows.map(w => ({ ...w, workspace: 2 })) }));
+  await page.waitForFunction(() => document.querySelectorAll('.box-border').length === 0);
+  await page.evaluate(() => elsewhere.store.set({ windows: elsewhere.store.get().windows.map(w => ({ ...w, workspace: 1 })) }));
+  await page.waitForFunction(() => document.querySelectorAll('.box-border').length === 2);
   assert.equal(await page.evaluate(() => localStorage.getItem('elsewhere.borders')), '1');
   assert.equal(await page.evaluate(() => localStorage.getItem('elsewhere.elements')), '1');
   assert.equal(await page.evaluate(() => sent.filter(p => [0x83, 0x84, 0x85, 0x86, 0x87, 0x91, 0x92].includes(p[0])).length), 0);

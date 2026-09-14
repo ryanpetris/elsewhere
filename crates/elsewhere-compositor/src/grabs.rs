@@ -243,7 +243,7 @@ impl Start {
 impl State {
     /// Move `window` with the pointer or finger from `start`.
     pub fn start_move(&mut self, start: Start, window: Window, serial: Serial) {
-        if !self.on_active_workspace(&window) { return; }
+        if !self.on_input_workspace(&window) { return; }
         let initial_location = self.space.element_location(&window).unwrap();
         let grab = MoveGrab { start_data: start.pointer(), window, initial_location };
         match start {
@@ -262,7 +262,7 @@ impl State {
 
     /// Resize `window` from `edges` with the pointer or finger from `start`; the client is told it is being resized.
     pub fn start_resize(&mut self, start: Start, window: &Window, edges: ResizeEdge, serial: Serial) {
-        if !self.on_active_workspace(window) { return; }
+        if !self.on_input_workspace(window) { return; }
         // A drag starts at the geometry currently displayed to the user.
         let mut initial_rect = window.geometry();
         initial_rect.loc = self.space.element_location(window).unwrap();

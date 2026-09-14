@@ -36,7 +36,6 @@ export function Stage({ viewer, windowMode, borders, elements, children }) {
       <canvas ref={viewer.attach} tabIndex={-1} className={`stage block outline-none ${windowMode ? '' : 'h-full w-full'} ${observer || !windowMode && releasedMouse ? 'cursor-default!' : ''}`} />
       {(borders || elements) && <Overlay viewer={viewer} size={size} borders={borders} elements={elements} />}
       {!windowMode && <ObserverPointer viewer={viewer} size={size} />}
-      {windowMode && <InactiveWindow viewer={viewer} />}
       <Banner viewer={viewer} />
       <Notice viewer={viewer} />
       <Notifications viewer={viewer} />
@@ -45,15 +44,6 @@ export function Stage({ viewer, windowMode, borders, elements, children }) {
   );
 }
 
-function InactiveWindow({ viewer }) {
-  const inactive = useStore(viewer.store, s => s.windows.some(w => w.id === Number(WINDOW) && w.workspace !== s.workspaces.active));
-  const controls = useStore(viewer.store, s => s.status === 'connected' && s.permissions.includes('desktop.control'));
-  if (!inactive) return null;
-  return <div className="absolute top-3 rounded border border-line bg-surface px-3 py-2 text-xs text-ink" role="status">
-    This window is on another workspace.
-    {controls && <button className="ml-3 rounded bg-accent px-2 py-1 text-canvas" onClick={() => viewer.control({ id: Number(WINDOW), op: 'activate' })}>Activate on Desktop</button>}
-  </div>;
-}
 
 function ObserverPointer({ viewer, size }) {
   const stream = useStore(viewer.store, s => s.stream);
@@ -86,7 +76,7 @@ function Overlay({ viewer, size, borders, elements }) {
   const k = Math.min(size.w / sw, size.h / sh);
   const ox = (size.w - sw * k) / 2, oy = (size.h - sh * k) / 2;
   const box = (x, y, w, h) => ({ left: ox + x * k, top: oy + y * k, width: w * k, height: h * k });
-  const f = windows.find(w => w.focused && !w.minimized);
+  const f = windows.find(w => w.focused && !w.minimized && w.workspace === activeWorkspace);
   const page = elements && f && els?.id === f.id ? els : null;
   const why = page && (page.status !== 200 ? page.page.error || `HTTP ${page.status}` : page.page.level !== 'full' && `no elements: ${page.page.level}${page.page.toolkit ? ` (${page.page.toolkit})` : ''}`);
   return (

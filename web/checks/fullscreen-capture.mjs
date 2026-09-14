@@ -34,7 +34,7 @@ window.WebSocket = class {
     this.onopen?.({});
     const send = (type, value) => this.onmessage?.({ data: new Uint8Array([type, ...new TextEncoder().encode(JSON.stringify(value))]).buffer });
     send(0x15, ["desktop.view", "desktop.control", "clipboard.read", "clipboard.write"]);
-    send(${WORKSPACES}, { active: 1, count: 4 });
+    send(${WORKSPACES}, { active: 1, workspaces: [1, 2, 3, 4].map(id => ({ id, name: String(id) })) });
     send(${WINDOWS}, [{ id: 1, title: 'Capture fixture', app_id: 'fixture', workspace: 1, minimized: false, x: 0, y: 0, w: 1280, h: 720, popups: [] }]);
   }); }
   send(data) { sent.push([...new Uint8Array(data)]); }

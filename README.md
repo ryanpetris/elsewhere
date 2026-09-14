@@ -207,7 +207,7 @@ cargo run --release -- --exec 'dbus-run-session -- sh -c "xfce4-panel & exec foo
 ```
 
 xfce4-panel needs a D-Bus session bus for xfconfd; the wrapper is only needed where there is none.
- Its pager shows the single workspace. Waybar's default config draws its
+ Its pager lists the shared workspaces. Waybar's default config draws its
 icons with Font Awesome (`otf-font-awesome`); GTK only shows icons in the Xfce menus with
 `gtk-menu-images=1` in `~/.config/gtk-3.0/settings.ini`, which xfsettingsd normally sets. Windows
 that draw their own title bar take its buttons from the GSettings key

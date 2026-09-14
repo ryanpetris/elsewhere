@@ -41,6 +41,16 @@ def menu_closed(widget):
     save()
 menu.connect('deactivate', menu_closed)
 def open_menu(widget, event):
+    if event.button == 2:
+        window.begin_move_drag(event.button, int(event.x_root), int(event.y_root), event.time)
+        state['move_requested'] = state.get('move_requested', 0) + 1
+        save()
+        return True
+    if event.button == 1 and event.x < 12:
+        window.begin_resize_drag(Gdk.WindowEdge.SOUTH_EAST, event.button, int(event.x_root), int(event.y_root), event.time)
+        state['resize_requested'] = state.get('resize_requested', 0) + 1
+        save()
+        return True
     if event.button == 3:
         menu.popup_at_pointer(event)
         state['menu_opened'] = state.get('menu_opened', 0) + 1

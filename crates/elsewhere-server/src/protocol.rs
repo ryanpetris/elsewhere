@@ -47,7 +47,7 @@ pub const PERMISSIONS: u8 = 0x15;
 pub const ROSTER: u8 = 0x16;
 /// `[f64 x][f64 y][f64 logical width][f64 logical height]`.
 pub const POINTER_POSITION: u8 = 0x17;
-/// Shared active workspace and fixed count, as JSON.
+/// Shared active workspace and workspace IDs/names, as JSON.
 pub const WORKSPACES: u8 = 0x18;
 // client -> server
 /// `[AUTH][token as UTF-8]`: must be the first message on a new socket; nothing else is processed before it.

@@ -104,7 +104,6 @@ For example, `/elsewhere/alice/api/windows` and `/elsewhere/alice/mcp` address t
 | 401 | missing or wrong bearer token | check `Authorization: Bearer` |
 | 403 | permission denied | obtain a token with the grants required by this operation |
 | 404 | no such window | the window closed; list again |
-| 409 | window is on an inactive workspace | explicitly activate it before coordinate input |
 | 429 | another snapshot is in flight | one at a time; retry after it returns |
 | 500 | the snapshot render failed | retry after checking the error |
 | 501 | the server runs without `--elements` | use snapshots instead |
@@ -157,11 +156,14 @@ settings yourself when using MCP. See the generated reference for the matching H
 
 ## Workspaces
 
-Read `GET /api/workspaces` (MCP `workspaces`) for the shared active number and fixed count of four.
+Read `GET /api/workspaces` (MCP `workspaces`) for the shared active ID and workspace IDs/names.
 Each window reports `workspace`, separate from `minimized`. `POST /api/control` accepts
-`{"op":"switchworkspace","workspace":2}` and `{"op":"movetoworkspace","id":7,"workspace":2}`;
-MCP provides `switch_workspace` and `move_to_workspace`. Reads require `desktop.view`, mutations
-`desktop.control`. Moving a dialog moves its parent/transient family without switching desktops.
-Explicitly activate a window to switch to its workspace and focus it. Ordinary coordinate input to
-an inactive window fails with 409; do not retry without activation. Snapshots remain available.
-Workspaces share access and state across viewers; they are not separate security domains.
+`createworkspace`, `deleteworkspace` with `workspace`, `switchworkspace` with `workspace`, and
+`movetoworkspace` with `id` and `workspace`. MCP provides `create_workspace`, `delete_workspace`,
+`switch_workspace`, and `move_to_workspace`. Reads require `desktop.view`, mutations
+`desktop.control`. IDs remain stable; workspace count has no configured limit. Deleting a populated
+workspace moves its windows to the first remaining workspace. The last workspace cannot be deleted.
+Moving a dialog moves its parent/transient family without switching desktops. Explicit activation
+switches to the window's workspace and focuses it. Window-relative input can reach inactive
+workspaces without switching the displayed workspace. Untargeted keys follow the shared keyboard
+focus. Snapshots remain available. Workspaces share access and state across viewers.

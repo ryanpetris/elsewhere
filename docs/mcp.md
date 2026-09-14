@@ -35,7 +35,7 @@ The compositor could always move the pointer, click and press keys: that is how 
 was missing was a way in other than the viewer's binary WebSocket. `InputMsg` in `elsewhere-core` is that way:
 `move`, `click`, `button`, `scroll`, `key`, `text`, served as `POST /api/input` and as tools.
 
-- The server rejects missing windows with 404 and inactive workspace targets with 409, then forwards
+- The server rejects missing windows with 404, then forwards
   one `Command::Input`. The compositor resolves window-relative coordinates against the geometry it has at
   that moment and emits a click's motion and button events in one go, so neither a moving window nor a
   human's pointer motion arriving in between can redirect it. Coordinates are output logical pixels or,
@@ -125,10 +125,14 @@ another action is needed.
 
 ## Workspaces
 
-`workspaces` returns the shared active workspace and the fixed count (four); `windows` reports each
-window’s `workspace`. Reads require `desktop.view`. `switch_workspace` takes `workspace` (1–4).
-`move_to_workspace` takes `window` and `workspace`, moving the parent/transient family while retaining
-geometry and minimized state. Both require `desktop.control` independently of desktop viewer roles.
-They queue control operations; read state to confirm completion. Explicit `window_control` activation switches
-to the target’s workspace. Coordinate input to inactive windows is rejected; it never switches for you.
-Snapshots and per-window streams remain available across workspace switches.
+`workspaces` returns the shared active workspace ID and the workspace IDs and names. `windows`
+reports each window's `workspace`. Reads require `desktop.view`. `create_workspace` adds a workspace;
+`delete_workspace` takes `workspace` and moves its windows to the first remaining workspace. The
+last workspace cannot be deleted. IDs remain stable and there is no configured count limit.
+
+`switch_workspace` takes `workspace`. `move_to_workspace` takes `window` and `workspace`, moving the
+transient family while retaining geometry and minimized state. Mutations require `desktop.control`
+independently of viewer roles. They queue operations; read state to confirm completion.
+Explicit `window_control` activation switches to the target workspace. Window-relative coordinate
+input routes to its workspace without changing the displayed workspace. Untargeted keys follow the
+shared keyboard focus. Snapshots and window streams remain available across workspace switches.

@@ -182,6 +182,8 @@ impl State {
     /// A request from the viewer page or `/api/control`. Unknown ids and impossible requests are ignored.
     pub fn control(&mut self, msg: ControlMsg) {
         if let ControlOp::SwitchWorkspace { workspace } = &msg.op { return self.switch_workspace(*workspace); }
+        if let ControlOp::CreateWorkspace { name } = &msg.op { return self.create_workspace(name.clone()); }
+        if let ControlOp::DeleteWorkspace { workspace } = &msg.op { return self.delete_workspace(*workspace); }
         if let ControlOp::Spawn { cmd } = &msg.op {
             return self.spawn_client(cmd);
         }
@@ -193,9 +195,9 @@ impl State {
         let mapped = self.space.element_location(&window).is_some();
         let floating = mapped && !maximized && !fullscreen;
         match msg.op {
-            ControlOp::Focus => { if self.on_active_workspace(&window) && mapped { self.focus_window(Some(&window), smithay::utils::SERIAL_COUNTER.next_serial()); } },
+            ControlOp::Focus => { if mapped { self.set_input_workspace(self.window_workspace(&window)); self.focus_window(Some(&window), smithay::utils::SERIAL_COUNTER.next_serial()); } },
             ControlOp::MoveToWorkspace { workspace } => self.move_to_workspace(&window, workspace),
-            ControlOp::SwitchWorkspace { .. } => {},
+            ControlOp::SwitchWorkspace { .. } | ControlOp::CreateWorkspace { .. } | ControlOp::DeleteWorkspace { .. } => {},
             ControlOp::Activate => {
                 self.activate_window(&window);
             }

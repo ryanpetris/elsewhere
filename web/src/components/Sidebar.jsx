@@ -125,8 +125,7 @@ function WinIcon({ w }) {
 
 function WindowRow({ viewer, w, acts, eligible, dpr }) {
   const workspaces = useStore(viewer.store, s => s.workspaces);
-  const role = useStore(viewer.store, s => s.role);
-  const badges = [!(acts && role === 'controller') && `workspace ${w.workspace}`, w.fullscreen && 'fullscreen', w.maximized && 'maximized', w.minimized && 'minimized'].filter(Boolean);
+  const badges = [!acts && `workspace ${w.workspace}`, w.fullscreen && 'fullscreen', w.maximized && 'maximized', w.minimized && 'minimized'].filter(Boolean);
   const act = (op, e) => { e.stopPropagation(); viewer.control({ id: w.id, op }); };
   return (
     <div
@@ -148,8 +147,8 @@ function WindowRow({ viewer, w, acts, eligible, dpr }) {
         <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-3">
           <span className="truncate" title={w.app_id}>{w.app_id || (w.x11 ? 'X11' : 'Wayland')}</span>
           <span className="shrink-0 font-mono text-ink-4" title={w.decoration ? 'plus the title bar' : ''}>{w.w}×{w.h}</span>
-          {acts && role === 'controller' && <select aria-label={`Move ${w.title || w.app_id} to workspace`} value={w.workspace} onClick={e => e.stopPropagation()} onChange={e => viewer.control({ id: w.id, op: 'movetoworkspace', workspace: Number(e.target.value) })} className="rounded bg-surface-3 text-xs">
-            {Array.from({ length: workspaces.count }, (_, i) => <option key={i + 1} value={i + 1}>Workspace {i + 1}</option>)}
+          {acts && <select aria-label={`Move ${w.title || w.app_id} to workspace`} value={w.workspace} onClick={e => e.stopPropagation()} onChange={e => viewer.control({ id: w.id, op: 'movetoworkspace', workspace: Number(e.target.value) })} className="rounded bg-surface-3 text-xs">
+            {workspaces.workspaces.map(entry => <option key={entry.id} value={entry.id}>Workspace {entry.name}</option>)}
           </select>}
           {badges.map(b => <span key={b} className="shrink-0 rounded bg-surface-4 px-1 text-[10px] text-ink-3">{b}</span>)}
         </div>

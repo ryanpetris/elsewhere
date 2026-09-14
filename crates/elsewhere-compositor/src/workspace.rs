@@ -1,4 +1,4 @@
-//! Four numbered desktops, shared by viewers and ext-workspace panel clients.
+//! Dynamic desktops, shared by viewers and ext-workspace panel clients.
 
 use smithay::reexports::{
     wayland_protocols::ext::workspace::v1::server::{
@@ -17,17 +17,35 @@ struct Binding {
     manager: ExtWorkspaceManagerV1,
     group: ExtWorkspaceGroupHandleV1,
     handles: Vec<(u32, ExtWorkspaceHandleV1)>,
-    pending: Option<u32>,
+    pending: Vec<elsewhere_core::ControlOp>,
+}
+
+impl Binding {
+    fn add(&mut self, dh: &DisplayHandle, entry: &elsewhere_core::Workspace, active: u32) {
+        let Some(client) = self.manager.client() else { return; };
+        let Ok(ws) = client.create_resource::<ExtWorkspaceHandleV1, (ExtWorkspaceManagerV1, u32), State>(dh, self.manager.version(), (self.manager.clone(), entry.id)) else { return; };
+        self.manager.workspace(&ws);
+        ws.id(entry.id.to_string());
+        ws.name(entry.name.clone());
+        ws.coordinates((entry.id - 1).to_ne_bytes().to_vec());
+        ws.state(if entry.id == active { handle::State::Active } else { handle::State::empty() });
+        ws.capabilities(handle::WorkspaceCapabilities::Activate | handle::WorkspaceCapabilities::Remove);
+        self.group.workspace_enter(&ws);
+        self.handles.push((entry.id, ws));
+    }
 }
 
 pub struct Workspaces {
     pub active: u32,
-    focus: [Option<Window>; COUNT as usize],
+    pub input: u32,
+    pub entries: Vec<elsewhere_core::Workspace>,
+    next_id: Option<u32>,
+    pub focus: std::collections::HashMap<u32, Window>,
     bindings: Vec<Binding>,
 }
 
 impl Default for Workspaces {
-    fn default() -> Self { Self { active: 1, focus: Default::default(), bindings: Vec::new() } }
+    fn default() -> Self { Self { active: 1, input: 1, entries: elsewhere_core::WorkspaceState::default().workspaces, next_id: Some(5), focus: Default::default(), bindings: Vec::new() } }
 }
 
 impl Workspaces {
@@ -50,7 +68,7 @@ impl Workspaces {
     }
 
     pub fn forget(&mut self, window: &Window) {
-        for focus in &mut self.focus { if focus.as_ref() == Some(window) { *focus = None; } }
+        self.focus.retain(|_, focus| focus != window);
     }
 }
 
@@ -59,22 +77,12 @@ impl GlobalDispatch<ExtWorkspaceManagerV1, ()> for State {
         let manager = data_init.init(resource, ());
         let Ok(group) = client.create_resource::<ExtWorkspaceGroupHandleV1, (), State>(dh, manager.version(), ()) else { return; };
         manager.workspace_group(&group);
-        group.capabilities(group::GroupCapabilities::empty());
+        group.capabilities(group::GroupCapabilities::CreateWorkspace);
         for output in state.output.client_outputs(client) { group.output_enter(&output); }
-        let mut handles = Vec::new();
-        for number in 1..=COUNT {
-            let Ok(ws) = client.create_resource::<ExtWorkspaceHandleV1, (ExtWorkspaceManagerV1, u32), State>(dh, manager.version(), (manager.clone(), number)) else { return; };
-            manager.workspace(&ws);
-            ws.id(number.to_string());
-            ws.name(number.to_string());
-            ws.coordinates((number - 1).to_ne_bytes().to_vec());
-            ws.state(if number == state.workspaces.active { handle::State::Active } else { handle::State::empty() });
-            ws.capabilities(handle::WorkspaceCapabilities::Activate);
-            group.workspace_enter(&ws);
-            handles.push((number, ws));
-        }
-        manager.done();
-        state.workspaces.bindings.push(Binding { manager, group, handles, pending: None });
+        let mut binding = Binding { manager, group, handles: Vec::new(), pending: Vec::new() };
+        for entry in &state.workspaces.entries { binding.add(dh, entry, state.workspaces.active); }
+        binding.manager.done();
+        state.workspaces.bindings.push(binding);
     }
 }
 
@@ -82,8 +90,8 @@ impl Dispatch<ExtWorkspaceManagerV1, ()> for State {
     fn request(state: &mut Self, _: &Client, manager: &ExtWorkspaceManagerV1, request: manager::Request, _: &(), _: &DisplayHandle, _: &mut DataInit<'_, Self>) {
         match request {
             manager::Request::Commit => {
-                let pending = state.workspaces.bindings.iter_mut().find(|b| b.manager == *manager).and_then(|b| b.pending.take());
-                if let Some(number) = pending { state.switch_workspace(number); }
+                let pending = state.workspaces.bindings.iter_mut().find(|b| b.manager == *manager).map(|b| std::mem::take(&mut b.pending)).unwrap_or_default();
+                for op in pending { state.control(elsewhere_core::ControlMsg { id: 0, op }); }
             }
             manager::Request::Stop => {
                 state.workspaces.bindings.retain(|b| b.manager != *manager);
@@ -98,24 +106,70 @@ impl Dispatch<ExtWorkspaceManagerV1, ()> for State {
 }
 
 impl Dispatch<ExtWorkspaceGroupHandleV1, ()> for State {
-    fn request(_: &mut Self, _: &Client, _: &ExtWorkspaceGroupHandleV1, _: group::Request, _: &(), _: &DisplayHandle, _: &mut DataInit<'_, Self>) {}
-}
-
-impl Dispatch<ExtWorkspaceHandleV1, (ExtWorkspaceManagerV1, u32)> for State {
-    fn request(state: &mut Self, _: &Client, _: &ExtWorkspaceHandleV1, request: handle::Request, data: &(ExtWorkspaceManagerV1, u32), _: &DisplayHandle, _: &mut DataInit<'_, Self>) {
-        if matches!(request, handle::Request::Activate) {
-            if let Some(b) = state.workspaces.bindings.iter_mut().find(|b| b.manager == data.0) { b.pending = Some(data.1); }
+    fn request(state: &mut Self, _: &Client, group: &ExtWorkspaceGroupHandleV1, request: group::Request, _: &(), _: &DisplayHandle, _: &mut DataInit<'_, Self>) {
+        if let group::Request::CreateWorkspace { workspace } = request {
+            if let Some(b) = state.workspaces.bindings.iter_mut().find(|b| b.group == *group) {
+                b.pending.push(elsewhere_core::ControlOp::CreateWorkspace { name: Some(workspace) });
+            }
         }
     }
 }
 
+impl Dispatch<ExtWorkspaceHandleV1, (ExtWorkspaceManagerV1, u32)> for State {
+    fn request(state: &mut Self, _: &Client, _: &ExtWorkspaceHandleV1, request: handle::Request, data: &(ExtWorkspaceManagerV1, u32), _: &DisplayHandle, _: &mut DataInit<'_, Self>) {
+        let op = match request {
+            handle::Request::Activate => elsewhere_core::ControlOp::SwitchWorkspace { workspace: data.1 },
+            handle::Request::Remove => elsewhere_core::ControlOp::DeleteWorkspace { workspace: data.1 },
+            _ => return,
+        };
+        if let Some(b) = state.workspaces.bindings.iter_mut().find(|b| b.manager == data.0) { b.pending.push(op); }
+    }
+}
 
-pub const COUNT: u32 = elsewhere_core::WORKSPACE_COUNT;
+
 struct Membership(Cell<u32>);
 
 impl State {
+    pub fn workspace_state(&self) -> elsewhere_core::WorkspaceState {
+        elsewhere_core::WorkspaceState { active: self.workspaces.active, workspaces: self.workspaces.entries.clone() }
+    }
+
+    pub fn create_workspace(&mut self, name: Option<String>) {
+        let Some(id) = self.workspaces.next_id else { return; };
+        let name = name.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| id.to_string());
+        if name.len() > 256 || name.chars().any(char::is_control) { return; }
+        self.workspaces.next_id = id.checked_add(1);
+        let entry = elsewhere_core::Workspace { id, name };
+        for binding in &mut self.workspaces.bindings { binding.add(&self.dh, &entry, self.workspaces.active); }
+        self.workspaces.entries.push(entry);
+        self.workspaces.publish();
+        let _ = self.events.send(elsewhere_core::Event::Workspaces(self.workspace_state()));
+    }
+
+    pub fn delete_workspace(&mut self, workspace: u32) {
+        if !self.workspaces.entries.iter().any(|entry| entry.id == workspace) { return; }
+        let Some(target) = self.workspaces.entries.iter().find(|entry| entry.id != workspace).map(|entry| entry.id) else { return; };
+        if self.workspaces.active == workspace { self.switch_workspace(target); }
+        if self.workspaces.input == workspace { self.set_input_workspace(target); }
+        for window in self.full_stack() {
+            if self.window_workspace(&window) == workspace { self.assign_workspace(&window, target); }
+        }
+        self.workspaces.entries.retain(|entry| entry.id != workspace);
+        self.workspaces.focus.remove(&workspace);
+        for binding in &mut self.workspaces.bindings {
+            binding.handles.retain(|(id, handle)| {
+                if *id != workspace { return true; }
+                if handle.is_alive() { binding.group.workspace_leave(handle); handle.removed(); }
+                false
+            });
+        }
+        self.sync_workspace_parents(true);
+        self.workspaces.publish();
+        let _ = self.events.send(elsewhere_core::Event::Workspaces(self.workspace_state()));
+    }
+
     pub fn active_element_under(&self, point: Point<f64, Logical>) -> Option<(&Window, Point<i32, Logical>)> {
-        self.space.elements().rev().filter(|w| self.on_active_workspace(w)).find_map(|w| {
+        self.space.elements().rev().filter(|w| self.on_input_workspace(w)).find_map(|w| {
             let origin = self.space.element_location(w)? - w.geometry().loc;
             w.is_in_input_region(&(point - origin.to_f64())).then_some((w, origin))
         })
@@ -132,6 +186,27 @@ impl State {
 
     pub fn on_active_workspace(&self, window: &Window) -> bool {
         self.window_workspace(window) == self.workspaces.active
+    }
+
+    pub fn on_input_workspace(&self, window: &Window) -> bool {
+        self.window_workspace(window) == self.workspaces.input
+    }
+
+    pub fn set_input_workspace(&mut self, workspace: u32) {
+        if workspace == self.workspaces.input { return; }
+        if let Some(window) = self.active.clone().filter(|w| self.on_input_workspace(w)) {
+            self.workspaces.focus.insert(self.workspaces.input, window);
+        }
+        let pending = self.pending_initial_focus.clone().filter(|w| self.window_workspace(w) == workspace);
+        self.end_workspace_input();
+        self.workspaces.input = workspace;
+        let next = self.workspaces.focus.get(&workspace).cloned()
+            .filter(|w| self.on_input_workspace(w) && self.space.element_location(w).is_some())
+            .or_else(|| self.top_window());
+        if self.focus_exclusive_layer() { self.active = next; }
+        else { self.focus_window(next.as_ref(), SERIAL_COUNTER.next_serial()); }
+        self.pending_initial_focus = pending;
+        self.pointer_motion(self.pointer_location);
     }
 
     pub fn parent_window(&self, window: &Window) -> Option<Window> {
@@ -160,10 +235,10 @@ impl State {
             }
             if !changed { break; }
         }
-        let hidden_focus = self.active.as_ref().is_some_and(|w| !self.on_active_workspace(w));
+        let hidden_focus = self.active.as_ref().is_some_and(|w| !self.on_input_workspace(w));
         let mut hidden_surfaces = std::collections::HashSet::new();
         if membership_changed {
-            for window in windows.iter().filter(|w| !self.on_active_workspace(w)) {
+            for window in windows.iter().filter(|w| !self.on_input_workspace(w)) {
                 window.with_surfaces(|surface, _| { hidden_surfaces.insert(surface.id()); });
             }
         }
@@ -176,11 +251,11 @@ impl State {
             || focus_is_hidden(pointer.grab_start_data().and_then(|g| g.focus.map(|(f, _)| f)), &hidden_surfaces)
             || focus_is_hidden(touch.grab_start_data().and_then(|g| g.focus.map(|(f, _)| f)), &hidden_surfaces)
             || self.touch_down.values().any(|focus| focus_is_hidden(focus.clone(), &hidden_surfaces))
-            || self.pointer_grab_window.as_ref().is_some_and(|w| !self.on_active_workspace(w))
-            || self.touch_grab_window.as_ref().is_some_and(|w| !self.on_active_workspace(w));
+            || self.pointer_grab_window.as_ref().is_some_and(|w| !self.on_input_workspace(w))
+            || self.touch_grab_window.as_ref().is_some_and(|w| !self.on_input_workspace(w));
         if hidden_focus || hidden_owner {
             if hidden_owner || !self.exclusive_layer_focused() { self.end_workspace_input(); }
-            let next = self.active.clone().filter(|w| self.on_active_workspace(w)).or_else(|| self.top_window());
+            let next = self.active.clone().filter(|w| self.on_input_workspace(w)).or_else(|| self.top_window());
             if self.exclusive_layer_focused() { self.active = next; }
             else { self.focus_window(next.as_ref(), SERIAL_COUNTER.next_serial()); }
         }
@@ -191,7 +266,7 @@ impl State {
         }
     }
 
-    fn end_workspace_input(&mut self) {
+    pub(crate) fn end_workspace_input(&mut self) {
         self.pending_initial_focus = None;
         self.release_pointer_lock();
         let serial = SERIAL_COUNTER.next_serial();
@@ -212,16 +287,17 @@ impl State {
     }
 
     pub fn switch_workspace(&mut self, workspace: u32) {
-        if !(1..=COUNT).contains(&workspace) || workspace == self.workspaces.active { return; }
-        self.workspaces.focus[(self.workspaces.active - 1) as usize] = self.active.clone();
+        if !self.workspaces.entries.iter().any(|entry| entry.id == workspace) || workspace == self.workspaces.active { return; }
+        if let Some(window) = self.active.clone() { self.workspaces.focus.insert(self.workspaces.input, window); } else { self.workspaces.focus.remove(&self.workspaces.input); }
         self.end_workspace_input();
         self.workspaces.active = workspace;
+        self.workspaces.input = workspace;
         self.workspaces.publish();
-        let _ = self.events.send(elsewhere_core::Event::Workspaces(elsewhere_core::WorkspaceState { active: workspace, count: COUNT }));
-        let next = self.workspaces.focus[(workspace - 1) as usize].clone()
+        let _ = self.events.send(elsewhere_core::Event::Workspaces(self.workspace_state()));
+        let next = self.workspaces.focus.get(&workspace).cloned()
             .filter(|w| self.on_active_workspace(w) && self.space.element_location(w).is_some())
             .or_else(|| self.top_window());
-        if self.exclusive_layer_focused() { self.active = next; }
+        if self.focus_exclusive_layer() { self.active = next; }
         else { self.focus_window(next.as_ref(), SERIAL_COUNTER.next_serial()); }
         self.pointer_motion(self.pointer_location);
         self.force_full_frame = true;
@@ -230,12 +306,13 @@ impl State {
 
     pub fn activate_window(&mut self, window: &Window) {
         self.switch_workspace(self.window_workspace(window));
+        self.set_input_workspace(self.window_workspace(window));
         self.unminimize(window);
         self.focus_window(Some(window), SERIAL_COUNTER.next_serial());
     }
 
     pub fn move_to_workspace(&mut self, window: &Window, workspace: u32) {
-        if !(1..=COUNT).contains(&workspace) { return; }
+        if !self.workspaces.entries.iter().any(|entry| entry.id == workspace) { return; }
         let mut root = window.clone();
         let mut seen = vec![root.clone()];
         while let Some(parent) = self.parent_window(&root) {

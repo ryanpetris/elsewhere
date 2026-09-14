@@ -70,6 +70,7 @@ pub enum Command {
     Input(InputMsg),
     /// Per-window viewer input, admitted only while the target is on the active desktop.
     WindowInput { window: u64, command: Box<Command> },
+    DesktopInput(Box<Command>),
     /// Render one window (or the whole output) to pixels and hand them to `reply`.
     Snapshot { id: Option<u64>, sizing: SnapshotSizing, reply: SnapshotReply },
     /// The icon a window's client set as pixels (xdg-toplevel-icon), the largest; `NoSuchWindow` when it set none.
@@ -153,15 +154,19 @@ pub mod decoration {
     }
 }
 
-pub const WORKSPACE_COUNT: u32 = 4;
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Workspace {
+    pub id: u32,
+    pub name: String,
+}
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct WorkspaceState {
     pub active: u32,
-    pub count: u32,
+    pub workspaces: Vec<Workspace>,
 }
 impl Default for WorkspaceState {
-    fn default() -> Self { Self { active: 1, count: WORKSPACE_COUNT } }
+    fn default() -> Self { Self { active: 1, workspaces: (1..=4).map(|id| Workspace { id, name: id.to_string() }).collect() } }
 }
 
 /// One window as the desktop API reports it.
@@ -218,6 +223,8 @@ pub enum ControlOp {
     /// Focus only if already mapped on the active workspace; never switch or restore.
     Focus,
     SwitchWorkspace { workspace: u32 },
+    CreateWorkspace { name: Option<String> },
+    DeleteWorkspace { workspace: u32 },
     MoveToWorkspace { workspace: u32 },
     Activate,
     Close,

@@ -101,6 +101,11 @@ try {
   await native('x-source', 'w-target');
   await native('x-source', 'x-target', ['x-target', 'w-target']);
 
+  await api('control', {op: 'spawn', cmd: 'foot --title=HiddenDropFocus sleep 1000'});
+  const hidden = await wait(async () => (await api('windows')).find(w => w.title === 'HiddenDropFocus'), 'hidden input fixture');
+  await api('control', {op: 'movetoworkspace', id: hidden.id, workspace: 2});
+  await wait(async () => (await api('windows')).find(w => w.id === hidden.id)?.workspace === 2, 'hidden input workspace');
+
   const browserDrop = async (target, mode = 'accept', cancel = false) => {
     await writeFile(`${root}/${target}.mode`, mode);
     const count = (await records(target)).filter(r => r.kind === 'received').length;
@@ -109,6 +114,8 @@ try {
     const start = packets.length;
     // Refusal follows an accepting Wayland target in the same drag.
     await move(...point(mode === 'refuse' ? 'w-target' : target));
+    await api('control', {op: 'focus', id: hidden.id});
+    await wait(async () => (await api('windows')).find(w => w.id === hidden.id)?.focused, 'hidden focus before desktop drop');
     json(DRAG, {op: 'start'}); await sleep(200);
     if (mode === 'refuse') { await move(...point(target)); await sleep(200); }
     const response = await fetch(`${origin}/api/drop/${batch}/sample.txt`, {method: 'PUT', headers: {Authorization: 'Bearer ' + token}, body: payload});

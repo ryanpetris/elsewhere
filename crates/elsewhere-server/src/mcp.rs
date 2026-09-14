@@ -287,18 +287,28 @@ impl Mcp {
 
 #[tool_router(vis = "pub(crate)")]
 impl Mcp {
-    #[tool(description = "Read the shared active workspace number and the fixed workspace count. Requires desktop.view.")]
+    #[tool(description = "Read the shared active workspace number and workspace IDs and names. Requires desktop.view.")]
     fn workspaces(&self, Extension(parts): Extension<Parts>) -> ToolResult {
         if let Err(e) = self.require_key(&parts, P::DesktopView) { return done(Err(e)); }
         json(self.app.workspaces())
     }
 
-    #[tool(description = "Switch the shared desktop to workspace 1 through 4. Releases held input and restores that workspace's focus. Requires desktop.control; check workspaces afterwards.")]
+    #[tool(description = "Create a workspace. Requires desktop.control; read workspaces afterwards for its ID.")]
+    fn create_workspace(&self, Extension(parts): Extension<Parts>) -> ToolResult {
+        self.control(&parts, 0, ControlOp::CreateWorkspace { name: None })
+    }
+
+    #[tool(description = "Delete a workspace and move its windows to the first remaining workspace. The last workspace cannot be deleted. Requires desktop.control; read workspaces afterwards.")]
+    fn delete_workspace(&self, Extension(parts): Extension<Parts>, Parameters(args): Parameters<WorkspaceArg>) -> ToolResult {
+        self.control(&parts, 0, ControlOp::DeleteWorkspace { workspace: args.workspace })
+    }
+
+    #[tool(description = "Switch the shared desktop to an existing workspace. Releases held input and restores that workspace's focus. Requires desktop.control; check workspaces afterwards.")]
     fn switch_workspace(&self, Extension(parts): Extension<Parts>, Parameters(args): Parameters<WorkspaceArg>) -> ToolResult {
         self.control(&parts, 0, ControlOp::SwitchWorkspace { workspace: args.workspace })
     }
 
-    #[tool(description = "Move a window and its transient family to workspace 1 through 4, retaining geometry and minimized state. Does not switch desktops. Requires desktop.control; check windows afterwards.")]
+    #[tool(description = "Move a window and its transient family to an existing workspace, retaining geometry and minimized state. Does not switch desktops. Requires desktop.control; check windows afterwards.")]
     fn move_to_workspace(&self, Extension(parts): Extension<Parts>, Parameters(args): Parameters<MoveWorkspaceArg>) -> ToolResult {
         self.control(&parts, args.window, ControlOp::MoveToWorkspace { workspace: args.workspace })
     }

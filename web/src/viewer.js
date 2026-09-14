@@ -36,7 +36,7 @@ export function createViewer() {
     stream: null, // the last Config: {streamId, codec, width, height, scale}
     renderer: '2d',
     windows: [],
-    workspaces: { active: 1, count: 4 },
+    workspaces: { active: 1, workspaces: [] },
     windowTitle: '', // window mode: the streamed window's title
     notice: null, // { text, kind: 'warning' | 'success' }: a word about our last action, shown for a few seconds
     notifications: [], // open desktop notifications, oldest first
@@ -946,8 +946,8 @@ export function createViewer() {
 
   // --- input -----------------------------------------------------------------------------
   // Only the controller's pointer and keyboard are the desktop's (a window popup drives with any token with `desktop.control`).
-  const windowOnDesktop = () => state().windows.some(w => w.id === Number(WINDOW) && w.workspace === state().workspaces.active && !w.minimized);
-  const driving = () => can('desktop.control') && (WINDOW ? state().role !== 'viewer' && windowOnDesktop() : state().role === 'controller');
+  const windowAvailable = () => state().windows.some(w => w.id === Number(WINDOW) && !w.minimized);
+  const driving = () => can('desktop.control') && (WINDOW ? state().role !== 'viewer' && windowAvailable() : state().role === 'controller');
   // A pointer position in the desktop's logical px, through the canvas's on-screen rectangle (which
   // follows the touch zoom); the stream's size is the desktop's, except while a resize is in flight.
   function toDesktop(e) {
@@ -1361,7 +1361,7 @@ export function createViewer() {
   // the title, the content (updated_ms, whole seconds), the geometry, the open popups or the stream scale
   // (Chromium's web content is scaled by it). The 300 ms delay merges a burst of list updates into one request.
   let elementsKey = '', elementsTimer = 0, elementsRev = 0;
-  const focusedWindow = () => state().windows.find(w => w.focused && !w.minimized);
+  const focusedWindow = () => state().windows.find(w => w.focused && !w.minimized && w.workspace === state().workspaces.active);
   function fetchElements() {
     const f = focusedWindow();
     const key = state().elementsOn && f ? `${f.id}/${f.title}/${f.updated_ms}/${f.w}x${f.h}+${f.geo_x}+${f.geo_y}@${stream?.scale}/${JSON.stringify(f.popups)}` : '';
