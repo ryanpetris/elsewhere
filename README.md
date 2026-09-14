@@ -79,18 +79,18 @@ status bar on screen, with keyboard lock so shortcuts like Ctrl+W reach the desk
 
 **Hide controls** hides the top bar and open panels while keeping the status bar, statistics and stream
 controls. Use the highlighted **Show Controls** button at the left of the status bar or
-**Ctrl+Alt+Shift+H** to return. The shortcut also releases mouse capture and exits viewer fullscreen. The
+**Ctrl+Alt+Shift+H** to return. The shortcut also releases mouse capture. The
 mode belongs to this viewer and resets on reload; hidden terminal sessions stay open. Browser tabs and
 the address bar stay visible in windowed mode.
 
-Open the command palette from the toolbar or with **Ctrl+Alt+Shift+P**, including while controls
-are hidden or the viewer is fullscreen. Search Applications, Windows, and Viewer actions by name,
+Open **Search** from the toolbar. Search Applications, Windows, and Viewer actions by name,
 application description or window application ID. Arrow keys select, Enter invokes, and Escape
 returns focus. Window IDs distinguish matching titles. Applications launch a new instance; Windows
 activate an existing window, including a minimized one. Viewer actions open Files, Terminal,
 Settings, Windows and Statistics, toggle Fullscreen, or Show/Hide Controls. Results follow live
-windows and permissions. Window popups offer Fullscreen and Show/Hide Controls only. Opening the
-palette releases held desktop input and mouse capture; search and composition stay in the viewer.
+windows and permissions. Read-only users can search windows. Opening panels preserves fullscreen.
+Window popups offer Fullscreen and Show/Hide Controls only. Opening the
+Search menu releases held desktop input and mouse capture; search and composition stay in the viewer.
 
 Any number of people can watch at once, each with a stream scaled to their own window. The first to
 connect with `desktop.control` drives the pointer and keyboard; other eligible sessions can use
@@ -227,8 +227,7 @@ The page says when the server closed its socket with a token dialog ("wrong toke
 
 In Settings, enable **Capture Mouse on Click** for games that use edge scrolling. The first click
 captures the mouse; movement, clicks, and the mouse wheel reach the desktop only while captured. A
-**Mouse Captured** warning sits in the top bar for as long as capture lasts; fullscreen and hidden
-controls take the bar and the warning with them. Use the application's fullscreen button to send normal
+**Mouse Captured** warning sits in the top bar while capture lasts and controls are shown. Use the application's fullscreen button to send normal
 Escape presses to the remote application while keeping the mouse captured in supported browsers. Hold
 Escape to use the browser's release gesture. Outside supported fullscreen, normal Escape may release
 capture; browser-only F11 fullscreen does not enable this behavior. The setting is remembered in your

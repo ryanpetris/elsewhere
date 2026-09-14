@@ -26,6 +26,7 @@ export function createViewer() {
     // The role tracks desktop input ownership; permissions govern feature access.
     role: null,
     controlsHidden: false,
+    fullscreenControls: false,
     panelWindows: {},
     display: null,
     permissions: [],
@@ -1242,25 +1243,18 @@ export function createViewer() {
   function setControlsHidden(hidden) {
     releaseInput();
     if (document.pointerLockElement === canvas) document.exitPointerLock();
-    store.set({ controlsHidden: hidden });
-    if (!hidden && ownFullscreen()) document.exitFullscreen().catch(() => {});
+    store.set({ controlsHidden: hidden, fullscreenControls: !hidden && ownFullscreen() });
     canvas?.focus({ preventScroll: true });
     if (hidden) notice('Ctrl+Alt+Shift+H to show controls.', 'success');
   }
-  let controlsKey = false, paletteKey = false;
+  let controlsKey = false;
   const controlsShortcut = e => {
     if (PIP || disposed) return;
-    if (e.code === 'KeyP' && (paletteKey || e.ctrlKey && e.altKey && e.shiftKey && !e.metaKey)) {
-      e.preventDefault(); e.stopImmediatePropagation();
-      if (e.type === 'keydown' && !e.repeat) { paletteKey = true; viewer.openPalette?.(); }
-      if (e.type === 'keyup') paletteKey = false;
-      return;
-    }
     if (e.code !== 'KeyH' || !(controlsKey || e.ctrlKey && e.altKey && e.shiftKey && !e.metaKey)) return;
     e.preventDefault(); e.stopImmediatePropagation();
     if (e.type === 'keydown' && !e.repeat) {
       controlsKey = true;
-      setControlsHidden(!(state().controlsHidden || ownFullscreen()));
+      setControlsHidden(!(state().controlsHidden || ownFullscreen() && !state().fullscreenControls));
     }
     if (e.type === 'keyup') controlsKey = false;
   };
@@ -1303,7 +1297,7 @@ export function createViewer() {
   // a deferred paste chord must not fire after its modifier was released; no key is held during a native
   // drag, and the release would let go of the drag while its files are still uploading
   const releaseInput = () => { forwardedKeys.clear(); pendingPaste = null; clearTimeout(pasteTimer); clearPasteTarget(); send(BLUR, 0); };
-  const blur = () => { controlsKey = false; paletteKey = false; if (keyboardPending) releaseKeyboard(); pendingPaste = null; if (!dragging) releaseInput(); };
+  const blur = () => { controlsKey = false; if (keyboardPending) releaseKeyboard(); pendingPaste = null; if (!dragging) releaseInput(); };
   window.addEventListener('blur', blur);
   document.addEventListener('visibilitychange', () => { if (document.hidden) blur(); });
   if (WINDOW) window.addEventListener('focus', () => sendControl({ id: +WINDOW, op: 'focus' }));
@@ -1354,7 +1348,7 @@ export function createViewer() {
       if (epoch === keyboardEpoch) keyboardPending = false;
     }
   }
-  document.addEventListener('fullscreenchange', () => { if (!ownFullscreen()) releaseKeyboard(); });
+  document.addEventListener('fullscreenchange', () => { store.set({ fullscreenControls: false }); if (!ownFullscreen()) releaseKeyboard(); });
 
   // --- elements --------------------------------------------------------------------------------
   // The focused window's elements, fetched again when anything the answer depends on changed: the focus,

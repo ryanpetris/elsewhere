@@ -5,12 +5,12 @@ import { readFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
 import { KEY, BLUR, CONTROL } from '../src/protocol.js';
 
-let requests = 0, launches = 0, finishLaunch, delayLaunch = false;
+let requests = 0, launches = 0, finishLaunch, delayLaunch = false, failApps = false;
 const server = createServer(async (req, res) => {
   const path = new URL(req.url, 'http://localhost').pathname;
   if (path.startsWith('/api/')) {
     res.setHeader('Content-Type', 'application/json');
-    if (path === '/api/applications') { requests++; return res.end(JSON.stringify(Array.from({ length: 500 }, (_, i) => ({ id: `app${i}`, name: i < 2 ? 'Duplicate application' : `Application ${i}`, comment: 'Palette fixture', categories: [] })))); }
+    if (path === '/api/applications') { requests++; if (failApps) { res.writeHead(503); return res.end('{}'); } return res.end(JSON.stringify(Array.from({ length: 500 }, (_, i) => ({ id: `app${i}`, name: i < 2 ? 'Duplicate application' : `Application ${i}`, comment: 'Palette fixture', categories: [] })))); }
     if (path === '/api/control') { launches++; if (delayLaunch) { finishLaunch = () => res.end('{}'); return; } return res.end('{}'); }
     if (path.endsWith('/icon')) { res.writeHead(404); return res.end('{}'); }
     return res.end('[]');
@@ -42,8 +42,8 @@ try {
   await page.evaluate(permissions => elsewhere.store.set({ status: 'connected', permissions, role: 'controller', windows: [
     { id: 1, title: 'Duplicate', app_id: 'fixture', z: 1 }, { id: 2, title: 'Duplicate', app_id: 'fixture', minimized: true, z: 2 },
   ] }), permissions);
-  const input = page.getByRole('combobox', { name: 'Search commands' });
-  const open = async () => { await page.keyboard.press('Control+Alt+Shift+P'); await input.waitFor(); };
+  const input = page.getByRole('combobox', { name: 'Search' });
+  const open = async () => { await page.locator('#apps-toggle').click(); await input.waitFor(); };
   const begin = performance.now();
   await open();
   await page.locator('[data-entry="app:app499"]').waitFor();
@@ -116,6 +116,18 @@ try {
   await page.waitForFunction(() => !document.querySelector('[data-entry^="window:"]'));
   await input.fill('Renamed');
   await page.locator('[data-entry="window:1"]').waitFor();
+  await input.press('Escape');
+  failApps = true; await open();
+  await page.getByRole('button', { name: 'Retry', exact: true }).waitFor();
+  failApps = false;
+  await input.press('Tab');
+  assert.equal(await page.getByRole('button', { name: 'Retry', exact: true }).evaluate(el => el === document.activeElement), true);
+  await page.keyboard.press('Enter');
+  await page.locator('[data-entry="app:app499"]').waitFor();
+  const afterRetry = await page.evaluate(() => sent.length);
+  await page.keyboard.type('a');
+  assert.equal(await input.inputValue(), 'a');
+  assert.equal(await page.evaluate(({ start, key }) => sent.slice(start).filter(b => b[0] === key).length, { start: afterRetry, key: KEY }), 0);
   const completedLaunches = launches;
   await input.fill('application');
   await page.evaluate(() => elsewhere.store.set({ permissions: ['desktop.view'] }));
@@ -123,20 +135,14 @@ try {
   await input.press('Enter');
   assert.equal(launches, completedLaunches);
   await input.fill('');
+  assert.equal(await page.locator('[data-entry="window:1"]').isDisabled(), true);
   assert.equal(await page.locator('[data-entry="action:files"]').count(), 0);
   assert.equal(await page.locator('[data-entry="action:terminal"]').count(), 0);
   await input.press('Escape');
-  await page.evaluate(() => elsewhere.setControlsHidden(true));
-  await open();
-  const pointerStart = await page.evaluate(() => sent.length);
-  await page.mouse.click(5, 5);
-  await input.waitFor({ state: 'hidden' });
-  assert.equal(await page.evaluate(start => sent.slice(start).filter(b => [0x83, 0x84, 0x85].includes(b[0])).length, pointerStart), 0, 'hidden top edge dismisses without desktop pointer input');
-  assert.equal(await page.locator('canvas.stage').evaluate(el => el === document.activeElement), true);
   await page.evaluate(() => elsewhere.setControlsHidden(false));
   await page.locator('#apps-toggle').click();
   await input.press('Tab'); assert(await input.evaluate(el => el === document.activeElement));
-  await page.keyboard.press('Control+Alt+Shift+P');
+  await input.press('Escape');
   await input.waitFor({ state: 'hidden' });
   assert(await page.locator('#apps-toggle').evaluate(el => el === document.activeElement));
   await open();
@@ -155,7 +161,6 @@ try {
   await input.press('Escape');
   await page.evaluate(() => elsewhere.store.set({ status: 'unauthorized', permissions: [] }));
   await page.waitForFunction(() => !document.getElementById('apps-toggle'));
-  await page.keyboard.press('Control+Alt+Shift+P');
   assert.equal(await input.count(), 0, 'authorization form keeps the palette unavailable');
   assert.deepEqual(errors, []);
   console.log('Palette search, stale selection, grants, composition, held input, hidden controls, settings, popup and repeated opening passed');

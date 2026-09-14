@@ -62,7 +62,7 @@ const Capture = () => (
   </Badge>
 );
 
-export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, onHideControls, menu, onMenu, keyboard, onKeyboard, canType }) {
+export function TopBar({ viewer, windowMode, sidebar, onSidebar, fullscreen, onFullscreen, onHideControls, menu, onMenu, keyboard, onKeyboard, canType }) {
   const status = useStore(viewer.store, s => s.status);
   const workspaces = useStore(viewer.store, s => s.workspaces);
   const stream = useStore(viewer.store, s => s.stream);
@@ -86,7 +86,7 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, o
     </header>
   );
   return (
-    <header onClick={event => { if (!event.target.closest('[data-menu-trigger]')) onMenu(null); }} className="flex h-12 shrink-0 items-center border-b border-line bg-surface px-1 max-sm:[&_button:not([role=dialog]_button)]:size-7 max-sm:[&_button:not([role=dialog]_button)]:px-0 sm:gap-2 sm:px-3">
+    <header onClick={event => { if (!event.target.closest('[data-menu-trigger]')) onMenu(null); }} className="flex min-h-12 flex-wrap shrink-0 items-center border-b border-line bg-surface px-1 max-sm:[&_button:not([role=dialog]_button)]:size-7 max-sm:[&_button:not([role=dialog]_button)]:px-0 sm:gap-2 sm:px-3">
       <div className="flex min-w-0 shrink items-center pr-1">
         <button type="button" data-menu-trigger id="about-toggle" aria-label="About Elsewhere" title="About Elsewhere"
           aria-describedby={windowMode ? 'about-window-title' : undefined}
@@ -97,7 +97,7 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, o
         </button>
       </div>
       {!['no-token', 'unauthorized'].includes(status) && <Divider className="hidden sm:block" />}
-      {!['no-token', 'unauthorized'].includes(status) && <BarButton data-menu-trigger id="apps-toggle" icon={LayoutGrid} label="Command Palette (Ctrl+Alt+Shift+P)" aria-haspopup="dialog" aria-expanded={menu === 'apps'} active={menu === 'apps'} onClick={() => onMenu('apps')} />}
+      {!['no-token', 'unauthorized'].includes(status) && <BarButton data-menu-trigger id="apps-toggle" icon={LayoutGrid} label="Search" aria-haspopup="dialog" aria-expanded={menu === 'apps'} active={menu === 'apps'} onClick={() => onMenu('apps')} />}
       <div className="flex min-w-0 shrink items-center rounded-full px-1 py-1 text-xs text-ink-2 sm:ml-1 sm:gap-2 sm:border sm:border-line sm:bg-surface-2 sm:pr-3 sm:pl-2.5" title={stream && status === 'connected' ? `${text} · ${codecName(stream.codec)} ${stream.width}×${stream.height}` : text}>
         <span className={`size-2 shrink-0 rounded-full ${dot}`} />
         <span className="hidden truncate sm:inline">{text}</span>
@@ -131,7 +131,7 @@ export function TopBar({ viewer, windowMode, sidebar, onSidebar, onFullscreen, o
         )}
         {viewer.pip.supported && <IconButton icon={PictureInPicture2} label="Picture-in-Picture" onClick={() => viewer.pip.open()} />}
         <IconButton id="hide-controls" icon={PanelTopClose} label="Hide Controls (Ctrl+Alt+Shift+H)" onClick={onHideControls} />
-        <IconButton icon={Expand} label="Fullscreen" onClick={onFullscreen} />
+        <IconButton icon={Expand} label={fullscreen ? 'Exit Fullscreen' : 'Fullscreen'} onClick={onFullscreen} />
         {acts('server.manage') && (
           <>
             <Divider className="hidden sm:block" />

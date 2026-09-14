@@ -25,6 +25,7 @@ function usePref(key, fallback) {
 export function App({ viewer }) {
   const status = useStore(viewer.store, s => s.status);
   const controlsHidden = useStore(viewer.store, s => s.controlsHidden);
+  const fullscreenControls = useStore(viewer.store, s => s.fullscreenControls);
   const role = useStore(viewer.store, s => s.role);
   const permissions = useStore(viewer.store, s => s.permissions);
   const [sidebar, setSidebar] = usePref('sidebar', matchMedia('(min-width: 48rem)').matches); // a phone starts with the stage alone
@@ -59,7 +60,15 @@ export function App({ viewer }) {
   const filesOpen = useStore(viewer.store, s => s.filesOpen);
   useEffect(() => { if (filesOpen) { viewer.setControlsHidden(false); setSidebar(true); setTab('files'); } }, [filesOpen]);
   const [menu, setMenu] = useState(null); // One top-bar menu at a time.
-  const paletteInvoker = useRef(null);
+  useEffect(() => { if (['no-token', 'unauthorized'].includes(status)) setMenu(null); }, [status]);
+  const toolbar = useRef(null);
+  useLayoutEffect(() => {
+    const node = toolbar.current;
+    const update = () => node.parentElement.style.setProperty('--toolbar-height', `${node.getBoundingClientRect().height}px`);
+    const observer = new ResizeObserver(update);
+    observer.observe(node); update();
+    return () => observer.disconnect();
+  }, []);
   const [focusAfterClose, setFocusAfterClose] = useState(null);
   useLayoutEffect(() => {
     if (!focusAfterClose) return;
@@ -71,14 +80,14 @@ export function App({ viewer }) {
   const closeMenu = (event, focus) => {
     setMenu(current => current === menu ? null : current);
     if (menu === 'apps') {
-      setFocusAfterClose({ target: focus || (event?.type === 'keydown' || event?.detail === 0 ? paletteInvoker.current : 'canvas.stage') });
+      setFocusAfterClose({ target: focus || (event?.type === 'keydown' || event?.detail === 0 ? '#apps-toggle' : 'canvas.stage') });
       return;
     }
     if (event?.type === 'keydown' || event?.detail === 0) document.getElementById(`${menu}-toggle`)?.focus();
   };
   const [fullscreen, setFullscreen] = useState(false); // the chrome is gone then, so nothing is collected for it
   const windowMode = !!WINDOW;
-  const hidden = controlsHidden || fullscreen;
+  const hidden = controlsHidden || fullscreen && !fullscreenControls;
   useEffect(() => { if (hidden) setMenu(null); }, [hidden]);
   useEffect(() => {
     const on = () => { const full = viewer.isFullscreen(); setFullscreen(full); if (full) setMenu(null); };
@@ -87,19 +96,11 @@ export function App({ viewer }) {
   }, [viewer]);
   useEffect(() => viewer.setElementsOn(elements && !windowMode && !PIP), [viewer, elements, windowMode]);
   const openPalette = () => {
-    if (['no-token', 'unauthorized'].includes(viewer.store.get().status)) return;
-    if (menu === 'apps') { closeMenu({ type: 'keydown' }); return; }
-    paletteInvoker.current = document.activeElement;
     viewer.releaseInput();
     if (document.pointerLockElement) document.exitPointerLock();
     setMenu('apps');
   };
-  useEffect(() => {
-    viewer.openPalette = openPalette;
-    return () => { viewer.openPalette = null; };
-  }, [viewer, menu]);
   const revealControls = async current => {
-    if (viewer.isFullscreen()) await document.exitFullscreen();
     if (!current()) return false;
     viewer.setControlsHidden(false);
     return true;
@@ -128,19 +129,19 @@ export function App({ viewer }) {
 
   return (
     <div data-viewer="" className="relative flex h-full w-full flex-col overflow-hidden bg-canvas font-sans text-ink-2 select-none">
-      <div hidden={hidden}><TopBar
+      <div ref={toolbar} hidden={hidden}><TopBar
         viewer={viewer}
         windowMode={windowMode}
         sidebar={sidebar} onSidebar={() => setSidebar(!sidebar)}
-        onFullscreen={viewer.fullscreen}
+        fullscreen={fullscreen} onFullscreen={() => viewer.isFullscreen() ? document.exitFullscreen().catch(() => {}) : viewer.fullscreen()}
         onHideControls={() => viewer.setControlsHidden(true)}
         menu={menu} onMenu={m => { if (m === 'apps' && menu !== 'apps') openPalette(); else if (m === null || menu === m) closeMenu({ type: 'click', detail: 1 }); else setMenu(m); }}
         keyboard={keyboard} onKeyboard={toggleKeyboard} canType={canType}
       /></div>
-      {menu === 'about' && !fullscreen && <About viewer={viewer} onClose={closeMenu} />}
+      {menu === 'about' && !hidden && <About viewer={viewer} onClose={closeMenu} />}
       {menu === 'apps' && <Launcher viewer={viewer} actions={paletteActions} onClose={closeMenu} />}
       {menu === 'power' && <PowerMenu viewer={viewer} onClose={closeMenu} />}
-      {menu === 'settings' && !windowMode && !fullscreen && <Settings viewer={viewer} borders={borders} onBorders={setBorders} elements={elements} onElements={setElements} onClose={closeMenu} />}
+      {menu === 'settings' && !windowMode && !hidden && <Settings viewer={viewer} borders={borders} onBorders={setBorders} elements={elements} onElements={setElements} onClose={closeMenu} />}
       <div className="relative flex min-h-0 flex-1">
         <Stage viewer={viewer} windowMode={windowMode} borders={borders && !windowMode && !PIP} elements={elements && !windowMode && !PIP}>
           {keyboard && canType && !hidden && <div className="absolute inset-x-0 bottom-0 z-20 max-h-full overflow-y-auto">

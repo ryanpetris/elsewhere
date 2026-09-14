@@ -29,7 +29,7 @@ Playback retains its context, statistics analyser settings and speaker connectio
 The branch never connects to speakers. The renderer starts paused. Animation is
 capped at 30 fps, with no recurring animation callbacks or analysis reads while
 paused, hidden, zero-sized or without a running playback context. Disabling Animate,
-reduced motion, hidden controls and viewer fullscreen pause the docked panel.
+reduced motion and hidden controls pause the docked panel.
 Closing it releases its branch, canvas, observers and listeners. Setup and draw
 failures stop the renderer and report "Visualizer unavailable" without stopping
 session playback.

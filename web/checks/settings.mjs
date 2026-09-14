@@ -137,11 +137,11 @@ try {
   await page.keyboard.press('Control+Alt+Shift+h');
   assert.deepEqual(await page.evaluate(() => sent.filter(p => [0x87, 0x89].includes(p[0]))), [[0x87, 29, 0, 1], [0x87, 56, 0, 1], [0x87, 42, 0, 1], [0x89]], 'hide shortcut releases modifiers through BLUR');
   await page.keyboard.press('Control+Alt+Shift+h');
-  for (const name of ['Settings', 'About Elsewhere', 'Command Palette (Ctrl+Alt+Shift+P)']) {
+  for (const name of ['Settings', 'About Elsewhere', 'Search']) {
     const button = page.getByRole('button', { name, exact: true });
     await button.focus(); await resetPackets();
     await page.keyboard.press('Enter');
-    await (name === 'Command Palette (Ctrl+Alt+Shift+P)' ? page.getByPlaceholder('Search applications, windows, actions…') : page.getByRole('dialog')).waitFor();
+    await (name === 'Search' ? page.getByPlaceholder('Search…') : page.getByRole('dialog')).waitFor();
     await page.keyboard.press('Escape');
     assert(await button.evaluate(el => el === document.activeElement), `${name} keyboard close restores trigger focus`);
     assert.deepEqual(await keyPackets(), [], `${name} keyboard open and close stay local`);
@@ -190,24 +190,24 @@ try {
   assert.equal(await panel.count(), 0); assert(await trigger.evaluate(el => el === document.activeElement));
   assert(await page.evaluate(() => elsewhere.store.get().elementsOn && elsewhere.store.get().elements !== null));
   await trigger.click(); assert(await borders.isChecked() && await elements.isChecked());
-  await page.getByRole('button', { name: 'Command Palette (Ctrl+Alt+Shift+P)', exact: true }).click();
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
   assert.equal(await panel.count(), 0);
-  await page.getByPlaceholder('Search applications, windows, actions…').waitFor();
+  await page.getByPlaceholder('Search…').waitFor();
   await trigger.click(); await panel.waitFor();
-  assert.equal(await page.getByPlaceholder('Search applications, windows, actions…').count(), 0);
+  assert.equal(await page.getByPlaceholder('Search…').count(), 0);
   await page.locator('header').click({ position: { x: 3, y: 3 } });
   assert.equal(await panel.count(), 0, 'header outside click dismisses settings');
   await trigger.click();
   await page.mouse.click(5, 500); assert.equal(await panel.count(), 0);
-  const apps = page.getByRole('button', { name: 'Command Palette (Ctrl+Alt+Shift+P)', exact: true });
+  const apps = page.getByRole('button', { name: 'Search', exact: true });
   await apps.click();
   await page.getByRole('heading', { name: 'Applications', exact: true }).click();
   await page.keyboard.press('a');
   await page.keyboard.press('Escape');
   assert(await apps.evaluate(el => el === document.activeElement));
-  assert.equal(await page.getByPlaceholder('Search applications, windows, actions…').count(), 0);
+  assert.equal(await page.getByPlaceholder('Search…').count(), 0);
   await apps.click();
-  const search = page.getByPlaceholder('Search applications, windows, actions…');
+  const search = page.getByPlaceholder('Search…');
   await search.fill('Local Test');
   await page.locator('[data-entry="app:local-test.desktop"]').waitFor();
   await search.press('Enter');
@@ -379,7 +379,8 @@ try {
   assert(await page.evaluate(() => document.fullscreenElement.contains(document.querySelector('#stream-settings'))));
   await page.getByRole('button', { name: 'Close Stream Settings', exact: true }).click();
   await page.getByRole('button', { name: 'Show Controls', exact: true }).click();
-  await page.waitForFunction(() => !document.fullscreenElement);
+  await page.waitForFunction(() => elsewhere.store.get().fullscreenControls && !!document.fullscreenElement);
+  await page.evaluate(() => document.exitFullscreen());
   assert.equal(await page.getByRole('button', { name: /^Transport:/ }).count(), 0, 'no transport choice without WebRTC');
   await page.evaluate(() => elsewhere.store.set({ rtcAvailable: true, videoVia: 'websocket' }));
   const transportButton = page.getByRole('button', { name: /^Transport:/ });

@@ -608,7 +608,7 @@ read it with `useSyncExternalStore` and send actions back through the engine.
   side panel (`Sidebar.jsx`) and a status bar (`StatusBar.jsx`: fps, bandwidth, input-to-paint latency,
   loss counters, clipboard, pointer lock, audio). The controller's stage sizes the desktop's output; the
   other sessions get it fitted into theirs. Fullscreen
-  is requested on the stage element, so the chrome is gone while it lasts. Toggles are remembered in
+  is requested on the viewer root. Controls start hidden and can be shown inside fullscreen. Toggles are remembered in
   `localStorage`. A popup (`?window=ID`) shows the window's title in the top bar, no side panel, and the
   canvas centred at the window's size, scaled down if the popup is smaller.
 - **Touch and phones** (`viewer.js` `onTouch`, `Keyboard.jsx`): pointer events with `pointerType`
@@ -652,12 +652,13 @@ read it with `useSyncExternalStore` and send actions back through the engine.
   through viewer.type, composition waits for compositionend, and line breaks and deletions use
   viewer.key. Both methods send Input (0x91), the InputMsg of POST /api/input, through the WebSocket
   and the compositor's keymap in order with pointer input. View-only sessions have no keyboard control.
-- **Command palette** (`Launcher.jsx`): applications from `GET /api/applications`, live windows and
-  viewer actions in separate groups. Ctrl+Alt+Shift+P opens it with controls visible, hidden or fullscreen.
+- **Search** (`Launcher.jsx`): applications from `GET /api/applications`, live windows and
+  viewer actions in separate groups, opened from the toolbar.
   Substring search matches names, descriptions and application IDs. Arrow keys select and Enter invokes;
   Escape restores the invoking control. IDs distinguish duplicate names. Launch and activation use their
   existing grants; local controls remain available without `apps.launch`. Window popups offer fullscreen
-  and control visibility actions. Opening the palette releases desktop input and pointer capture.
+  and control visibility actions. Opening Search releases desktop input and pointer capture.
+  Read-only users can search windows; activation requires control permission. Panels open inside fullscreen.
   Icons use authenticated fetches and cached blob URLs. The **power menu** requires `server.manage`,
   confirms, then sends `quit`; an accepted shutdown ends reconnection.
 - **Windows tab**: one row per window, top-most first, minimized last: a thumbnail, a colour dot, the

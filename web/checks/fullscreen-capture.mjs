@@ -176,7 +176,8 @@ try {
       await enter();
       assert.equal(await js(() => [...document.querySelectorAll('button')].some(b => b.ariaLabel === 'Show Controls' && b.getBoundingClientRect().width > 0)), true);
       key('ctrl+alt+shift+h');
-      await wait(() => js(() => !elsewhere.isFullscreen() && !document.pointerLockElement));
+      await wait(() => js(() => elsewhere.isFullscreen() && elsewhere.store.get().fullscreenControls && !document.pointerLockElement));
+      await js(() => document.exitFullscreen());
       assert.equal(await js(KEY => sent.some(p => p[0] === KEY && p[1] === 35), KEY), false, 'controls shortcut H stays local');
       await enter();
       await js(() => document.exitPointerLock());
