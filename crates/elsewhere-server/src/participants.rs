@@ -56,7 +56,7 @@ impl App {
         if v.controller == Some(id) { return; }
         if v.controller.is_none() { self.set_controller(v, Some(id)); return; }
         if s.request.is_some() { return; }
-        s.request = Some(ControlRequest { id: v.next_request, epoch: v.control_epoch, deadline: Instant::now() + Duration::from_secs(30), expires_at_ms: tokens::now_ms() + 30_000 });
+        s.request = Some(ControlRequest { id: v.next_request, epoch: v.control_epoch, deadline: Instant::now() + Duration::from_secs(300), expires_at_ms: tokens::now_ms() + 300_000 });
         v.next_request += 1;
         s.request_result = None;
         v.publish_roster();

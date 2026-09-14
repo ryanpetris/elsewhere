@@ -94,7 +94,8 @@ palette releases held desktop input and mouse capture; search and composition st
 
 Any number of people can watch at once, each with a stream scaled to their own window. The first to
 connect with `desktop.control` drives the pointer and keyboard; other eligible sessions can use
-request control for the current controller to approve. The Participants menu lists live connections,
+request control for the current controller to approve within five minutes. Sessions with
+`desktop.take_control` and `desktop.control` can take over immediately. The Participants menu lists live connections,
 and observers see the desktop pointer. Each token grants explicit feature access. Desktop viewing, clipboard, files, audio,
 camera, microphone and program execution have separate permissions.
 

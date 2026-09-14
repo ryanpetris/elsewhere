@@ -21,7 +21,7 @@ macro_rules! permissions {
 permissions! {
     AppsLaunch => "apps.launch", AudioListen => "audio.listen", BroadcastsManage => "broadcasts.manage",
     CameraSend => "camera.send", ClipboardRead => "clipboard.read", ClipboardWrite => "clipboard.write",
-    CommandsExecute => "commands.execute", DesktopControl => "desktop.control", DesktopView => "desktop.view",
+    CommandsExecute => "commands.execute", DesktopControl => "desktop.control", DesktopTakeControl => "desktop.take_control", DesktopView => "desktop.view",
     DragdropUpload => "dragdrop.upload", FilesBrowse => "files.browse", FilesDownload => "files.download",
     FilesManage => "files.manage", FilesUpload => "files.upload", MicrophoneSend => "microphone.send",
     ServerManage => "server.manage", TokensManage => "tokens.manage",

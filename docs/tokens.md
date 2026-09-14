@@ -61,6 +61,7 @@ permission: a camera grant does not enable a server started without webcam suppo
 | --- | --- |
 | `desktop.view` | Desktop/window streams, windows, screenshots, elements, installed application metadata/icons, notifications, codec discovery, shared display settings |
 | `desktop.control` | Pointer, keyboard, touch, window actions, requesting/approving/handing off control, notification actions, kiosk and resolution settings |
+| `desktop.take_control` | Take over the shared desktop without approval; also requires `desktop.control`. |
 | `apps.launch` | Launch an installed application |
 | `commands.execute` | Execute a command or open an interactive terminal |
 | `server.manage` | Quit the server |
@@ -153,7 +154,8 @@ valid for its other grants; the viewer reports the denial and retains the token.
 
 The Participants roster describes live desktop connections with labels such as "Session 3",
 not verified identities. It exposes neither token IDs nor token secrets or permission management.
-Eligible observers request control for the current controller to approve within 30 seconds.
+Eligible observers request control for the current controller to approve within five minutes. A session with both `desktop.control` and `desktop.take_control`
+can take over immediately.
 Approval transfers ownership without granting permissions. HTTP and MCP actions and per-window
 input retain their own permission checks. Revocation disconnects the token's connections and
 invalidates their requests; the oldest eligible desktop connection inherits abandoned control.

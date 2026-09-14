@@ -49,7 +49,8 @@ const decide = (controller, target, approve = true, request = own(target).reques
 try {
   await wait('server', async () => { try { return (await fetch(origin)).ok; } catch { return false; } });
   admin = await createToken(root);
-  const a = await connect(admin), b = await connect(admin);
+  const ordinary = await create(['desktop.view', 'desktop.control']);
+  const a = await connect(admin), b = await connect(ordinary.token);
   const eligible = await create(['desktop.view', 'desktop.control']);
   const c = await connect(eligible.token);
   const readonly = await create(['desktop.view']);
@@ -82,10 +83,14 @@ try {
   await wait('revocation', () => c.closed && a.roster.sessions.length === 3);
   decide(a, c, true, revokedRequest); await delay(100); assert.equal(a.roster.controller, a.id);
   send(b, REQUEST_CONTROL); await wait('expiry request', () => !!own(b).request);
-  const started = Date.now();
-  while (own(b).request && Date.now() - started < 32_000) await delay(100);
-  assert.equal(own(b).result, 'expired');
-  console.log('Request expiry ms:', Date.now() - started);
+  const remaining = own(b).request.expires_at_ms - Date.now();
+  assert(remaining > 295_000 && remaining <= 300_000);
+  send(b, CANCEL_CONTROL, [own(b).request.id, own(b).request.epoch]);
+  await wait('cancel long request', () => !own(b).request);
+  send(a, HANDOFF, [b.id]);
+  await wait('ordinary controller', () => a.roster.controller === b.id);
+  send(a, TAKE_CONTROL);
+  await wait('immediate takeover', () => a.roster.controller === a.id && b.roster.controller === a.id);
   const motion = (x, y) => { const bytes = new Uint8Array(9), dv = new DataView(bytes.buffer); bytes[0] = MOTION_ABS; dv.setFloat32(1, x, true); dv.setFloat32(5, y, true); a.socket.send(bytes); };
   assert.equal((await api('/api/input', 'POST', { type: 'move', x: 400, y: 300 })).status, 202);
   await wait('pointer', () => reader.pointer?.[0] === 400 && reader.pointer?.[1] === 300);

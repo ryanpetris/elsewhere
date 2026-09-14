@@ -6,6 +6,7 @@ import { Popover } from './Launcher.jsx';
 export function Participants({ viewer, menu, onMenu }) {
   const roster = useStore(viewer.store, s => s.roster);
   const sessionId = useStore(viewer.store, s => s.sessionId);
+  const takeControl = useStore(viewer.store, s => s.permissions.includes('desktop.take_control'));
   const status = useStore(viewer.store, s => s.status);
   const open = menu === 'participants';
   const trigger = useRef(null), panel = useRef(null);
@@ -27,10 +28,10 @@ export function Participants({ viewer, menu, onMenu }) {
   const rect = trigger.current?.getBoundingClientRect();
   return <>
     <span role="status" className="sr-only">{controlling && pending ? `${pending} pending control request${pending === 1 ? '' : 's'}` : ''}</span>
-    {own?.can_control && !controlling && <button type="button" aria-label={own.request ? 'Cancel Request' : roster.controller ? 'Request Control' : 'Claim Control'} className="btn btn-primary btn-xs mr-1"
-      onClick={event => { own.request ? viewer.cancelControl(own.request) : roster.controller ? viewer.requestControl() : viewer.claimControl(); event.currentTarget.blur(); }}>
-      {own.request ? <X className="size-3.5" /> : <MousePointer2 className="size-3.5" />}
-      <span className="hidden sm:inline">{own.request ? 'Cancel Request' : roster.controller ? 'Request Control' : 'Claim Control'}</span>
+    {own?.can_control && !controlling && <button type="button" aria-label={takeControl ? 'Take Control' : own.request ? 'Cancel Request' : roster.controller ? 'Request Control' : 'Claim Control'} className="btn btn-primary btn-xs mr-1"
+      onClick={event => { takeControl ? viewer.claimControl() : own.request ? viewer.cancelControl(own.request) : roster.controller ? viewer.requestControl() : viewer.claimControl(); event.currentTarget.blur(); }}>
+      {own.request && !takeControl ? <X className="size-3.5" /> : <MousePointer2 className="size-3.5" />}
+      <span className="hidden sm:inline">{takeControl ? 'Take Control' : own.request ? 'Cancel Request' : roster.controller ? 'Request Control' : 'Claim Control'}</span>
     </button>}
     <button ref={trigger} type="button" id="participants-toggle" data-menu-trigger aria-label={`Participants${pending ? `, ${pending} pending request${pending === 1 ? '' : 's'}` : ''}`}
       aria-haspopup="dialog" aria-expanded={open} onClick={() => onMenu('participants')} className="btn btn-outline btn-xs mr-1">
@@ -47,11 +48,10 @@ export function Participants({ viewer, menu, onMenu }) {
         buttons[i < 0 ? (event.shiftKey ? buttons.length - 1 : 0) : (i + (event.shiftKey ? buttons.length - 1 : 1)) % buttons.length]?.focus();
       }}>
       <h2 className="mb-2 text-sm font-semibold">Participants</h2>
-      <p className="mb-2 text-xs text-ink-3">Labels identify connections, not verified people. API operations use their own permissions.</p>
       <ul className="min-h-0 overflow-y-auto">
         {roster.sessions.map(member => <li key={member.id} className="border-t border-line py-2 text-xs">
           <span className="font-medium">{member.label}{member.id === String(sessionId) ? ' · You' : ''}</span>
-          <span className="ml-2 text-ink-3">{member.id === roster.controller ? 'Controlling' : member.can_control ? 'Can request control' : 'View only'}</span>
+          <span className="ml-2 text-ink-3">{member.id === roster.controller ? 'Controlling' : member.can_control ? 'Can control' : 'View only'}</span>
           {member.request && <div className="mt-2 flex items-center gap-2">
             <span role="status">Control requested</span>
             {controlling && <>

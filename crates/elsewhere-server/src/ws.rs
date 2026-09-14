@@ -828,7 +828,7 @@ impl App {
                 }
             }
             ClientMsg::TakeControl => {
-                if key.has(P::DesktopControl) && v.controller.is_none() {
+                if key.has(P::DesktopControl) && (v.controller.is_none() || key.has(P::DesktopTakeControl)) {
                     self.set_controller(&mut v, Some(id));
                 } else if !controls {
                     let _ = v.sessions[&id].events.try_send(protocol::notice(if key.has(P::DesktopControl) { "Request control from the current controller." } else { "This token does not allow desktop control." }));
